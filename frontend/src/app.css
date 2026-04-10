@@ -1,0 +1,50 @@
+@import "tailwindcss";
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/jetbrains-mono/400.css";
+
+/*
+ * Tee-Mo design system tokens — Tailwind 4 CSS-first config via @theme.
+ *
+ * Source of truth: tee_mo_design_guide.md §2 (colors) + §3 (typography).
+ *
+ * Tailwind 4 built-in slate, white, and other palette tokens are NOT redefined
+ * here — they are available out of the box. Only custom tokens (brand + semantic
+ * + font aliases) live in this block. ADR-022 forbids tailwind.config.*; this
+ * @theme block is the ONLY configuration surface.
+ */
+@theme {
+  /* Brand — coral/rose, Design Guide §2.1 */
+  --color-brand-50:  #FFF1F2;
+  --color-brand-100: #FFE4E6;
+  --color-brand-500: #F43F5E;
+  --color-brand-600: #E11D48;
+  --color-brand-700: #BE123C;
+
+  /* Semantic — Design Guide §2.3 */
+  --color-success: #10B981;
+  --color-warning: #F59E0B;
+  --color-danger:  #E11D48;
+  --color-info:    #0EA5E9;
+
+  /* Typography — Design Guide §3.1 */
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+}
+
+/*
+ * Apply Inter stylistic alternates globally (cv11, ss01, ss03).
+ * Design Guide §3.1 requires these feature settings for correct Inter rendering.
+ */
+html {
+  font-feature-settings: 'cv11', 'ss01', 'ss03';
+}
+
+/*
+ * Base body: slate-50 page background, slate-900 text, Inter sans-serif,
+ * antialiased rendering. Matches Design Guide §2.2 surface conventions.
+ */
+body {
+  @apply bg-slate-50 text-slate-900 font-sans antialiased;
+}

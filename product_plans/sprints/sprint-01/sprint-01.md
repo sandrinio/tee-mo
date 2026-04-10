@@ -2,7 +2,7 @@
 sprint_id: "sprint-01"
 sprint_goal: "End-to-end scaffold: both servers run, database schema applied, design system foundation in place, smoke test renders backend health via UI primitives."
 dates: "2026-04-11"
-status: "Confirmed"
+status: "Active"
 delivery: "D-01"
 confirmed_by: "Solo dev (user)"
 confirmed_at: "2026-04-11"

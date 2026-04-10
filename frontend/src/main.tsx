@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 // Design system CSS — must import before any components to ensure @theme tokens
 // and @fontsource fonts are loaded globally. See src/app.css for all tokens.
@@ -18,6 +19,15 @@ import { routeTree } from './routeTree.gen';
  */
 const router = createRouter({ routeTree });
 
+/**
+ * TanStack Query client — global singleton.
+ *
+ * Wraps the entire app via `QueryClientProvider` (see render below).
+ * Default options are intentionally left at library defaults for Sprint 1.
+ * Sprint 2 auth stories can configure staleTime, retry logic, etc. here.
+ */
+const queryClient = new QueryClient();
+
 declare module '@tanstack/react-router' {
   interface Register {
     router: typeof router;
@@ -31,6 +41,8 @@ if (!rootElement) {
 
 createRoot(rootElement).render(
   <StrictMode>
-    <RouterProvider router={router} />
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>
   </StrictMode>,
 );

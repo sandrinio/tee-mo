@@ -1,38 +1,120 @@
-import { createFileRoute } from '@tanstack/react-router';
-
 /**
  * Index route — landing page at `/`.
  *
- * Renders a typography + brand-token demo per STORY-001-03 acceptance criteria:
- *   - "Tee-Mo" heading: Display style from Design Guide §3.2
- *   - Brand swatch: bg-brand-500 box proves coral token is resolved
- *   - Subtitle: slate-500 secondary text
- *   - Monospace code sample: JetBrains Mono, slate-100 bg
+ * Fetches `/api/health` on mount via TanStack Query and renders a System Status
+ * card using the Button, Card, and Badge design-system primitives introduced in
+ * STORY-001-04.
  *
- * No API calls. No components beyond HTML. Story 001-04 adds Card/Badge/fetch.
+ * Three render states:
+ *   - Loading  — `neutral` Badge "loading…" while query is in-flight.
+ *   - Success  — Green `success` Badge for each table reporting "ok"; `warning`
+ *               (amber) Badge for the overall backend if `status === "degraded"`.
+ *   - Error    — `danger` Badge "error"; all table rows show "unreachable".
+ *
+ * The "Continue" Button is always rendered but always `disabled` in Sprint 1.
+ * It becomes interactive when auth lands in Sprint 2.
  */
+import { createFileRoute } from '@tanstack/react-router';
+import { useQuery } from '@tanstack/react-query';
+import { apiGet } from '../lib/api';
+import { Card } from '../components/ui/Card';
+import { Badge } from '../components/ui/Badge';
+import { Button } from '../components/ui/Button';
+
+/**
+ * Shape of the `/api/health` response.
+ *
+ * `database` is a map from table name → status string ("ok" or an error
+ * message). It is optional here because STORY-001-01's initial endpoint does
+ * not yet include the database field; STORY-001-02 adds it.
+ */
+interface HealthResponse {
+  status: 'ok' | 'degraded';
+  service: string;
+  version: string;
+  database?: Record<string, string>;
+}
+
 export const Route = createFileRoute('/')({
   component: Landing,
 });
 
+/** The four Tee-Mo database tables reported by the health endpoint. */
+const TABLES = [
+  'teemo_users',
+  'teemo_workspaces',
+  'teemo_knowledge_index',
+  'teemo_skills',
+] as const;
+
 /**
- * Landing page component — typography + design-system token demo.
- * Scoped to Sprint 1 scaffold verification; real content arrives in Sprint 2.
+ * Landing page — typography, design-token demo, and end-to-end smoke test.
+ *
+ * Heading and subtitle are preserved from STORY-001-03. The System Status Card
+ * is new in STORY-001-04.
  */
 function Landing() {
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: ['health'],
+    queryFn: () => apiGet<HealthResponse>('/api/health'),
+    retry: false,
+  });
+
+  const overallVariant = isError
+    ? 'danger'
+    : isLoading
+      ? 'neutral'
+      : data?.status === 'ok'
+        ? 'success'
+        : 'warning';
+
+  const overallLabel = isError
+    ? 'error'
+    : isLoading
+      ? 'loading\u2026'
+      : data?.status ?? 'unknown';
+
   return (
     <main className="mx-auto max-w-3xl px-6 py-16">
+      {/* Brand swatch + heading — preserved from STORY-001-03 */}
       <div className="flex items-center gap-4">
-        {/* Brand swatch — verifies bg-brand-500 resolves to #F43F5E */}
         <div className="h-10 w-10 rounded-md bg-brand-500" aria-hidden="true" />
-        <h1 className="text-4xl font-semibold tracking-tight text-slate-900">
-          Tee-Mo
-        </h1>
+        <h1 className="text-4xl font-semibold tracking-tight text-slate-900">Tee-Mo</h1>
       </div>
       <p className="mt-3 text-base text-slate-500">Your BYOK Slack assistant.</p>
-      <pre className="mt-8 rounded-md bg-slate-100 px-4 py-3 font-mono text-sm text-slate-700">
-        {`GET /api/health → {"status":"ok"}`}
-      </pre>
+
+      {/* System Status card */}
+      <Card className="mt-8">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-slate-900">System Status</h2>
+          <Badge variant={overallVariant}>Backend: {overallLabel}</Badge>
+        </div>
+
+        {/* Per-table status rows */}
+        <ul className="space-y-2">
+          {TABLES.map((t) => {
+            const tableStatus = data?.database?.[t] ?? (isError ? 'unreachable' : '\u2026');
+            const ok = tableStatus === 'ok';
+            const rowVariant = ok ? 'success' : isError ? 'danger' : 'warning';
+            return (
+              <li key={t} className="flex items-center justify-between">
+                <code className="font-mono text-sm text-slate-700">{t}</code>
+                <Badge variant={rowVariant}>{tableStatus}</Badge>
+              </li>
+            );
+          })}
+        </ul>
+
+        {/* Error detail — shown only on fetch failure */}
+        {isError && error instanceof Error && (
+          <p className="mt-4 font-mono text-xs text-rose-600">{error.message}</p>
+        )}
+      </Card>
+
+      {/* CTA — disabled until auth lands in Sprint 2 */}
+      <div className="mt-6">
+        <Button variant="primary" disabled>Continue</Button>
+      </div>
     </main>
   );
 }

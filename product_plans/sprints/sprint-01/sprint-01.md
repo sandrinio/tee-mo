@@ -2,7 +2,7 @@
 sprint_id: "sprint-01"
 sprint_goal: "End-to-end scaffold: both servers run, database schema applied, design system foundation in place, smoke test renders backend health via UI primitives."
 dates: "2026-04-11"
-status: "Active"
+status: "Done"
 delivery: "D-01"
 confirmed_by: "Solo dev (user)"
 confirmed_at: "2026-04-11"
@@ -194,5 +194,15 @@ confirmed_at: "2026-04-11"
 
 | Story | Final State | QA Bounces | Arch Bounces | Tests Written | Correction Tax | Notes |
 |-------|-------------|------------|--------------|---------------|----------------|-------|
-| _(empty — sprint not yet started)_ | | | | | | |
+| STORY-001-01 | Done | 0 (Fast Track) | 0 (Fast Track) | 1 (`test_health.py`) | ~5% | Dev included `bcrypt==5.0.0` + `test_health.py` per the story spec, overriding an incorrect Team Lead task prompt. Followed ADR-locked Charter §3.2 pins exactly. |
+| STORY-001-03 | Done | 0 (Fast Track) | 0 (Fast Track, 1 bounce for version fix) | 0 | ~2% | Bounce-2 needed: Team Lead sprint-context incorrectly listed `vite@5.x` / `bcrypt<5.0`. Charter §3.2 (authoritative) pins `vite@^8.0.8` / `bcrypt==5.0.0`. Corrected via targeted patch. Lesson recorded in `FLASHCARDS.md`. Also recorded: do not redefine Tailwind 4 built-in slate tokens. |
+| STORY-001-02 | Done | 0 (Fast Track) | 0 (Fast Track) | 5 hermetic (`test_health_db.py`) | 0% | Clean single pass. Cached Supabase client via `@lru_cache`, `/api/health` extended with per-table `teemo_*` status + aggregate `status: ok/degraded`. Dev correctly preferred the story spec over task-prompt ambiguity on the `database_ok` boolean field. |
+| STORY-001-04 | Done | 0 (Fast Track) | 0 (Fast Track) | 0 | 0% | Clean single pass. Button (4 variants per spec, not 3 as the task prompt said), Card, Badge primitives. Added `QueryClient` + `QueryClientProvider` to `main.tsx` and used `useQuery` for `/api/health` per story §R5. Typed `HealthResponse.database` as optional to survive the pre-merge race. |
+
+**Aggregate Correction Tax**: ~1.75% average — well within tolerance. All corrections driven by Team Lead sprint-context errors, not Dev errors.
+
+**Process lessons recorded to FLASHCARDS.md**:
+1. Sprint context locked-dependency rows must be copied verbatim from Charter §3.2 (not from memory).
+2. Do not redefine Tailwind 4 built-in slate/zinc tokens in `@theme`.
+3. bcrypt 5.0 raises `ValueError` on passwords >72 bytes — validate at the `/api/auth/register` boundary in Sprint 2.
 <!-- EXECUTION_LOG_END -->

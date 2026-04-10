@@ -1,0 +1,18 @@
+# V-Bounce runtime files (not tracked in git)
+state.json
+install-meta.json
+backups/
+reports/
+gate-checks.json
+sprint-context-*
+qa-context-*
+arch-context-*
+product-graph.json
+improvement-*
+trends.md
+scribe-task-*
+sprint-report-*
+context-packs/
+
+# Archive is committed (audit trail)
+!archive/

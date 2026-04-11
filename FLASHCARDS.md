@@ -71,3 +71,27 @@ Project-specific lessons recorded after each story merge. Read this before writi
 **What happened:** Test fixtures used `test+{uuid4}@teemo.test` addresses so they'd never collide with real users. Pydantic `EmailStr` rejected them with `"The domain name teemo.test is a special-use or reserved name that cannot be used with email."`. This is `email-validator` 2.x's `globally_deliverable=True` check, which fires even when `check_deliverability=False` — the two flags are independent. Pydantic's built-in `EmailStr` has no way to set `test_environment=True`, so a custom annotated type is required.
 **Rule:** When a Pydantic model accepting email input will be exercised by integration tests, either (a) use `backend/app/models/user.py::LaxEmailStr` (which calls `email_validator.validate_email(v, check_deliverability=False, test_environment=True)` and accepts `.test` / `.localhost` / `.invalid` / `.example` TLDs) or (b) switch test fixtures to `@example.com` and keep plain `EmailStr` in the model.
 **How to apply:** New request models for `/api/*` endpoints that land in tests — import `LaxEmailStr` from `app.models.user` rather than `EmailStr` from `pydantic`. Response models can use plain `str` for the email field (the data is already validated on write). If you're adding an endpoint with NO integration tests against `.test` addresses, `EmailStr` is fine.
+
+---
+
+## Vitest
+
+### [2026-04-11] Vitest 2.x `vi.mock` hoisting TDZ — use `vi.hoisted(...)` for mock variables
+**Seen in:** STORY-002-03 Green phase
+**What happened:** The Red test file used `const clearMock = vi.fn()` followed by `vi.mock('../../main', () => ({ queryClient: { clear: clearMock } }))`. Vitest 2.x AST-hoists the `vi.mock(...)` call above the `const clearMock = ...` declaration, so when the mock factory runs, `clearMock` is in TDZ and throws `ReferenceError: Cannot access 'clearMock' before initialization` — every test fails at collection time.
+**Rule:** When a `vi.mock` factory closes over a variable defined in the test file, wrap that variable's initializer in `vi.hoisted(...)`:
+```ts
+const { clearMock } = vi.hoisted(() => ({ clearMock: vi.fn() }));
+vi.mock('../../main', () => ({ queryClient: { clear: clearMock } }));
+```
+**How to apply:** Any Vitest 2.x test that needs a spy inside a `vi.mock` factory MUST use `vi.hoisted`. If the test file is already written and immutable (e.g., V-Bounce Red phase tests), the workaround is a lazy dynamic `import('../main')` in the module under test so the factory resolves after the spy is initialized. That workaround is production-safe but emits a cosmetic Vite `[INEFFECTIVE_DYNAMIC_IMPORT]` warning at build time. Prefer the `vi.hoisted` fix whenever the test is still mutable.
+
+---
+
+## TanStack Router + Vite
+
+### [2026-04-11] `tsc -b && vite build` chicken-and-egg when adding new routes
+**Seen in:** STORY-002-04 single-pass
+**What happened:** The frontend scaffold's `"build": "tsc -b && vite build"` runs TypeScript compilation BEFORE Vite gets to regenerate `src/routeTree.gen.ts`. When a new route file is added (`src/routes/foo.tsx`), the first `npm run build` after the addition fails in `tsc` because the generated tree hasn't been updated to export the new route yet — tsc sees stale imports.
+**Rule:** After creating new files in `frontend/src/routes/`, run `node_modules/.bin/vite build` (or `npm run dev` briefly) FIRST to let the TanStackRouterVite plugin regenerate `routeTree.gen.ts`. Then run the normal `npm run build` — it will succeed. Subsequent builds after the regeneration work normally.
+**How to apply:** When a story adds `src/routes/*.tsx` files, the Developer agent should run the vite-first build once, confirm `routeTree.gen.ts` now includes the new route, and only then run the full `tsc -b && vite build` gate. Do NOT hand-edit `routeTree.gen.ts`. A cleaner long-term fix (candidate for `/improve`) is to reorder the build script to `"build": "vite build && tsc --noEmit"` or add a `"pretsr": "tsr generate"` step — both depend on confirming the plugin writes the file synchronously enough for the tsc pass to pick it up.

@@ -2,7 +2,7 @@
 sprint_id: "sprint-02"
 sprint_goal: "End-to-end email + password auth: register, login, refresh, logout, /me; frontend ProtectedRoute gating a /app placeholder; auto-login on register; ready for EPIC-003 to replace the body of /app with the real workspace dashboard."
 dates: "2026-04-11"
-status: "Active"
+status: "Completed"
 delivery: "D-01 (Release 1: Foundation)"
 confirmed_by: "Solo dev (user)"
 confirmed_at: "2026-04-11"

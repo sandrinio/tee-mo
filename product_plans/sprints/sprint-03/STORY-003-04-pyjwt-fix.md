@@ -275,3 +275,4 @@ Total test count after this story: `test_security.py` 9 → 10 tests. Cumulative
 
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| Developer | 45 | 4,348 | 4,393 |

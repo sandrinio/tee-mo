@@ -27,6 +27,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routes.auth import router as auth_router
 from app.api.routes.slack_events import router as slack_events_router
+from app.api.routes.slack_oauth import router as slack_oauth_router
 from app.core.config import settings
 from app.core.db import get_supabase
 from app.core.encryption import key_fingerprint
@@ -49,6 +50,7 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(slack_events_router)
+app.include_router(slack_oauth_router)
 
 # Log the encryption key fingerprint at module import time (startup).
 # Only the 8-char hex fingerprint is logged — never the raw key or any secret.

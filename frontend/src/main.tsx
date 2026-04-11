@@ -8,6 +8,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import './app.css';
 
 import { routeTree } from './routeTree.gen';
+import { AuthInitializer } from './components/auth/AuthInitializer';
 
 /**
  * Application router instance.
@@ -26,7 +27,7 @@ const router = createRouter({ routeTree });
  * Default options are intentionally left at library defaults for Sprint 1.
  * Sprint 2 auth stories can configure staleTime, retry logic, etc. here.
  */
-const queryClient = new QueryClient();
+export const queryClient = new QueryClient();
 
 declare module '@tanstack/react-router' {
   interface Register {
@@ -42,6 +43,7 @@ if (!rootElement) {
 createRoot(rootElement).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
+      <AuthInitializer />
       <RouterProvider router={router} />
     </QueryClientProvider>
   </StrictMode>,

@@ -17,6 +17,7 @@ Usage (from ``backend/`` directory)::
     uvicorn app.main:app --reload
 """
 
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -28,6 +29,9 @@ from app.api.routes.auth import router as auth_router
 from app.api.routes.slack_events import router as slack_events_router
 from app.core.config import settings
 from app.core.db import get_supabase
+from app.core.encryption import key_fingerprint
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Tee-Mo API",
@@ -45,6 +49,12 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(slack_events_router)
+
+# Log the encryption key fingerprint at module import time (startup).
+# Only the 8-char hex fingerprint is logged — never the raw key or any secret.
+# ADR-002 / STORY-005A-01 Req 5: key_fingerprint() is the only permitted
+# representation of TEEMO_ENCRYPTION_KEY in log output.
+logger.info("enc key fp: %s", key_fingerprint())
 
 # Canonical list of Tee-Mo tables — all must be reachable for status "ok".
 # The teemo_ prefix is non-negotiable: this is a shared Supabase instance.

@@ -193,3 +193,5 @@ N/A — this story introduces no HTTP routes.
 ## Token Usage
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| Developer | 1,030 | 2,145 | 3,175 |
+| Developer | 30 | 854 | 884 |

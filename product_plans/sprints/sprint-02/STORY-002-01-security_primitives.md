@@ -347,3 +347,4 @@ N/A — this story exposes no HTTP endpoint. All consumers are internal Python i
 
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| Developer (Red) | 10 | 2566 | 2576 |

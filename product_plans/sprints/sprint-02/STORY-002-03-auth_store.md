@@ -501,3 +501,5 @@ This story consumes the API contracts defined in STORY-002-02 §3.4. No new back
 
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| Developer | 16 | 572 | 588 |
+| Developer | 131 | 13,771 | 13,902 |

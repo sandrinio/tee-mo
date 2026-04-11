@@ -1,14 +1,19 @@
 ---
 epic_id: "EPIC-003"
-status: "Draft — pending human review of §6 Edge Cases + §8 Open Questions"
-ambiguity: "🟡 Medium"
-context_source: "Charter §1.1, §2.6, §5.3, §5.5, §10 Dashboard Epic Seed Map; Roadmap §2 EPIC-003 row + ADR-014/022/024/025; Design Guide §6, §9.2, §9.3; Codebase Context Pack 2026-04-11."
-release: "D-01 Release 1: Foundation"
+status: "In Progress — Slice A active in S-03, Slice B scheduled for S-05 (after EPIC-005 Phase A lands real Slack teams in S-04)"
+ambiguity: "🟢 Low (post-ADR-026 reshape)"
+context_source: "Charter §1.1, §2.6, §5.3, §5.5, §10 Dashboard Epic Seed Map; Roadmap §2 EPIC-003 row + ADR-014/022/024/025/026; Design Guide §6, §9.2, §9.3; Codebase Context Pack 2026-04-11; ADR-026 reshape 2026-04-12."
+release: "D-01 Release 1: Foundation + Deploy + Slack Install"
 owner: "Solo dev"
 priority: "P0"
-tags: ["frontend", "backend", "schema", "dashboard", "crud"]
-target_date: "2026-04-12"
+tags: ["frontend", "backend", "schema", "dashboard", "crud", "deploy"]
+target_date: "2026-04-13"
 ---
+
+> **⚠ Post-ADR-026 reshape (2026-04-12).** EPIC-003 is now split into two slices across two sprints, with EPIC-005 Phase A (Slack OAuth install) landing between them. The dev-only manual team-create path is ELIMINATED. Original open questions Q1 / Q2 / Q3 / Q4 / Q5 / Q6 / Q7 / Q8 / Q9 / Q10 are resolved (see §8). See §5 Decomposition for the new Slice A / Slice B story inventory.
+>
+> - **Slice A — Schema Foundation (S-03)**: Migrations 005/006/007 + TEEMO_TABLES extension + PyJWT BUG fix. Lands alongside ADR-026 deploy story in the same sprint. No routes, no frontend.
+> - **Slice B — Workspace CRUD (S-05)**: Backend workspace routes + frontend `/app/teams/$teamId` workspace list + create/rename modals + make-default toggle. Attaches to real `teemo_slack_teams` rows created by EPIC-005 Phase A in S-04.
 
 # EPIC-003: Dashboard Shell + SlackTeam / Workspace CRUD
 
@@ -25,8 +30,8 @@ Ship the **Dashboard Shell** and the **team/workspace CRUD foundation** (schema 
 1. **Schema foundation** — three new migrations that refactor the workspace model to ADR-024's `1 user : N SlackTeams : N Workspaces : N channel bindings` shape (create `teemo_slack_teams`, create `teemo_workspace_channels`, ALTER `teemo_workspaces` to drop slack bot fields and add `is_default_for_team` + partial unique index).
 2. **Backend CRUD API** — authenticated REST endpoints for listing/creating/renaming/deleting SlackTeams and Workspaces, scoped to the current user via `get_current_user_id`.
 3. **Frontend shell** — replace the `/app` placeholder body with a two-level navigation: **Team list** (landing after login) → **Team detail** showing Workspaces under that team, with "New Workspace" / "Rename" / "Make default" actions.
-4. **Empty-state pragmatic unlock** — because EPIC-005 (Slack OAuth) hasn't landed yet, the team list renders a disabled **"Install Slack"** CTA AND a **dev-only** "Create team manually" path so the Workspace CRUD loop is exercisable end-to-end before Slack integration arrives. EPIC-005 later replaces the dev path with the real OAuth callback; the dashboard UI stays put.
-5. **Trailing tech-debt fix** — BUG-20260411-001 (PyJWT module-level options leak causing test-order flake) resolved in-sprint because every new backend route in EPIC-003 lands more tests into the same suite, and the flake will only get worse.
+4. **No dev-only path — real Slack install from Day 2** — per ADR-026, deploy is pulled forward and EPIC-005 Phase A sandwiches between EPIC-003's two slices. The `/app` team list's "Install Slack" button is a real CTA from S-04, not a disabled placeholder. Workspace CRUD in Slice B attaches to real `teemo_slack_teams` rows. This eliminates the dev-only spoofing vector, the dead-code cleanup burden, and the "dev vs prod" mental model cost.
+5. **Trailing tech-debt fix** — BUG-20260411-001 (PyJWT module-level options leak causing test-order flake) resolved in Slice A (S-03) because every new backend route in S-04 and S-05 lands more tests into the same suite, and the flake would only get worse.
 
 ### 1.3 Success Metrics (North Star)
 
@@ -244,22 +249,30 @@ flowchart LR
 7. **Frontend /app/teams/$teamId workspace list** depends on: wrappers + hooks + backend `GET /api/slack-teams/:id/workspaces` + backend `POST /api/slack-teams/:id/workspaces`.
 8. **Polish** (rename, make-default, empty-state copy) ships last in a single story once the CRUD loop is green.
 
-### Draft Story Inventory (10 stories, ~2 sprints)
+### Slice A Story Inventory — S-03 (Schema Foundation — shares S-03 with ADR-026 deploy stories)
 
-| # | Story (draft) | Label | Parent sprint |
-|---|---|---|---|
-| 1 | Migrations 005 + 006 + 007 + update TEEMO_TABLES + extend `/api/health` coverage | L2 | S-03 |
-| 2 | BUG-20260411 fix: migrate `decode_token` to `jwt.PyJWT()` instance + regression-lock test | L1 | S-03 |
-| 3 | Backend: `models/slack_team.py` + `/api/slack-teams` routes (list + dev-only create) + integration tests | L2 | S-03 |
-| 4 | Backend: `models/workspace.py` + `/api/slack-teams/{team_id}/workspaces` + `/api/workspaces/{id}` routes (list, create, get, rename, make-default) + integration tests (including partial-unique constraint) | L2 | S-03 |
-| 5 | Frontend: `lib/api.ts` wrappers (7 functions + types) + `hooks/useWorkspaces.ts` TanStack Query hooks | L2 | S-04 |
-| 6 | Frontend: replace `/app` body with team list (empty state + dev-only create modal + team cards) | L2 | S-04 |
-| 7 | Frontend: new `/app/teams/$teamId` route — workspace list + CreateWorkspaceModal | L2 | S-04 |
-| 8 | Frontend: RenameWorkspaceModal + make-default action + optimistic UI + inline error rollback | L2 | S-04 |
-| 9 | Frontend: dashboard header bar (shell chrome — logo + user email + sign-out) + empty/loading/error polish | L1 | S-04 |
-| 10 | Manual verification checklist + documentation of dev-only path for future removal (when EPIC-005 ships) | L1 | S-04 |
+EPIC-003 Slice A contributes **2 stories** to S-03. The rest of S-03 is owned by ADR-026 (deploy) and the Slack scaffold infrastructure — see the S-03 Sprint Plan for the full story list.
 
-Story IDs are placeholder. Final IDs (`STORY-003-01-migrations`, etc.) assigned during decomposition Phase 3.
+| # | Story (draft) | Label |
+|---|---|---|
+| S-03 / EPIC-003 / 1 | Migrations 005 + 006 + 007: create `teemo_slack_teams`, create `teemo_workspace_channels`, ALTER `teemo_workspaces` (drop `slack_bot_user_id` + `encrypted_slack_bot_token`, convert `slack_team_id` to FK, add `is_default_for_team` + partial unique index `one_default_per_team`). Update `TEEMO_TABLES` tuple in `backend/app/main.py`. Extend `/api/health` regression tests to verify all 6 `teemo_*` tables return `"ok"`. | L2 |
+| S-03 / EPIC-003 / 2 | BUG-20260411 fix: migrate `backend/app/core/security.py::decode_token` to use a scoped `jwt.PyJWT()` instance. Add regression-lock test in `test_security.py` verifying that mutating module-level PyJWT options in one test does NOT leak into a subsequent `decode_token` call. Run `pytest tests/` 10× with `pytest-randomly` active to confirm stability. | L1 |
+
+### Slice B Story Inventory — S-05 (Workspace CRUD — follows EPIC-005 Phase A in S-04)
+
+EPIC-003 Slice B is the full S-05 sprint. All 7 stories live here.
+
+| # | Story (draft) | Label |
+|---|---|---|
+| S-05 / EPIC-003 / 3 | Backend: `models/workspace.py` (`Workspace` response model — **no secrets**, omits `encrypted_api_key` / `encrypted_google_refresh_token`; `WorkspaceCreate` request; `WorkspaceUpdate` request). Export in `models/__init__.py`. | L1 |
+| S-05 / EPIC-003 / 4 | Backend: `app/api/routes/workspaces.py` — `GET /api/slack-teams/{team_id}/workspaces` (list scoped to team owner), `POST /api/slack-teams/{team_id}/workspaces` (create; auto-set `is_default_for_team=TRUE` if first workspace under that team), `GET /api/workspaces/{id}` (fetch single), `PATCH /api/workspaces/{id}` (rename only), `POST /api/workspaces/{id}/make-default` (atomic default swap in a transaction). Authorization helper `assert_team_owner` used throughout. Mount router in `main.py`. | L2 |
+| S-05 / EPIC-003 / 5 | Backend integration tests: `backend/tests/test_workspaces_routes.py` against live Supabase — happy path create, 403 cross-user access, 404 missing workspace, first-workspace auto-default, second-workspace non-default, partial-unique-constraint violation on concurrent make-default (race fix verification), cascade-on-team-delete, rename, response-model secret-field omission. | L2 |
+| S-05 / EPIC-003 / 6 | Frontend: `lib/api.ts` wrappers (`listWorkspaces(teamId)`, `createWorkspace`, `getWorkspace`, `renameWorkspace`, `makeWorkspaceDefault`) + `Workspace` type + `hooks/useWorkspaces.ts` TanStack Query hooks. | L2 |
+| S-05 / EPIC-003 / 7 | Frontend: new `/app/teams/$teamId` file-based route — workspace list (Design Guide §9.2 grid), breadcrumb back to `/app`, "+ New Workspace" button, `CreateWorkspaceModal` (native `<form>`, single `name` field, inline error). | L2 |
+| S-05 / EPIC-003 / 8 | Frontend: workspace card — `RenameWorkspaceModal`, "Make default" action with optimistic UI + inline error rollback, "Default for DMs" badge when `is_default_for_team`, "Not connected" status chips for future BYOK / Drive / Channels. | L2 |
+| S-05 / EPIC-003 / 9 | Manual verification walkthrough + `npm run build` regression + STORY-002-03 Vitest suite still green. Register → install Slack → land on `/app` team list → click real team → create workspace → rename → make default → sign out → sign in → state persists. Full Release 1 exit-criteria verification. | L1 (manual) |
+
+Story IDs finalized here (`STORY-003-01` through `STORY-003-09`). Slice A files live in `product_plans/sprints/sprint-03/` when S-03 opens; Slice B files in `product_plans/sprints/sprint-05/` when S-05 opens.
 
 ---
 
@@ -355,22 +368,24 @@ Feature: Dashboard Shell + SlackTeam / Workspace CRUD
 
 ---
 
-## 8. Open Questions
+## 8. Open Questions — RESOLVED by ADR-026 reshape (2026-04-12)
 
-**These are the decisions the human needs to make before Story decomposition can proceed.**
+All 10 original open questions were resolved by the Path 2 (Slack-first) decision captured in ADR-026. Summary:
 
-| # | Question | Options | Impact | Recommendation | Owner | Status |
-|---|---|---|---|---|---|---|
-| Q1 | **Ship the dev-only manual team-create path, or wait for EPIC-005 Slack OAuth?** | **(A)** Ship the dev-only path gated on `DEBUG=true`. EPIC-005 later replaces the dev path with real OAuth. Workspace CRUD is testable end-to-end in S-04. **(B)** Skip the dev path. EPIC-003 only ships the team-list empty state + disabled "Install Slack" button. The Workspace CRUD API is built but not reachable via the UI until EPIC-005 lands. | (A) unlocks immediate frontend CRUD demoability; (B) is cleaner but leaves the CRUD dead code until EPIC-005 merges. | **(A) Ship it.** The dev path is ~30 min of work, ~30 min of cleanup when EPIC-005 removes it. (B) trades that for unverifiable UI. | Solo dev | **Open** |
-| Q2 | **Ship Rename and Make-Default actions in EPIC-003 or defer to EPIC-008?** | **(A)** Ship both in EPIC-003. **(B)** Ship Rename only; defer Make-Default to EPIC-008 wizard (it's part of the "polish" story). **(C)** Defer both; EPIC-003 is create-only. | Rename is low-risk, high-value (users will want it). Make-Default is the only UX hook for the "which workspace gets DMs" Charter §5.5 rule — deferring it means the charter behavior is unobservable until much later. | **(A) Ship both.** Make-Default is the only surface that makes `is_default_for_team` observable. Small cost, big clarity. | Solo dev | **Open** |
-| Q3 | **Workspace detail view: disabled placeholder chips for future BYOK / Drive / Channels, or hide entirely?** | **(A)** Show as disabled "Not connected" chips so the user (and future judges) see the shape of what's coming. **(B)** Hide them entirely until EPIC-004/005/006 land. | (A) sets expectations and looks intentional. (B) is cleaner but gives no indication of the coming flow. | **(A) Show as disabled chips.** Matches Design Guide §9.2's "setup status" pattern. | Solo dev | **Open** |
-| Q4 | **BYOK (EPIC-004) column placement — include now or add later?** | The existing `teemo_workspaces` table already has `ai_provider`, `ai_model`, `encrypted_api_key` columns (from S-01 migration 002). Do we **(A)** leave them as-is and let EPIC-004 populate them, or **(B)** drop them in migration 007 and have EPIC-004 add them back when it ships? | (A) is simpler — the columns already exist, unused. (B) keeps EPIC-003's schema clean. | **(A) Leave them.** They're unused but not harmful, and EPIC-004 will thank you for not re-adding them. | Solo dev | **Open** |
-| Q5 | **Frontend route structure: flat or nested?** | **(A)** `/app` → team list; `/app/teams/$teamId` → workspace list (2 route files, nested). **(B)** `/app` → team list + inline drawer for workspaces (1 route file, modal-based). **(C)** `/app` → combined single-page hierarchy that renders everything in one component (1 route file, no modal). | (A) gives bookmarkable URLs and matches Design Guide §9.2 two-screen model. (B) is cheaper to build. (C) is cheapest but fights browser back-button and deep linking. | **(A) Nested routes.** Matches the Design Guide, enables EPIC-008 wizard to reuse `/app/teams/$teamId` as its target, bookmarkable URLs help the demo flow. | Solo dev | **Open** |
-| Q6 | **Sprint split for EPIC-003: 2 sprints or 3?** | **(A) 2 sprints**: S-03 = schema + PyJWT fix + all 4 backend stories; S-04 = all 5 frontend stories + polish. **(B) 3 sprints**: S-03 = schema + PyJWT fix only; S-04 = backend routes + tests; S-05 = frontend. | (A) is tight but feasible because stories 1-4 are mostly copy-style backend work. (B) is safer but pushes Release 1 completion to S-05, eating Release 2 capacity on the 2026-04-18 deadline. | **(A) 2 sprints** unless S-03 obviously overruns — in which case split at that point. | Solo dev | **Open** |
-| Q7 | **BUG-20260411 (PyJWT fix): ship in S-03 or as a separate maintenance sprint?** | **(A)** Ship in S-03 as an L1 trailing story (~30 min) — avoids a separate sprint. **(B)** Spin up S-02.5 as a hotfix-only sprint before S-03 plans anything. **(C)** Defer until after EPIC-003 because the workaround (`-p no:randomly` + explicit order) works. | (A) keeps sprints meaningful; (B) is ceremony overhead; (C) means EPIC-003's ~18 new backend tests inherit the flake. | **(A) Ship in S-03.** Blocks nothing and removes a growing pain point. | Solo dev | **Open** |
-| Q8 | **Browser walkthrough of S-02 before EPIC-003 starts?** | **(A)** Run the 11 manual steps from STORY-002-04 §2.2 now (~3 min Incognito) before committing to EPIC-003. **(B)** Skip — EPIC-003 replaces `/app` body anyway, so any visual bugs there get caught in S-04's manual verification. | (A) catches any login/register regression before we build on top; (B) saves 3 minutes. | **(A) Run it.** 3 minutes of insurance. If the register flow is subtly broken, EPIC-003 inherits the breakage silently. | Solo dev | **Open** |
-| Q9 | **Dashboard header chrome — sticky and minimal, or full toolbar?** | **(A) Minimal sticky**: logo on left, user email + sign-out on right, `h-14`. **(B) Full toolbar**: logo + breadcrumbs + user menu + help + notifications bell. | (A) matches Tee-Mo minimalism (Charter §2.6); (B) is premature scope. | **(A) Minimal sticky.** ADR-022 explicitly says "no shadcn, no MUI" — keep the chrome boring. | Solo dev | **Open** |
-| Q10 | **Create modal UX: native `<form>` or a reusable `<Modal>` component?** | **(A)** Inline native `<form>` in each route file, same pattern as `/login` and `/register`. **(B)** Build a reusable `<Modal>` component (new primitive) and use it for all three create/rename modals. | (A) matches S-02 pattern exactly; (B) is cleaner but adds a new primitive and a new story. | **(A) Native forms.** Stay consistent with S-02. A reusable modal is EPIC-008 wizard territory. | Solo dev | **Open** |
+| # | Question | Resolution | Resolved by |
+|---|---|---|---|
+| Q1 | Ship the dev-only manual team-create path? | **No — eliminated.** EPIC-005 Phase A in S-04 lands real Slack OAuth install BETWEEN EPIC-003 Slice A and Slice B, so Slice B attaches to real teams. | ADR-026 |
+| Q2 | Ship Rename + Make-Default? | **Yes — both ship in Slice B (S-05).** | Retained from original recommendation A |
+| Q3 | Disabled placeholder chips for future features? | **Yes — "Not connected" chips on workspace card in Slice B.** | Retained from original recommendation A |
+| Q4 | BYOK columns in `teemo_workspaces` — keep or drop? | **Keep.** Migration 007 does NOT touch `ai_provider` / `ai_model` / `encrypted_api_key` / `encrypted_google_refresh_token` columns. They stay unused until EPIC-004 / EPIC-006 populate them. | Retained from original recommendation A |
+| Q5 | Frontend routes flat or nested? | **Nested: `/app` (team list) + `/app/teams/$teamId` (workspace list).** Matches Design Guide §9.2. | Retained from original recommendation A |
+| Q6 | Sprint split? | **3 slices across 3 sprints — but NOT all EPIC-003.** S-03 = EPIC-003 Slice A schema + ADR-026 deploy + Slack scaffold. S-04 = EPIC-005 Phase A. S-05 = EPIC-003 Slice B full workspace CRUD. | ADR-026 |
+| Q7 | PyJWT BUG-20260411 fix timing? | **Ship in S-03 as an L1 story in Slice A.** Same answer as before the reshape. | Retained from original recommendation A |
+| Q8 | Browser walkthrough of S-02 first? | **Run it before S-03 starts (~3 min).** Catches any login/register regression before we build on top. If you want to skip, say so — otherwise I'll gate S-03 kickoff on this. | Retained from original recommendation A |
+| Q9 | Dashboard header chrome shape? | **Minimal sticky: logo + user email + sign-out, `h-14`.** Ships with the team list in S-04's frontend landing story (NOT Slice B — it's EPIC-005 Phase A's landing UI). | Retained from original recommendation A, but moved sprint |
+| Q10 | Create modal UX — native form or reusable Modal? | **Native `<form>`, same pattern as `/login` and `/register`.** | Retained from original recommendation A |
+
+No open questions remain. Ambiguity 🟢 Low. Epic is ready for Story decomposition — specifically, **S-03 Slice A stories can be drafted now**; S-05 Slice B stories will be drafted when S-05 opens (per the "don't over-plan far ahead" discipline).
 
 ---
 
@@ -404,3 +419,4 @@ Feature: Dashboard Shell + SlackTeam / Workspace CRUD
 | Date | Change | By |
 |------|--------|-----|
 | 2026-04-11 | Epic drafted from Context Pack. Ambiguity 🟡 Medium — pending human review of §6 Risks + §8 Open Questions before decomposition. | Team Lead (post-S-02 planning) |
+| 2026-04-12 | **ADR-026 reshape.** Split into Slice A (S-03 schema + PyJWT fix, 2 stories) and Slice B (S-05 workspace CRUD, 7 stories). EPIC-005 Phase A sandwiches in S-04. Dev-only manual team-create path eliminated. All 10 open questions resolved. Ambiguity 🟡 → 🟢. Target date 2026-04-12 → 2026-04-13. §5 story inventory rewritten; §8 marked resolved. | Team Lead (ADR-026 planning) |

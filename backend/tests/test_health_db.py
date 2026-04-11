@@ -1,17 +1,22 @@
 """
 Acceptance tests for the database smoke-check portion of GET /api/health.
 
-Covers all three Gherkin scenarios from STORY-001-02 §2.1:
-1. All 4 teemo_ tables exist and are queryable  -> status "ok", all tables "ok"
+Covers all Gherkin scenarios from STORY-001-02 §2.1 and STORY-003-03 §2.1:
+1. All 6 teemo_ tables exist and are queryable  -> status "ok", all tables "ok"
 2. One table is missing / errors                -> status "degraded", others "ok"
 3. Client is reused across requests             -> get_supabase() called once per
                                                    in-process call (singleton)
+4. /api/health reports exactly 6 teemo_* tables after ADR-024 migrations
 
 The Supabase client is mocked so tests are hermetic — no live DB required.
 The mock replicates the call chain:
     client.table(name).select("id").limit(0).execute()
 
 Pattern reference: test_health.py (STORY-001-01).
+Note: test_health_reports_all_six_teemo_tables() requires the ADR-024 migrations
+(005, 006, 007) to be applied in Supabase before the test passes against a live
+DB. Against the mock it passes immediately since TEEMO_TABLES drives both the
+endpoint and the mock.
 """
 
 from unittest.mock import MagicMock, call, patch
@@ -79,9 +84,9 @@ def _make_mock_supabase(failing_table: str | None = None) -> MagicMock:
 
 def test_health_all_tables_ok() -> None:
     """
-    Gherkin Scenario: All 4 teemo_ tables exist and are queryable.
+    Gherkin Scenario: All 6 teemo_ tables exist and are queryable.
 
-    Given the mock Supabase responds without errors for all 4 tables
+    Given the mock Supabase responds without errors for all 6 tables
     When  GET /api/health is called
     Then  response.status_code is 200
     And   response.json()["status"] is "ok"
@@ -183,3 +188,47 @@ def test_supabase_client_is_singleton() -> None:
     assert len(set(id(c) for c in returned_clients)) == 1, (
         "get_supabase must return the same client instance every time"
     )
+
+
+# ---------------------------------------------------------------------------
+# Scenario 4 — /api/health reports exactly 6 teemo_* tables (ADR-024)
+# ---------------------------------------------------------------------------
+
+
+def test_health_reports_all_six_teemo_tables() -> None:
+    """
+    After ADR-024 migrations, /api/health must list all 6 teemo_* tables.
+
+    Gherkin Scenario: /api/health reports 6 teemo_* tables after migrations
+      (STORY-003-03 §2.1)
+
+    Given the mock Supabase responds without errors for all 6 tables
+    When  GET /api/health is called
+    Then  response.status_code is 200
+    And   response.json()["status"] is "ok"
+    And   response.json()["database"] has exactly 6 keys
+    And   the keys are: teemo_users, teemo_workspaces, teemo_knowledge_index,
+          teemo_skills, teemo_slack_teams, teemo_workspace_channels
+    And   every value is "ok"
+
+    Note: Against live Supabase this test fails until the user runs migrations
+    005, 006, and 007 via the SQL editor. Against the mock it passes immediately.
+    """
+    mock_client = _make_mock_supabase(failing_table=None)
+    with patch("app.main.get_supabase", return_value=mock_client):
+        client = TestClient(app)
+        response = client.get("/api/health")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert set(body["database"].keys()) == {
+        "teemo_users",
+        "teemo_workspaces",
+        "teemo_knowledge_index",
+        "teemo_skills",
+        "teemo_slack_teams",
+        "teemo_workspace_channels",
+    }
+    for table_name, status in body["database"].items():
+        assert status == "ok", f"{table_name} is {status}"

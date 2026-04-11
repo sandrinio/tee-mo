@@ -395,14 +395,16 @@ No open questions remain. Ambiguity 🟢 Low. Epic is ready for Story decomposit
 - [x] STORY-003-03-migrations → Archive (S-03)
 - [x] STORY-003-04-pyjwt-fix → Archive (S-03)
 
-**Stories (Slice B - S-05 Pending):**
-- [ ] STORY-003-B01-workspace-models → Backlog (pending)
-- [ ] STORY-003-B02-workspace-routes → Backlog (pending)
-- [ ] STORY-003-B03-workspace-tests → Backlog (pending)
-- [ ] STORY-003-B04-frontend-api-hooks → Backlog (pending)
-- [ ] STORY-003-B05-team-workspace-list → Backlog (pending)
-- [ ] STORY-003-B06-rename-make-default → Backlog (pending)
-- [ ] STORY-003-B07-manual-verification → Backlog (pending)
+**Stories (Slice B - Safe for Parallel Run):**
+- [ ] STORY-003-B01-workspace-models → Backlog (Ready for Parallel)
+- [ ] STORY-003-B04-frontend-api-hooks → Backlog (Ready for Parallel)
+
+**Stories (Slice B - Blocked by S-04 Slack Install):**
+- [ ] STORY-003-B02-workspace-routes → Backlog (Pending S-04)
+- [ ] STORY-003-B03-workspace-tests → Backlog (Pending S-04)
+- [ ] STORY-003-B05-team-workspace-list → Backlog (Pending S-04)
+- [ ] STORY-003-B06-rename-make-default → Backlog (Pending S-04)
+- [ ] STORY-003-B07-manual-verification → Backlog (Pending S-04)
 
 **References:**
 - Charter: `product_plans/strategy/tee_mo_charter.md` §1.1, §2.6, §5.3, §5.5, §6 (constraints), §10 Dashboard Epic Seed Map

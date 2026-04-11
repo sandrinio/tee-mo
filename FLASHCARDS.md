@@ -131,3 +131,63 @@ vi.mock('../../main', () => ({ queryClient: { clear: clearMock } }));
 **What happened:** The Developer agent for STORY-003-04 was given a worktree at `.worktrees/STORY-003-04-pyjwt-fix/`. It used an absolute path (`/Users/ssuladze/Documents/Dev/SlaXadeL/product_plans/backlog/EPIC-002_auth/BUG-20260411-pyjwt-test-ordering.md`) for the BUG report edit instead of a worktree-relative path. Absolute paths resolve to the MAIN repo working directory, which was on `sprint/S-03` at the time — not the story worktree's `story/STORY-003-04-pyjwt-fix` branch. Result: the BUG report edit landed on `sprint/S-03`'s working tree and did NOT get included in the story branch's commit. Required a separate chore commit on `sprint/S-03` to capture the edit post-merge.
 **Rule:** Inside a V-Bounce story worktree, every Edit/Write tool call MUST use paths relative to the worktree root. Absolute paths bypass the worktree branch isolation and land on whatever branch is checked out in the main repo.
 **How to apply:** Task files spawned for story work must include an explicit instruction near the top: "Use worktree-relative paths for ALL edits. NEVER use absolute paths starting with `/Users/ssuladze/...`. Absolute paths skip the worktree and land on the main repo's checked-out branch, breaking story-branch isolation." Team Lead should spot-check the first few Edit/Write tool calls per story to confirm relative-path discipline, especially when stories edit files outside `backend/` or `frontend/` (e.g., `product_plans/`, `FLASHCARDS.md`, `.vbounce/`).
+
+---
+
+## Slack OAuth (S-04)
+
+### [2026-04-12] `httpx.AsyncClient` first use — `import httpx` at module level so tests can monkeypatch
+**Seen in:** STORY-005A-04 (Slack OAuth callback)
+**What happened:** S-04 introduced the codebase's first first-party outbound HTTP via `httpx.AsyncClient` in `backend/app/api/routes/slack_oauth.py`. The Red Phase tests mock it via `monkeypatch.setattr(slack_oauth_module.httpx, "AsyncClient", FakeAsyncClient)`, which only works if `httpx` is imported at the module level — NOT inside the handler body. An earlier draft tried `import httpx` inside the async function and all 10 tests ERROR'd at fixture setup with `AttributeError: module 'app.api.routes.slack_oauth' has no attribute 'httpx'`.
+**Rule:** When a route file needs outbound HTTP, `import httpx` at the top of the module, never inside a function. This applies to any future story that calls Slack/Google/Anthropic/etc from a backend route until `app/core/http.py` is extracted.
+**How to apply:** In tests, use `monkeypatch.setattr(module.httpx, "AsyncClient", FakeAsyncClient)` with a hand-rolled `FakeAsyncClient` that implements `__aenter__`/`__aexit__`/`post`. The canonical `FakeResponse` shape is in `backend/tests/test_slack_oauth_callback.py`. When `app/core/http.py` is extracted (on the 2nd httpx use-case), migrate tests to `Depends(get_http_client)` injection and this flashcard can be retired.
+
+---
+
+### [2026-04-12] Supabase `.upsert()` — omit `DEFAULT NOW()` columns from the payload
+**Seen in:** STORY-005A-04 (Slack OAuth callback)
+**What happened:** The `teemo_slack_teams` table has `installed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`. A naive upsert dict that passes `installed_at` (even as `None` or the current time) would reset the column on every re-install, losing the original install timestamp. PostgREST's `Prefer: resolution=merge-duplicates` header (what supabase-py's `.upsert()` translates to) writes every field that appears in the payload, including fields with `DEFAULT` clauses. Passing nothing means the column keeps its existing value on update and the default on insert — exactly what we want.
+**Rule:** When upserting a row that has `DEFAULT NOW()` (or any other DB-side default) columns you want preserved across re-writes, **omit those columns from the payload dict entirely**. Do NOT pass them as `None`; do NOT pass `datetime.utcnow()`. Just leave them out.
+**How to apply:** Applies to every ADR-024 table (`teemo_slack_teams.installed_at`, `teemo_workspace_channels.bound_at`, future `teemo_workspaces.created_at`). Rule of thumb: if a migration has `DEFAULT NOW()` on a column, the corresponding Python upsert dict does not reference that column at all.
+
+---
+
+### [2026-04-12] `base64.urlsafe_b64decode` needs padding for bare base64url from `.env`
+**Seen in:** STORY-005A-01 (Slack bootstrap)
+**What happened:** `TEEMO_ENCRYPTION_KEY` is generated via `secrets.token_urlsafe(32)` which emits an unpadded 43-char base64url string. `base64.urlsafe_b64decode` raises `binascii.Error: Invalid base64-encoded string` on unpadded input. Both the `config.py` Settings validator and `encryption.py::_key()` had to apply padding before decode. Missed on the first Green Phase pass; caught by the short-key validator test.
+**Rule:** Any base64url string read from `.env` (encryption keys, tokens, nonces) must be padded before decoding: `padded = raw + "=" * (-len(raw) % 4)` then `base64.urlsafe_b64decode(padded)`.
+**How to apply:** Wrap every base64url decode call site with the padding snippet, even if you think the source "should" already be padded. `secrets.token_urlsafe()` never emits padding. External tools vary. Defensive padding is free.
+
+---
+
+### [2026-04-12] `slack_bolt.AsyncApp` uses `request_verification_enabled`, NOT `token_verification_enabled`
+**Seen in:** STORY-005A-01 (Slack bootstrap)
+**What happened:** The story spec §3.3 skeleton passed `token_verification_enabled=False` to `AsyncApp(...)`. This parameter does not exist in `slack-bolt 1.28.x` — the constructor rejected it. The correct parameter for request-signing control is `request_verification_enabled`. The story spec template was copied from stale AI-generated docs.
+**Rule:** When constructing `slack_bolt.async_app.AsyncApp`, the parameter names that actually exist in 1.28.x are: `token`, `signing_secret`, `request_verification_enabled`, `installation_store`, `oauth_settings`, and a few others — NOT `token_verification_enabled`.
+**How to apply:** For `get_slack_app()` in `backend/app/core/slack.py`, use `AsyncApp(token=None, signing_secret=s.slack_signing_secret, request_verification_enabled=True)`. Sprint plans that reference the `AsyncApp` constructor must use the correct parameter name. When the slack-bolt version is bumped, verify the constructor signature hasn't changed in the upgrade notes.
+
+---
+
+### [2026-04-12] `/api/slack/events` 400 body changed from JSON detail to bare Response
+**Seen in:** STORY-005A-02 (events signing verification)
+**What happened:** The S-03 stub returned `JSONResponse({"detail":"invalid_json"}, status_code=400)` on malformed JSON. The S-04 hardened handler parses the JSON AFTER the signature guard and returns a bare `Response(status_code=400)` with no body when parsing fails. Any client that was grepping for the `"invalid_json"` detail string will silently break. The stub's 3 tests had to be updated to assert `status_code == 400` only (not the body shape).
+**Rule:** Document Slack-webhook-facing error shapes in the vdoc when that endpoint gets documentation. Don't rely on response body shapes for Slack-facing endpoints unless you control the consumer — Slack doesn't inspect the body, it only cares about the status code.
+**How to apply:** If you need diagnostic detail on malformed POSTs to Slack endpoints, add a structured log line (fields not body) so ops can trace it without exposing anything to the public-facing response.
+
+---
+
+## Frontend Test Infrastructure (S-04)
+
+### [2026-04-12] `vitest@2.1.9 + vite@8` — separate `vitest.config.ts` avoids `ProxyOptions` TypeScript conflict
+**Seen in:** STORY-005A-06 (frontend install UI)
+**What happened:** Added an inline `test:` block to `frontend/vite.config.ts` to configure Vitest. TypeScript flagged a `ProxyOptions` type incompatibility because `vitest@2.1.9` declares its peer dependency as `vite@5.x`, while this project runs `vite@8.0.8`. The two versions export overlapping but incompatible type shapes for proxy config. Inlining vitest config in `vite.config.ts` made the conflict unavoidable.
+**Rule:** When `vitest` and `vite` major versions don't match peer deps, keep Vitest config in a **separate `vitest.config.ts` file** that imports from `vitest/config` instead of `vite`. Exclude `vitest.config.ts` from `tsconfig.node.json` if necessary.
+**How to apply:** `frontend/vitest.config.ts` should `import { defineConfig } from 'vitest/config'` (NOT `from 'vite'`). All test-environment config (`test: { environment: 'jsdom', globals: true, setupFiles: [...] }`) lives in that file. `vite.config.ts` stays vite-only. When bumping either package, verify the peer range — if they align again (e.g. vitest@3 peers with vite@8), the files can be re-merged.
+
+---
+
+### [2026-04-12] `@testing-library/react` auto-cleanup requires `globals: true` in vitest config
+**Seen in:** STORY-005A-06 (frontend install UI)
+**What happened:** Without `globals: true` in `vitest.config.ts`, `@testing-library/react` silently skips its auto-cleanup hook. The library registers `afterEach(cleanup)` only if `typeof afterEach === 'function'` at load time — which requires the vitest globals injected into the test environment. Without it, every `render()` call leaks DOM nodes into the next test, producing false positives and cross-test pollution (one `screen.findByText('X')` matching content from a previous test's DOM).
+**Rule:** Any Vitest project using `@testing-library/react` MUST set `globals: true` in `vitest.config.ts`. If you prefer explicit imports, manually add `import { cleanup } from '@testing-library/react'; afterEach(() => cleanup())` to the test setup file — but `globals: true` is the simpler fix.
+**How to apply:** In `frontend/vitest.config.ts`, set `test.globals: true`. The accompanying `frontend/src/test-setup.ts` file imports `@testing-library/jest-dom` to register the matchers (`toBeInTheDocument`, etc.). Both files shipped with STORY-005A-06 — reference them when setting up a new component test file in a different frontend package.

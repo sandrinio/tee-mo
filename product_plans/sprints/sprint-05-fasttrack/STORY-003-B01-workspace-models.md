@@ -1,7 +1,7 @@
 ---
 story_id: "STORY-003-B01-workspace-models"
 parent_epic_ref: "EPIC-003"
-status: "Draft"
+status: "Ready for Parallel"
 ambiguity: "🟢 Low"
 context_source: "Epic §5, §4"
 actor: "Developer Agent"

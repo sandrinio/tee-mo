@@ -211,3 +211,6 @@ app.include_router(slack_oauth_router)
 ## Token Usage
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| Developer | 103 | 535 | 638 |
+| Developer | 25 | 1,949 | 1,974 |
+| DevOps | 14 | 15 | 29 |

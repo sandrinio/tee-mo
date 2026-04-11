@@ -1,7 +1,7 @@
 ---
 story_id: "STORY-003-B03-workspace-tests"
 parent_epic_ref: "EPIC-003"
-status: "Draft"
+status: "Blocked — Pending S-04"
 ambiguity: "🟢 Low"
 context_source: "Epic §5"
 actor: "QA Agent / Developer Agent"

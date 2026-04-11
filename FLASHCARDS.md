@@ -95,3 +95,39 @@ vi.mock('../../main', () => ({ queryClient: { clear: clearMock } }));
 **What happened:** The frontend scaffold's `"build": "tsc -b && vite build"` runs TypeScript compilation BEFORE Vite gets to regenerate `src/routeTree.gen.ts`. When a new route file is added (`src/routes/foo.tsx`), the first `npm run build` after the addition fails in `tsc` because the generated tree hasn't been updated to export the new route yet — tsc sees stale imports.
 **Rule:** After creating new files in `frontend/src/routes/`, run `node_modules/.bin/vite build` (or `npm run dev` briefly) FIRST to let the TanStackRouterVite plugin regenerate `routeTree.gen.ts`. Then run the normal `npm run build` — it will succeed. Subsequent builds after the regeneration work normally.
 **How to apply:** When a story adds `src/routes/*.tsx` files, the Developer agent should run the vite-first build once, confirm `routeTree.gen.ts` now includes the new route, and only then run the full `tsc -b && vite build` gate. Do NOT hand-edit `routeTree.gen.ts`. A cleaner long-term fix (candidate for `/improve`) is to reorder the build script to `"build": "vite build && tsc --noEmit"` or add a `"pretsr": "tsr generate"` step — both depend on confirming the plugin writes the file synchronously enough for the tsc pass to pick it up.
+
+---
+
+## FastAPI + Starlette serving an SPA
+
+### [2026-04-12] Starlette 1.0.0 `StaticFiles(html=True)` is NOT a SPA fallback — use an explicit catch-all route
+**Seen in:** STORY-003-01 (Dockerfile + same-origin static serving)
+**What happened:** The S-03 story spec claimed `app.mount("/", StaticFiles(directory=..., html=True))` would serve `index.html` for any unmatched SPA path like `/login`, `/register`, `/app`. It doesn't. In Starlette 1.0.0, `html=True` only serves `index.html` when the request path is a directory (e.g. trailing slash) and serves `404.html` for missing files — it does NOT serve `index.html` as a generic fallback for unmatched paths. TanStack Router client-side routes like `/login` returned 404 instead of the SPA shell.
+**Rule:** When serving a Vite/React SPA from FastAPI at same-origin, mount `StaticFiles` at `/assets` (or wherever Vite writes the hashed bundle directory) AND add an explicit catch-all route `@app.api_route("/{full_path:path}", methods=["GET", "HEAD"])` that returns `FileResponse(static_dir / "index.html")` for any path that doesn't match an earlier route. Order matters: API routes first, `/assets` StaticFiles mount second, catch-all route last.
+**How to apply:** When adding a new frontend shell to FastAPI, use the pattern from `backend/app/main.py`. If you see `StaticFiles(html=True)` proposed as an SPA fallback in any spec, flag it as wrong and replace with the explicit catch-all pattern.
+
+### [2026-04-12] Starlette 1.0.0 `@app.get(...)` does NOT auto-handle HEAD requests
+**Seen in:** STORY-003-01 (Coolify healthcheck compatibility)
+**What happened:** Coolify's healthcheck does `HEAD /api/health`. `curl -sI` (for curl sanity checks) also uses HEAD. STORY-003-01 found that `@app.get("/api/health")` returns 405 Method Not Allowed on HEAD in Starlette 1.0.0 — the `@app.get` decorator registers the route for GET only. Flask auto-handles HEAD for GET routes; Starlette doesn't.
+**Rule:** Any endpoint that will be hit by a reverse-proxy healthcheck, a curl `-I` sanity check, a Coolify/Kubernetes liveness probe, or any caller issuing HEAD must be registered with `@app.api_route(..., methods=["GET", "HEAD"])`. Do not rely on `@app.get` or `@router.get` to handle HEAD.
+**How to apply:** New backend health/liveness/readiness/metrics endpoints must use `api_route` with both methods. Review existing `@app.get` / `@router.get` routes when adding a new healthcheck target. Also applies to the SPA catch-all route (see the previous flashcard).
+
+---
+
+## Post-release verification + live-schema validation
+
+### [2026-04-12] `supabase.table(t).select("id").limit(0)` fails on tables without an `id` column
+**Seen in:** STORY-003-03 / S-03 post-release hotfix (commit `ce7c0b1`)
+**What happened:** The health-check probe `_check_table()` in `backend/app/main.py` used `supabase.table(t).select("id").limit(0).execute()` to confirm each `teemo_*` table existed and was reachable. PostgREST validates that the `id` column exists in the table's schema BEFORE executing the query, even with `LIMIT 0`. The two new ADR-024 tables (`teemo_slack_teams` with `slack_team_id` PK, `teemo_workspace_channels` with `slack_channel_id` PK) intentionally have NO `id` column, so PostgREST raised `column teemo_slack_teams.id does not exist (42703)` for both tables. The health endpoint reported `status: "degraded"` despite the tables being healthy and reachable. STORY-003-03's test suite is hermetic (mocked Supabase client), so the real-schema mismatch never surfaced — only the first live `/api/health` request against the production schema exposed it. Fixed by commit `ce7c0b1` as a post-release hotfix.
+**Rule:** Column-agnostic existence probes must use `select("*").limit(0)` or a HEAD-style request via `select("*", count="exact").limit(0)`. Never hard-code a column name (like `id`) in a smoke check that iterates over a heterogeneous set of tables — not all Tee-Mo tables have the same primary key shape.
+**How to apply:** Any backend health/smoke/probe code that iterates `TEEMO_TABLES` (or any list of tables) must use `select("*")`, not `select("id")`. Hermetic tests don't catch this — they mock the client and don't exercise PostgREST's column validation. Consider adding a live smoke test in production verification that hits the actual schema, not just hermetic unit tests. This bug is also a process signal: whenever a story adds tables with a non-`id` primary key, grep the codebase for `select("id")` and audit for assumption-of-id-column mistakes.
+
+---
+
+## V-Bounce Agent Discipline
+
+### [2026-04-12] Agent Edit/Write with absolute paths bypass worktree isolation
+**Seen in:** STORY-003-04 (Dev agent editing BUG-20260411 report)
+**What happened:** The Developer agent for STORY-003-04 was given a worktree at `.worktrees/STORY-003-04-pyjwt-fix/`. It used an absolute path (`/Users/ssuladze/Documents/Dev/SlaXadeL/product_plans/backlog/EPIC-002_auth/BUG-20260411-pyjwt-test-ordering.md`) for the BUG report edit instead of a worktree-relative path. Absolute paths resolve to the MAIN repo working directory, which was on `sprint/S-03` at the time — not the story worktree's `story/STORY-003-04-pyjwt-fix` branch. Result: the BUG report edit landed on `sprint/S-03`'s working tree and did NOT get included in the story branch's commit. Required a separate chore commit on `sprint/S-03` to capture the edit post-merge.
+**Rule:** Inside a V-Bounce story worktree, every Edit/Write tool call MUST use paths relative to the worktree root. Absolute paths bypass the worktree branch isolation and land on whatever branch is checked out in the main repo.
+**How to apply:** Task files spawned for story work must include an explicit instruction near the top: "Use worktree-relative paths for ALL edits. NEVER use absolute paths starting with `/Users/ssuladze/...`. Absolute paths skip the worktree and land on the main repo's checked-out branch, breaking story-branch isolation." Team Lead should spot-check the first few Edit/Write tool calls per story to confirm relative-path discipline, especially when stories edit files outside `backend/` or `frontend/` (e.g., `product_plans/`, `FLASHCARDS.md`, `.vbounce/`).

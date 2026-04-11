@@ -3,7 +3,9 @@ sprint_id: "S-03"
 sprint_goal: "Land https://teemo.soula.ge as a live Coolify auto-deploy, apply the 3 ADR-024 schema migrations, fix BUG-20260411 (PyJWT test-order flake), and ship the minimal Slack events verification endpoint so EPIC-005 Phase A can start in S-04."
 dates: "2026-04-12"
 delivery: "D-01 (Release 1: Foundation + Deploy + Slack Install)"
-status: "Done — pending final Coolify deploy verification"
+status: "Done — live verified 2026-04-12 after 1 post-release hotfix (ce7c0b1) + Coolify port reconfig (3000 → 8000)"
+post_release_hotfixes: 1
+post_release_config_changes: 1
 stories_planned: 6
 stories_completed: 5
 stories_deferred: 1  # STORY-003-06 collapsed into sprint close per user decision
@@ -86,7 +88,20 @@ generated_at: "2026-04-12"
 - **SQL migrations run** at `https://sulabase.soula.ge` via Supabase SQL editor — 005, 006, 007 applied in order. 6 `teemo_*` tables confirmed present.
 - **Slack app created** at `api.slack.com` per the Slack setup guide Steps 1–4. Credentials in `.env`: `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, `SLACK_SIGNING_SECRET`, `SLACK_APP_ID`, `SLACK_REDIRECT_URL`, `SLACK_VERIFICATION_TOKEN` (legacy, unused but harmless).
 - **Google Cloud OAuth consent screen** — scopes configured per `google-cloud-setup-guide.md` Step 2.5: `openid`, `userinfo.email`, `drive.file`. Zero sensitive/restricted scopes.
-- **Coolify service configuration** — pending manual redeploy post-push-to-main per user decision.
+- **Coolify service configuration** — user configured the Coolify service during sprint close. First redeploy produced a 502 due to the service Application Port defaulting to 3000 (Coolify's Node/Next convention) instead of 8000 (where uvicorn binds). User changed the port in the Coolify UI to 8000 and redeployed. Second redeploy hit the live backend successfully.
+
+### 🔧 Post-release incidents (2 caught and resolved during sprint close)
+
+Two issues surfaced between the release merge and the final live verification. Both were found + fixed in the same session; both are captured as flashcards in §4.
+
+| # | Issue | Root cause | Fix |
+|---|---|---|---|
+| 1 | **502 Bad Gateway** at `https://teemo.soula.ge` despite Traefik TLS cert valid and container `Up 8 minutes` | Coolify Traefik label `traefik.http.services.*.loadbalancer.server.port=3000` — Coolify's default port was 3000 (Node/Next convention), not 8000 where uvicorn binds. Dockerfile `EXPOSE 8000` alone isn't enough; Coolify needs an explicit **Application Port** in the service UI. | **Config change, not code.** User changed the Application Port in the Coolify UI: 3000 → 8000. Redeployed. Traefik label updated. Backend now reachable. |
+| 2 | Backend returned `status: "degraded"` with `"teemo_slack_teams":"missing: column teemo_slack_teams.id does not exist"` when hit directly at container:8000 | `backend/app/main.py::_check_table()` used `supabase.table(t).select("id").limit(0).execute()`. PostgREST validates that the `id` column exists in the schema, even for `LIMIT 0`. My migrations 005 and 006 correctly use `slack_team_id` / `slack_channel_id` as string PKs per ADR-024 — there's intentionally NO `id` UUID column. STORY-003-03's health test was hermetic (mocked Supabase) so the real-schema mismatch was never exercised in pytest. The bug only surfaced when live PostgREST first queried the real 6-table schema. | **Post-release hotfix commit `ce7c0b1`.** Changed `select("id")` → `select("*")` in `_check_table()`. Column-agnostic. Same network cost (`LIMIT 0` still transfers zero rows). 36/36 backend tests still green after the fix. Pushed directly to `main`. |
+
+**Neither issue was preventable by STORY-003-03's test strategy** — the hermetic mock pattern masks real-schema validation. Candidate framework improvement: add one "live smoke test" that runs against the actual Supabase schema in post-release verification, not just hermetic unit tests. Queued for `/improve`.
+
+**Process lesson**: the first Coolify deploy from a new port-based Docker image needs the "Application Port" field set explicitly. Adding this as an explicit checklist item in the Coolify setup runbook (STORY-003-02) would have caught this during Step 1 of the runbook instead of during post-release verification.
 
 ## 2. Git History
 

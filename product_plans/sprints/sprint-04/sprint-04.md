@@ -37,7 +37,7 @@ confirmed_at: "2026-04-12"
 
 | Priority | Story | Epic | Label | V-Bounce State | Blocker |
 |----------|-------|------|-------|----------------|---------|
-| 1 | [STORY-005A-01: Slack Bootstrap (encryption + config + slack.py)](./STORY-005A-01-slack-bootstrap.md) | EPIC-005 Phase A | L2 | Bouncing | — |
+| 1 | [STORY-005A-01: Slack Bootstrap (encryption + config + slack.py)](./STORY-005A-01-slack-bootstrap.md) | EPIC-005 Phase A | L2 | Done | — |
 | 2 | [STORY-005A-02: `/api/slack/events` Signing-Secret Verification](./STORY-005A-02-events-signing-verification.md) | EPIC-005 Phase A | L2 | Refinement | STORY-005A-01 |
 | 3 | [STORY-005A-03: `GET /api/slack/install` Install URL Builder](./STORY-005A-03-install-url-builder.md) | EPIC-005 Phase A | L2 | Refinement | STORY-005A-01 |
 | 4 | [STORY-005A-04: `GET /api/slack/oauth/callback` Code Exchange + Encrypt + Upsert](./STORY-005A-04-oauth-callback-upsert.md) | EPIC-005 Phase A | **L3** | Refinement | STORY-005A-01 + STORY-005A-03 |
@@ -210,7 +210,7 @@ Pulled from Phase A epic §6 + sprint-specific concerns:
 
 | Story | Final State | QA Bounces | Arch Bounces | Tests Written | Correction Tax | Notes |
 |-------|-------------|------------|--------------|---------------|----------------|-------|
-| STORY-005A-01 | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ |
+| STORY-005A-01 | Done | 0 | 0 | 8 | 5% | Fast Track. 8/8 target + 44/44 full suite. Two skeleton fixes in Green: base64url padding, AsyncApp `request_verification_enabled`. Fingerprint `aecf7b12` matches. |
 | STORY-005A-02 | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ |
 | STORY-005A-03 | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ |
 | STORY-005A-04 | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ |
@@ -226,3 +226,5 @@ Pulled from Phase A epic §6 + sprint-specific concerns:
 |------|--------|-----|
 | 2026-04-12 | Sprint plan drafted from `.vbounce/templates/sprint.md` after Phase A epic decomposition. Status: **Planning**. 6 stories scoped, dependency chain established, 5 Fast Track + 1 Full Bounce (005A-04 L3), 3 sprint-level questions (1 open at 005A-04 risk threshold), 6 risk flags identified (3 mitigated by §0 human prereqs). Awaiting human gate confirmation. | Team Lead |
 | 2026-04-12 | All §0 human prereqs cleared: PREREQ 1 Request URL ✅ Verified, PREREQ 2 consent screen eyeballed + cancel 404 confirmed, PREREQ 3b Coolify env var set. Human confirmation received from sandrinio. Status: **Planning → Active**. Sprint Readiness Gate cleared; proceeding to sprint branch cut and Step 1 STORY-005A-01 worktree creation. | Team Lead |
+| 2026-04-12 | **STORY-005A-01 Slack Bootstrap merged** (merge commit `466dc4e` into `sprint/S-04`). Fast Track, 0 QA / 0 Arch bounces, 5% correction tax. 8/8 target tests + 44/44 full backend suite passing. Fingerprint `aecf7b12` verified post-merge. Worktree removed, story branch deleted. 2 flashcards flagged for sprint close (base64url padding; slack_bolt `request_verification_enabled`). | Team Lead |
+| 2026-04-12 | **Sprint plan table cell corruption recovered.** `complete_story.mjs STORY-005A-01` over-aggressively replaced multiple table cells and column headers with the string "Done" (rows 3–5 in §1 Active Scope, §2 Merge Ordering row 2 + "Reason" header, §2 Execution Mode Architect-Override cell for 005A-01, §2 Dependency Chain "Reason" header + rows 003/005, §3 Open Questions "Options" header, §4 Execution Log Tests-Written cell). All cells restored by hand from the original plan content. Execution Log row for 005A-01 rewritten in-place (the script appended a duplicate, missing the Tests-Written column). **Framework issue filed for `/improve` at sprint close.** | Team Lead |

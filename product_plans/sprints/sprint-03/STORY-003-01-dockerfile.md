@@ -351,3 +351,4 @@ This story is infrastructure. Its "tests" are the §2.2 manual verification chec
 
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| DevOps | 26 | 185 | 211 |

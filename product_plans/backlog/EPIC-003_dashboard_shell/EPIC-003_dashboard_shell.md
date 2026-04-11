@@ -1,6 +1,6 @@
 ---
 epic_id: "EPIC-003"
-status: "In Progress — Slice A active in S-03, Slice B scheduled for S-05 (after EPIC-005 Phase A lands real Slack teams in S-04)"
+status: "In Progress — Slice A completed in S-03, Slice B scheduled for S-05 (after EPIC-005 Phase A lands real Slack teams in S-04)"
 ambiguity: "🟢 Low (post-ADR-026 reshape)"
 context_source: "Charter §1.1, §2.6, §5.3, §5.5, §10 Dashboard Epic Seed Map; Roadmap §2 EPIC-003 row + ADR-014/022/024/025/026; Design Guide §6, §9.2, §9.3; Codebase Context Pack 2026-04-11; ADR-026 reshape 2026-04-12."
 release: "D-01 Release 1: Foundation + Deploy + Slack Install"
@@ -391,17 +391,18 @@ No open questions remain. Ambiguity 🟢 Low. Epic is ready for Story decomposit
 
 ## 9. Artifact Links
 
-**Stories (to be created after §8 questions are resolved):**
-- [ ] STORY-003-01-migrations → Backlog (pending)
-- [ ] STORY-003-02-pyjwt-fix → Backlog (pending)
-- [ ] STORY-003-03-slack-teams-routes → Backlog (pending)
-- [ ] STORY-003-04-workspaces-routes → Backlog (pending)
-- [ ] STORY-003-05-frontend-api-hooks → Backlog (pending)
-- [ ] STORY-003-06-team-list-view → Backlog (pending)
-- [ ] STORY-003-07-team-detail-workspace-list → Backlog (pending)
-- [ ] STORY-003-08-rename-and-make-default → Backlog (pending)
-- [ ] STORY-003-09-dashboard-shell-chrome → Backlog (pending)
-- [ ] STORY-003-10-manual-verification → Backlog (pending)
+**Stories (Slice A - S-03 Completed):**
+- [x] STORY-003-03-migrations → Archive (S-03)
+- [x] STORY-003-04-pyjwt-fix → Archive (S-03)
+
+**Stories (Slice B - S-05 Pending):**
+- [ ] STORY-003-B01-workspace-models → Backlog (pending)
+- [ ] STORY-003-B02-workspace-routes → Backlog (pending)
+- [ ] STORY-003-B03-workspace-tests → Backlog (pending)
+- [ ] STORY-003-B04-frontend-api-hooks → Backlog (pending)
+- [ ] STORY-003-B05-team-workspace-list → Backlog (pending)
+- [ ] STORY-003-B06-rename-make-default → Backlog (pending)
+- [ ] STORY-003-B07-manual-verification → Backlog (pending)
 
 **References:**
 - Charter: `product_plans/strategy/tee_mo_charter.md` §1.1, §2.6, §5.3, §5.5, §6 (constraints), §10 Dashboard Epic Seed Map

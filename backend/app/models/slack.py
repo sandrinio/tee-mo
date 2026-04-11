@@ -1,8 +1,10 @@
 """Pydantic models for Slack OAuth install flow.
 
 STORY-005A-03 adds ``SlackInstallState`` (state JWT payload).
-STORY-005A-04 will add ``TeamResponse`` and related callback models here.
+STORY-005A-05 adds ``SlackTeamResponse`` (GET /api/slack/teams response shape).
 """
+
+from datetime import datetime
 
 from pydantic import BaseModel
 
@@ -25,3 +27,24 @@ class SlackInstallState(BaseModel):
 
     user_id: str
     exp: int
+
+
+class SlackTeamResponse(BaseModel):
+    """API response shape for a single row in GET /api/slack/teams.
+
+    NEVER include ``encrypted_slack_bot_token`` in this model. Adding it would
+    cause FastAPI's JSON serialization to leak the encrypted bot token to API
+    consumers. The token is encrypted at rest (ADR-002) AND must never appear
+    in any API response (ADR-010). Defense in depth: the DB query also uses
+    explicit-column ``.select(...)`` rather than ``*``, so the column is never
+    fetched at all.
+
+    Fields:
+        slack_team_id:    The Slack workspace/team identifier (e.g. ``"T0123ABC"``).
+        slack_bot_user_id: The bot user ID in that workspace (e.g. ``"UBOT456"``).
+        installed_at:     UTC timestamp of the first install for this team.
+    """
+
+    slack_team_id: str
+    slack_bot_user_id: str
+    installed_at: datetime

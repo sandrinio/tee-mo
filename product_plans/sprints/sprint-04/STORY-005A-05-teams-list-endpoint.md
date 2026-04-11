@@ -172,3 +172,4 @@ async def list_slack_teams(user_id: str = Depends(get_current_user_id)):
 ## Token Usage
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| Developer | 152 | 731 | 883 |

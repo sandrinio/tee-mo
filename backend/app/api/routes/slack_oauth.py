@@ -26,6 +26,7 @@ from app.core.config import get_settings
 from app.core.db import get_supabase
 from app.core.encryption import encrypt
 from app.core.security import create_slack_state_token, verify_slack_state_token
+from app.models.slack import SlackTeamResponse
 
 logger = logging.getLogger(__name__)
 
@@ -209,3 +210,41 @@ async def slack_oauth_callback(
     ).execute()
 
     return RedirectResponse("/app?slack_install=ok", status_code=302)
+
+
+@router.get("/teams")
+async def list_slack_teams(user_id: str = Depends(get_current_user_id)) -> dict:
+    """Return the list of Slack teams owned by the authenticated user.
+
+    Fetches only the three safe columns — ``slack_team_id``, ``slack_bot_user_id``,
+    and ``installed_at`` — from ``teemo_slack_teams``. The ``encrypted_slack_bot_token``
+    column is intentionally excluded from the ``.select(...)`` call so it is never
+    returned from PostgREST, providing defense in depth per ADR-010 on top of the
+    model-level guard in ``SlackTeamResponse``.
+
+    Results are ordered newest ``installed_at`` first for a predictable display order.
+    Empty result is HTTP 200 with ``{"teams": []}`` — NOT 404.
+
+    Args:
+        user_id: Injected by ``get_current_user_id``; raises 401 if missing/invalid.
+
+    Returns:
+        JSON object ``{"teams": [...]}`` where each element matches
+        ``SlackTeamResponse``. The wrapper object is intentional — forward compatible
+        for adding metadata (pagination cursors, total counts) without a breaking
+        API change.
+    """
+    sb = get_supabase()
+    result = (
+        sb.table("teemo_slack_teams")
+        .select("slack_team_id, slack_bot_user_id, installed_at")
+        .eq("owner_user_id", user_id)
+        .order("installed_at", desc=True)
+        .execute()
+    )
+    return {
+        "teams": [
+            SlackTeamResponse(**row).model_dump(mode="json")
+            for row in (result.data or [])
+        ]
+    }

@@ -39,7 +39,7 @@ confirmed_at: "2026-04-12"
 
 | Priority | Story | Epic | Label | V-Bounce State | Blocker |
 |----------|-------|------|-------|----------------|---------|
-| 1 | [STORY-003-01: Multi-stage Dockerfile + same-origin static serving](./STORY-003-01-dockerfile.md) | ADR-026 | L2 | Ready to Bounce | — |
+| 1 | [STORY-003-01: Multi-stage Dockerfile + same-origin static serving](./STORY-003-01-dockerfile.md) | ADR-026 | L2 | Done | — |
 | 2 | [STORY-003-02: Coolify wiring + first auto-deploy](./STORY-003-02-coolify-wiring.md) | ADR-026 | L2 | Ready to Bounce | STORY-003-01 |
 | 3 | [STORY-003-03: Migrations 005 + 006 + 007 + TEEMO_TABLES extension](./STORY-003-03-migrations.md) | EPIC-003 Slice A | L2 | Ready to Bounce | STORY-003-02 |
 | 4 | [STORY-003-04: BUG-20260411 PyJWT fix + regression-lock test](./STORY-003-04-pyjwt-fix.md) | EPIC-002 (maintenance) | L1 | Ready to Bounce | STORY-003-03 |
@@ -253,4 +253,5 @@ Because QA is skipped for all stories, each Dev agent MUST:
 **Aggregate Correction Tax**: —
 
 **Process lessons recorded to FLASHCARDS.md**: —
+| STORY-003-01-dockerfile | Done | 0 | 0 | 5% | Fast Track L2 single-pass. Multi-stage Dockerfile verified locally. Image 962MB. Two legit Starlette 1.0.0 spec deviations (StaticFiles html=True not SPA fallback; HEAD not auto-handled). |
 <!-- EXECUTION_LOG_END -->

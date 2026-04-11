@@ -1,6 +1,6 @@
 ---
-last_updated: "2026-04-11T21:00"
-status: "Planning"
+last_updated: "2026-04-11T23:59"
+status: "In Execution — Release 1 75% delivered (S-01 + S-02 shipped; EPIC-003 pending)"
 charter_ref: "product_plans/strategy/tee_mo_charter.md"
 design_guide_ref: "product_plans/strategy/tee_mo_design_guide.md"
 risk_registry_ref: "product_plans/strategy/RISK_REGISTRY.md"
@@ -45,16 +45,16 @@ risk_registry_ref: "product_plans/strategy/RISK_REGISTRY.md"
 ### Release 1: Foundation (Days 1–2, Sprints 1–4)
 **Target**: 2026-04-12 EOD
 **Exit Criteria**:
-- Repo scaffolded with frontend + backend + Docker + Supabase connection
-- User can register, log in, see empty dashboard
-- Workspace list page renders (create workspace works, no Slack/Drive/BYOK yet)
-- Both servers run locally with one command
+- [x] Repo scaffolded with frontend + backend + Docker + Supabase connection *(S-01)*
+- [x] User can register, log in, see empty dashboard *(S-02 — `/app` placeholder behind `ProtectedRoute`)*
+- [ ] Workspace list page renders (create workspace works, no Slack/Drive/BYOK yet) *(EPIC-003, pending)*
+- [x] Both servers run locally with one command *(S-01 + user-verified acceptance)*
 
 | Epic | Priority | Status | Notes |
 |------|----------|--------|-------|
-| EPIC-001: Project Scaffold & Supabase Schema | P0 | Draft | Bootstraps everything. Bash, Docker, .env.example, DB migrations for users / **slack_teams** / workspaces (with `slack_team_id` FK + `is_default_for_team` + `one_default_per_team` partial unique index) / **workspace_channels** / knowledge_index / skills. See ADR-024. |
-| EPIC-002: Auth (Email + Password + JWT) | P0 | Draft | Copy + strip from new_app. Strip Google OAuth, invite-only, license cap. bcrypt max 72 chars. |
-| EPIC-003: Dashboard Shell + SlackTeam/Workspace CRUD | P0 | Draft | Copy frontend scaffolding, minimal styling. Two-level navigation: **SlackTeam list** (post-Slack-install) → **Workspace list per team** with "New Workspace" CTA. No Slack/Drive/BYOK wiring yet (scaffolding only). Per ADR-024, Slack install is a team-level action and Workspaces are knowledge silos under a team. |
+| EPIC-001: Project Scaffold & Supabase Schema | P0 | **Done (S-01) — partial** | **Delivered in S-01**: FastAPI scaffold + `app/core/config.py` + `app/core/db.py` (cached Supabase singleton) + `GET /api/health` with per-table `teemo_*` aggregate, Vite 8 + React 19 + Tailwind 4 + TanStack Router scaffold, 4 migrations applied (`teemo_users`, `teemo_workspaces`, `teemo_knowledge_index`, `teemo_skills`). **Deferred to EPIC-003**: the 2 ADR-024 tables (`teemo_slack_teams`, `teemo_workspace_channels`) + `teemo_workspaces` ALTERs (`slack_team_id` FK, `is_default_for_team`, `one_default_per_team` partial unique index). These migrations were added to scope AFTER EPIC-001 was originally planned (via the ADR-024 refactor on 2026-04-11) and logically belong with the team/workspace CRUD feature — reassigned. |
+| EPIC-002: Auth (Email + Password + JWT) | P0 | **Done (S-02)** — tagged `v0.2.0-auth` | **Shipped end-to-end**: backend `security.py` (bcrypt + JWT + `validate_password_length` per ADR-017), 5 routes (`/register`, `/login`, `/refresh`, `/logout`, `/me`) with httpOnly cookies (`samesite="lax"` per Sprint Context deviation — recorded in FLASHCARDS.md as safe for EPIC-005/006 OAuth return hops), `get_current_user_id` dependency, frontend Zustand `useAuth` store, 5 typed `lib/api.ts` wrappers, `AuthInitializer`, full UI (`/login`, `/register`, `/app` placeholder, `ProtectedRoute`, `SignOutButton`), enabled landing CTA. 22 backend tests (9 unit + 13 live Supabase integration) + 10 frontend Vitest. Integration audit verdict: SHIP (zero findings). Carries 1 BUG to S-03 backlog (PyJWT test-order flake — production unaffected). |
+| EPIC-003: Dashboard Shell + SlackTeam/Workspace CRUD | P0 | **Next up** — candidate for S-03 / S-04 | Copy frontend scaffolding, minimal styling. Two-level navigation: **SlackTeam list** (post-Slack-install) → **Workspace list per team** with "New Workspace" CTA. No Slack/Drive/BYOK wiring yet (scaffolding only). Per ADR-024, Slack install is a team-level action and Workspaces are knowledge silos under a team. **Scope absorbed from EPIC-001**: the 2 ADR-024 migrations and the `teemo_workspaces` ALTERs now ship with this epic (they are the backing schema for the CRUD surface). **Empty-state shape for S-03**: because EPIC-005 (Slack OAuth) hasn't landed yet, the SlackTeam list must render an empty state with a disabled "Install Slack" CTA; manual/dev-only team creation is the pragmatic unlock to let the Workspace CRUD loop work end-to-end before Slack integration arrives. Replace the STORY-002-04 `/app` placeholder body; keep the route path `/app` stable (STORY-002-04 §R5 noted this explicitly). |
 
 ### Release 2: Core Pipeline (Days 3–6, Sprints 5–12)
 **Target**: 2026-04-16 EOD
@@ -144,7 +144,7 @@ risk_registry_ref: "product_plans/strategy/RISK_REGISTRY.md"
 | Epic | Depends On | Relationship | Status |
 |------|------------|--------------|--------|
 | EPIC-002 (Auth) | EPIC-001 (Scaffold) | Needs Supabase `users` table + FastAPI app | Sequential |
-| EPIC-003 (Dashboard Shell) | EPIC-002 (Auth) | Needs login/register flow + JWT cookies | Sequential |
+| EPIC-003 (Dashboard Shell) | EPIC-002 (Auth) | Needs login/register flow + JWT cookies | **Sequential — EPIC-002 ✅ delivered in S-02; EPIC-003 unblocked** |
 | EPIC-004 (BYOK) | EPIC-002 + EPIC-003 | Needs authenticated user + workspace CRUD | Sequential |
 | EPIC-005 (Slack) | EPIC-003 | Needs `slack_teams` + `workspaces` + `workspace_channels` tables from EPIC-001 and team/workspace CRUD UI from EPIC-003. Bindings depend on Workspace rows existing first. | Sequential |
 | EPIC-006 (Google Drive) | EPIC-003 | Needs Workspace entity (knowledge silo) for `encrypted_google_refresh_token` — each Workspace has its own Drive auth, not shared across a team | Sequential |
@@ -206,3 +206,4 @@ risk_registry_ref: "product_plans/strategy/RISK_REGISTRY.md"
 | 2026-04-11 | Skills feature decided (ADR-023). Chat-only CRUD, `related_tools` stripped, no seeded skills. Folded into EPIC-007 (AI Agent) — no new epic needed. Adds ~2.5 hours of work to the existing critical path. | Claude (doc-manager) |
 | 2026-04-11 | **Workspace model restructured (ADR-024 supersedes ADR-011, ADR-025 new).** New shape: `1 user : N SlackTeams : N Workspaces : N channel bindings`. Slack install is now team-level (new `slack_teams` table); Workspaces are knowledge silos (Drive + BYOK + skills + Drive auth) hanging off a team; channels bind explicitly to Workspaces via new `workspace_channels` table. Channels never fall back to a default — only DMs do. Binding is dashboard-led only (no `member_joined_channel` listener). Impacts: EPIC-001 (3 new/changed tables + partial unique index), EPIC-003 (two-level team→workspace navigation), EPIC-005 (new resolvers, binding REST, `channels:read`+`groups:read` scopes), EPIC-008 (two-phase wizard, channel chips, make-default toggle). Cost estimate: ~30% on top of EPIC-003 + EPIC-005, absorbed into existing sprint budget. S-02 (auth) unaffected. | Claude (doc-manager) |
 | 2026-04-11 | §7 Delivery Log backfilled with S-01 and S-02 entries. Both delivered into D-01 Release 1: Foundation. S-02 tagged v0.2.0-auth. | Team Lead (S-02 close) |
+| 2026-04-11 | **Post-S-02 status sync.** §2 Release 1 exit-criteria checkmarks updated (3/4 complete). EPIC-001 marked `Done (S-01) — partial` with the 2 ADR-024 migrations (`teemo_slack_teams`, `teemo_workspace_channels`) + `teemo_workspaces` ALTERs explicitly reassigned to EPIC-003 (they were added to scope after EPIC-001 was planned and logically belong with team/workspace CRUD). EPIC-002 marked `Done (S-02)` with the `v0.2.0-auth` tag. EPIC-003 marked `Next up` and flagged the empty-state shape required before EPIC-005 lands (manual/dev-only SlackTeam creation as the pragmatic unlock). Frontmatter status: `Planning` → `In Execution — Release 1 75% delivered`. Cross-epic dependency table updated to note EPIC-002 ✅ delivered. | Team Lead (post-S-02 sync) |

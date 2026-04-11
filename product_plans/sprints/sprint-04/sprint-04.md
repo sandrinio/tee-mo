@@ -42,7 +42,7 @@ confirmed_at: "2026-04-12"
 | 3 | [STORY-005A-03: `GET /api/slack/install` Install URL Builder](./STORY-005A-03-install-url-builder.md) | EPIC-005 Phase A | L2 | Done | — |
 | 4 | [STORY-005A-04: `GET /api/slack/oauth/callback` Code Exchange + Encrypt + Upsert](./STORY-005A-04-oauth-callback-upsert.md) | EPIC-005 Phase A | **L3** | Done | STORY-005A-01 + STORY-005A-03 |
 | 5 | [STORY-005A-05: `GET /api/slack/teams` List Endpoint](./STORY-005A-05-teams-list-endpoint.md) | EPIC-005 Phase A | L1 | Done | STORY-005A-04 (model file from 03 + table state from 04) |
-| 6 | [STORY-005A-06: Frontend `/app` Install UI + Flash Banners](./STORY-005A-06-frontend-install-ui.md) | EPIC-005 Phase A | L2 | Refinement | STORY-005A-05 |
+| 6 | [STORY-005A-06: Frontend `/app` Install UI + Flash Banners](./STORY-005A-06-frontend-install-ui.md) | EPIC-005 Phase A | L2 | Done | STORY-005A-05 |
 
 **Complexity mix:** 1× L1, 4× L2, 1× L3 — same shape as the S-03 6-story Fast-Track-only run that closed with 0 bounces and ~0.83% correction tax.
 
@@ -199,7 +199,7 @@ Pulled from Phase A epic §6 + sprint-specific concerns:
 | # | Question | Options | Impact | Owner | Status |
 |---|----------|---------|--------|-------|--------|
 | SQ-1 | If STORY-005A-02 or 005A-03 is QA-bounced, do we still allow the other to merge? | A: Yes — disjoint files, no risk. B: No — block both until both pass. | A is the obvious answer; documenting for explicitness. | Team Lead | **Decided — A** |
-| SQ-2 | If STORY-005A-04 bounces 3+ times, do we de-scope to "deploy with mocked OAuth callback returning fake row" to keep the demo flow visible? | A: De-scope, ship a demo seam. B: Hold the sprint open, no shortcut. | A risks shipping a fake demo. B risks slipping Release 1 by a day. | Done | **Open — escalate at 2 bounces, decide before 3rd** |
+| SQ-2 | If STORY-005A-04 bounces 3+ times, do we de-scope to "deploy with mocked OAuth callback returning fake row" to keep the demo flow visible? | A: De-scope, ship a demo seam. B: Hold the sprint open, no shortcut. | A risks shipping a fake demo. B risks slipping Release 1 by a day. | Solo dev | **Resolved — N/A. 005A-04 merged on first pass with 0 QA + 0 Arch bounces.** |
 | SQ-3 | Who runs the post-merge production smoke test (real OAuth click-through)? | A: Solo dev manually. B: Automated curl in CI. | A is the only viable option for hackathon — no Slack mock in CI. | Solo dev | **Decided — A** |
 
 ---
@@ -215,7 +215,7 @@ Pulled from Phase A epic §6 + sprint-specific concerns:
 | STORY-005A-03 | Done | 0 | 0 | 6 | 5% | Fast Track. 6/6 target + 58/58 full suite (stable 15 runs). Team Lead fixed malformed UUID fixture on line 96 per Step 2c. Flaky pre-existing `test_decode_token_resists_global_options_poison` (BUG-20260411 family) noted; not a regression. |
 | STORY-005A-04 | Done | 0 | 0 | 10 | 0% | **Full Bounce.** 10/10 target + 68/68 full suite. 0 QA + 0 Architect bounces on first pass. 2 flashcards approved (httpx module-level import, Supabase `.upsert()` DEFAULT NOW() exclusion). 5 Phase B risks documented in Architect audit (TOCTOU on different-owner, unvalidated oauth.v2.access response, coalesced missing-field warning, brittle httpx monkeypatch, no retry/resp.status_code check). |
 | STORY-005A-05 | Done | 0 | 0 | 5 | 0% | Fast Track L1. 5/5 target + 73/73 full suite. Explicit-column `.select()` verified; `SlackTeamResponse` model deliberately omits `encrypted_slack_bot_token`; no-ciphertext-in-response assertion passes. |
-| STORY-005A-06 | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ |
+| STORY-005A-06 | Done | 0 | 0 | 9 | 5% | Fast Track L2. 9/9 new frontend tests + 19/19 full frontend suite, `pnpm tsc --noEmit` clean, `pnpm build` clean. Backend unchanged at 73/73. Legitimate scope expansion: added RTL test infrastructure (4 devDeps + new `vitest.config.ts` + `test-setup.ts` + `tsr.config.json` route-ignore) — the frontend had no component testing setup before this story. 3 flashcards flagged for sprint close (vitest@2+vite@8 type conflict fix, RTL auto-cleanup needs globals:true, getByText mixed-text-nodes need span wrapping). |
 <!-- EXECUTION_LOG_END -->
 
 ---

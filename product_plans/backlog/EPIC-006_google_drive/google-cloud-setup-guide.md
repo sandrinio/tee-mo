@@ -79,6 +79,89 @@ http://localhost:8000/api/drive/oauth/callback
 
 ---
 
+## Step 2.5 — OAuth consent screen → Scopes (CRITICAL decision — read carefully)
+
+Go to **OAuth consent screen → Scopes page → Add or Remove Scopes**. This is a separate page from the credential itself — it declares the scope catalog your app is allowed to request at runtime. Google enforces this list.
+
+### The decision: use `drive.file`, NOT `drive.readonly`
+
+This is load-bearing for the hackathon timeline.
+
+| Scope | Google classification | What it grants | Production cost |
+|---|---|---|---|
+| `.../auth/drive.readonly` | **Restricted** | Read all files in the user's Drive | **CASA Tier 2 security assessment required** before leaving testing mode. 2–6 week formal review. |
+| `.../auth/drive.file` | **Non-sensitive** | Read only files the user explicitly selects via Google Picker | **Zero verification required.** Can publish OAuth consent screen to production mode instantly. |
+
+**Tee-Mo uses `drive.file` because:**
+
+1. **Architecturally correct** — Charter §5.3 step 6 says users pick files via Google Picker. We never enumerate the whole Drive. Every file Tee-Mo reads came from a Picker handoff.
+2. **Picker handoff works seamlessly** — `picker.setOAuthToken(accessToken)` makes returned files implicitly accessible under `drive.file`. No extra re-auth.
+3. **Covers every MIME type in ADR-016** — Google Docs/Sheets/Slides exports + PDF/Word/Excel media downloads all work under `drive.file` for picked files. Verified.
+4. **No security review needed** — the hackathon deadline (2026-04-18) is 6 days out. A CASA review would take longer than that.
+5. **Better consent UX** — judges see "access files you choose with Tee-Mo" instead of "access all your Drive files". Trust signal.
+
+### Add these 3 scopes (paste or filter/search for each)
+
+| Scope full URL | Google's label |
+|---|---|
+| `openid` | `openid` (Google adds this by default — confirm it's checked) |
+| `https://www.googleapis.com/auth/userinfo.email` | "See your primary Google Account email address" |
+| `https://www.googleapis.com/auth/drive.file` | "See, edit, create, and delete only the specific Google Drive files you use with this app" |
+
+Click **Update** → **Save and Continue**.
+
+### Do NOT add any of these
+
+- `https://www.googleapis.com/auth/drive` (full read-write) — massive overreach, triggers restricted review
+- `https://www.googleapis.com/auth/drive.readonly` (full read-only) — restricted, multi-week review
+- `https://www.googleapis.com/auth/drive.metadata` — listing metadata across Drive, sensitive, not needed
+- `https://www.googleapis.com/auth/userinfo.profile` — we don't need name/avatar. Less consent friction to omit it.
+- Any `Gmail`, `Calendar`, `Photos`, `YouTube`, `Maps` scopes — none of those are in scope for Tee-Mo
+
+### Verify the goal state
+
+After saving, Google shows a summary at the top of the Scopes page:
+
+```
+Your non-sensitive scopes:
+  - openid
+  - .../userinfo.email
+  - .../drive.file
+
+Your sensitive scopes:
+  (empty)
+
+Your restricted scopes:
+  (empty)
+```
+
+**Both "sensitive" and "restricted" must be empty.** If anything appears in either of those sections, you've accidentally added a scope that requires verification — remove it.
+
+### Consent screen app settings (same page, usually tab 1 "OAuth consent screen")
+
+While you're here, confirm these settings match the Tee-Mo deploy (fill any that are blank):
+
+| Setting | Value |
+|---|---|
+| User type | **External** |
+| App name | `Tee-Mo` |
+| User support email | your email |
+| Developer contact email | your email |
+| Application home page | `https://teemo.soula.ge` (set after S-03 deploys; can be blank for now) |
+| Application privacy policy link | blank (optional in testing mode; required for production publish) |
+| Application terms of service link | blank (same) |
+| Authorized domains | `soula.ge` (no subdomain prefix, no `https://`) |
+| Publishing status | **Testing** |
+| Test users | your Google email + any hackathon judge emails when known |
+
+### Why "Testing" mode is fine for the hackathon
+
+In Testing mode, External apps can be used by up to **100 test users** that you explicitly add. Scopes marked as non-sensitive (all three of ours) work with zero additional review. You can click **Publish App** any time to graduate to production — and because all scopes are non-sensitive, the publish happens instantly with no CASA review.
+
+**If you had chosen `drive.readonly` instead**, publishing would kick off a multi-week security assessment that you cannot complete before 2026-04-18. The `drive.file` choice keeps the production-publish path unblocked.
+
+---
+
 ## Step 3 — Enable the Drive API and Picker API
 
 Go to **Google Cloud Console → APIs & Services → Enabled APIs & services → + ENABLE APIS AND SERVICES**.

@@ -3,14 +3,16 @@
  *
  * Reads the API base URL from the `VITE_API_URL` environment variable at
  * build time (Vite replaces `import.meta.env.*` at bundle time). Falls back
- * to `http://localhost:8000` for local development without an `.env` file.
+ * to `''` (empty string = same origin) for production same-origin deploys
+ * (STORY-003-01). Local dev uses either `VITE_API_URL=http://localhost:8000`
+ * in `frontend/.env` OR the Vite dev-server proxy configured in vite.config.ts.
  *
  * `credentials: 'include'` is set on every request so that session cookies
  * established by future auth stories are forwarded automatically — no change
  * needed at the call site when auth lands in Sprint 2.
  */
 
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
+const API_URL = import.meta.env.VITE_API_URL ?? '';
 
 /**
  * Public user profile returned by the Tee-Mo backend.

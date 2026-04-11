@@ -2,7 +2,7 @@
 sprint_id: "sprint-03"
 sprint_goal: "Land https://teemo.soula.ge as a live Coolify auto-deploy, apply the 3 ADR-024 schema migrations, fix BUG-20260411 (PyJWT test-order flake), and ship the minimal Slack events verification endpoint so EPIC-005 Phase A can start in S-04."
 dates: "2026-04-12"
-status: "Confirmed"
+status: "Active"
 delivery: "D-01 (Release 1: Foundation + Deploy + Slack Install)"
 confirmed_by: "Solo dev (user)"
 confirmed_at: "2026-04-12"
@@ -39,11 +39,11 @@ confirmed_at: "2026-04-12"
 
 | Priority | Story | Epic | Label | V-Bounce State | Blocker |
 |----------|-------|------|-------|----------------|---------|
-| 1 | [STORY-003-01: Multi-stage Dockerfile + same-origin static serving](./STORY-003-01-dockerfile.md) | ADR-026 | L2 | Ready to Bounce | — |
-| 2 | [STORY-003-02: Coolify wiring + first auto-deploy](./STORY-003-02-coolify-wiring.md) | ADR-026 | L2 | Ready to Bounce | STORY-003-01 |
-| 3 | [STORY-003-03: Migrations 005 + 006 + 007 + TEEMO_TABLES extension](./STORY-003-03-migrations.md) | EPIC-003 Slice A | L2 | Ready to Bounce | STORY-003-02 |
-| 4 | [STORY-003-04: BUG-20260411 PyJWT fix + regression-lock test](./STORY-003-04-pyjwt-fix.md) | EPIC-002 (maintenance) | L1 | Ready to Bounce | STORY-003-03 |
-| 5 | [STORY-003-05: Slack events verification stub endpoint](./STORY-003-05-slack-events-stub.md) | EPIC-005 Phase A prep | L1 | Ready to Bounce | STORY-003-04 |
+| 1 | [STORY-003-01: Multi-stage Dockerfile + same-origin static serving](./STORY-003-01-dockerfile.md) | ADR-026 | L2 | Done | — |
+| 2 | [STORY-003-02: Coolify wiring + first auto-deploy](./STORY-003-02-coolify-wiring.md) | ADR-026 | L2 | Done | STORY-003-01 |
+| 3 | [STORY-003-03: Migrations 005 + 006 + 007 + TEEMO_TABLES extension](./STORY-003-03-migrations.md) | EPIC-003 Slice A | L2 | Done | STORY-003-02 |
+| 4 | [STORY-003-04: BUG-20260411 PyJWT fix + regression-lock test](./STORY-003-04-pyjwt-fix.md) | EPIC-002 (maintenance) | L1 | Done | STORY-003-03 |
+| 5 | [STORY-003-05: Slack events verification stub endpoint](./STORY-003-05-slack-events-stub.md) | EPIC-005 Phase A prep | L1 | Done | STORY-003-04 |
 | 6 | [STORY-003-06: Production deploy verification + Slack setup Step 5 unblock](./STORY-003-06-deploy-verification.md) | ADR-026 | L1 (manual) | Ready to Bounce | STORY-003-05 |
 
 ### Story Summaries
@@ -243,7 +243,7 @@ Because QA is skipped for all stories, each Dev agent MUST:
 
 | Story | Final State | QA Bounces | Arch Bounces | Tests Written | Correction Tax | Notes |
 |-------|-------------|------------|--------------|---------------|----------------|-------|
-| STORY-003-01 | — | — | — | — | — | Not yet started |
+| STORY-003-01 | Done | 0 | 0 | 0 | 5% | Fast Track L2 single-pass. Multi-stage Dockerfile verified locally. Image 962MB. Two legit Starlette 1.0.0 spec deviations (StaticFiles html=True not SPA fallback; HEAD not auto-handled). |
 | STORY-003-02 | — | — | — | — | — | Not yet started |
 | STORY-003-03 | — | — | — | — | — | Not yet started |
 | STORY-003-04 | — | — | — | — | — | Not yet started |
@@ -253,4 +253,8 @@ Because QA is skipped for all stories, each Dev agent MUST:
 **Aggregate Correction Tax**: —
 
 **Process lessons recorded to FLASHCARDS.md**: —
+| STORY-003-02-coolify-wiring | Done | 0 | 0 | 0% | Fast Track L2 single-pass. Runbook-only. Live deploy verification deferred to STORY-003-06 at sprint close. User action pending: follow coolify-setup-steps.md Steps 1-4 in Coolify UI. |
+| STORY-003-03-migrations | Done | 0 | 0 | 0% | Fast Track L2. 3 SQL migrations + TEEMO_TABLES + health test update. 31 hermetic tests pass. User action pending: run SQL in Supabase editor. |
+| STORY-003-04-pyjwt-fix | Done | 0 | 0 | 0% | Fast Track L1. decode_token → scoped PyJWT() instance. 33/33 tests + 10-run stability loop green. BUG-20260411 Fixed. |
+| STORY-003-05-slack-events-stub | Done | 0 | 0 | 0% | Fast Track L1. /api/slack/events stub handles url_verification. 36/36 tests green. Unblocks Slack app setup Steps 5-7 after deploy. |
 <!-- EXECUTION_LOG_END -->

@@ -22,8 +22,16 @@ from uuid import UUID
 
 import bcrypt
 import jwt
+from jwt.api_jwt import PyJWT
 
 from app.core.config import settings
+
+# Module-local PyJWT instance — isolates our decode path from any global
+# mutation of jwt.api_jwt._jwt_global_obj (BUG-20260411). A permissive
+# jwt.decode(..., options={"verify_signature": False}) elsewhere in the
+# process mutates module-level state and can leak into jwt.decode here;
+# using a dedicated instance avoids that shared-options footgun.
+_JWT = PyJWT()
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +145,7 @@ def decode_token(token: str) -> dict:
     Returns:
         The decoded payload as a dict.
     """
-    return jwt.decode(
+    return _JWT.decode(
         token,
         settings.supabase_jwt_secret,
         algorithms=[settings.jwt_algorithm],

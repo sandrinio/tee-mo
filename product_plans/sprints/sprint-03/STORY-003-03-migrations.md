@@ -474,3 +474,4 @@ def test_health_reports_all_six_teemo_tables():
 
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| Developer | 17 | 980 | 997 |

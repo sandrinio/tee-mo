@@ -183,3 +183,40 @@ def test_validate_password_length_counts_utf8_bytes():
     # 36 ASCII bytes + 38 bytes of "é" (19 × 2) = 74 bytes — reject
     with pytest.raises(ValueError, match="password_too_long"):
         validate_password_length("a" * 36 + "é" * 19)
+
+
+def test_decode_token_resists_global_options_poison():
+    """
+    Regression lock for BUG-20260411: PyJWT module-level options leak.
+
+    Some test paths call jwt.decode(options={"verify_signature": False}) which
+    mutates module-level PyJWT state. If decode_token uses the module-level
+    jwt.decode, the mutation leaks in and tampered tokens slip through.
+
+    decode_token must use a dedicated jwt.PyJWT() instance so it is isolated
+    from the global mutation. This test verifies the isolation.
+    """
+    import jwt as jwt_module
+
+    # Step 1: build a tampered token
+    token = create_access_token(uuid4())
+    head, body, sig = token.split(".")
+    flipped = "A" if sig[-1] != "A" else "B"
+    tampered = f"{head}.{body}.{sig[:-1]}{flipped}"
+
+    # Step 2: poison module-level PyJWT state by calling the module-level
+    # jwt.decode with verify_signature=False. This mirrors the exact mutation
+    # pattern observed during S-02 post-merge validation.
+    try:
+        jwt_module.decode(
+            token,
+            options={"verify_signature": False},
+            algorithms=[settings.jwt_algorithm],
+        )
+    except Exception:
+        pass  # We don't care whether this raises; we only care about the side effect.
+
+    # Step 3: decode_token MUST still reject the tampered token despite the
+    # poisoned global state. This is the isolation guarantee.
+    with pytest.raises(jwt_module.InvalidTokenError):
+        decode_token(tampered)

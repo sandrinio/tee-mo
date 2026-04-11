@@ -61,3 +61,6 @@ pnpm-debug.log*
 coverage/
 *.lcov
 .nyc_output/
+
+# Branding source assets at repo root — not to be bundled
+teemo-icon-*.png

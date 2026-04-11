@@ -1,10 +1,11 @@
 ---
 bug_id: "BUG-20260411-pyjwt-test-ordering"
-status: "Open"
+status: "Fixed"
 severity: "Low"
 found_during: "Sprint S-02 — STORY-002-04 post-merge validation and S-02 Integration Audit"
 affected_story: "STORY-002-01-security_primitives (test_security.py) and/or STORY-002-02-auth_routes (test_auth_routes.py)"
 reporter: "DevOps agent + Architect integration audit"
+fixed_in: "STORY-003-04 (Sprint S-03)"
 ---
 
 # BUG: PyJWT module-level options leak causes test-order-dependent failure in `test_decode_token_rejects_tampered_signature`
@@ -94,8 +95,25 @@ PyJWT 2.x stores its default decode options on a module-level singleton (`jwt.ap
 
 ---
 
+## Resolution (2026-04-12 — STORY-003-04)
+
+Migrated `backend/app/core/security.py::decode_token` to use a module-local
+`jwt.PyJWT()` instance via `from jwt.api_jwt import PyJWT; _JWT = PyJWT()`.
+The decode path is now isolated from any global mutation of
+`jwt.api_jwt._jwt_global_obj.options` elsewhere in the process.
+
+Added `test_decode_token_resists_global_options_poison` regression-lock test
+in `backend/tests/test_security.py` that explicitly poisons module-level PyJWT
+options before calling `decode_token` on a tampered token, and asserts the
+tampered token is still rejected.
+
+Verification: `pytest tests/` passed 10 consecutive runs with the full backend
+suite (33 tests: 13 auth routes + 1 health + 9 health_db + 9 security + 1 new
+regression-lock), no explicit ordering required.
+
 ## Change Log
 
 | Date | Change | By |
 |------|--------|-----|
 | 2026-04-11 | BUG filed at S-02 close. Workaround (explicit test ordering) in place for sprint/S-02 and main post-release. Queued for S-03 planning. | Team Lead |
+| 2026-04-12 | Fixed in STORY-003-04 (Sprint S-03). `decode_token` migrated to `_JWT = PyJWT()` instance. Regression-lock test added. 10-run stability verified. | Developer agent |

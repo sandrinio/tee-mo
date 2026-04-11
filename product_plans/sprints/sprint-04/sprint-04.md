@@ -40,7 +40,7 @@ confirmed_at: "2026-04-12"
 | 1 | [STORY-005A-01: Slack Bootstrap (encryption + config + slack.py)](./STORY-005A-01-slack-bootstrap.md) | EPIC-005 Phase A | L2 | Done | — |
 | 2 | [STORY-005A-02: `/api/slack/events` Signing-Secret Verification](./STORY-005A-02-events-signing-verification.md) | EPIC-005 Phase A | L2 | Done | STORY-005A-01 |
 | 3 | [STORY-005A-03: `GET /api/slack/install` Install URL Builder](./STORY-005A-03-install-url-builder.md) | EPIC-005 Phase A | L2 | Done | — |
-| 4 | [STORY-005A-04: `GET /api/slack/oauth/callback` Code Exchange + Encrypt + Upsert](./STORY-005A-04-oauth-callback-upsert.md) | EPIC-005 Phase A | **L3** | Refinement | STORY-005A-01 + STORY-005A-03 |
+| 4 | [STORY-005A-04: `GET /api/slack/oauth/callback` Code Exchange + Encrypt + Upsert](./STORY-005A-04-oauth-callback-upsert.md) | EPIC-005 Phase A | **L3** | Done | STORY-005A-01 + STORY-005A-03 |
 | 5 | [STORY-005A-05: `GET /api/slack/teams` List Endpoint](./STORY-005A-05-teams-list-endpoint.md) | EPIC-005 Phase A | L1 | Refinement | STORY-005A-04 (model file from 03 + table state from 04) |
 | 6 | [STORY-005A-06: Frontend `/app` Install UI + Flash Banners](./STORY-005A-06-frontend-install-ui.md) | EPIC-005 Phase A | L2 | Refinement | STORY-005A-05 |
 
@@ -199,7 +199,7 @@ Pulled from Phase A epic §6 + sprint-specific concerns:
 | # | Question | Options | Impact | Owner | Status |
 |---|----------|---------|--------|-------|--------|
 | SQ-1 | If STORY-005A-02 or 005A-03 is QA-bounced, do we still allow the other to merge? | A: Yes — disjoint files, no risk. B: No — block both until both pass. | A is the obvious answer; documenting for explicitness. | Team Lead | **Decided — A** |
-| SQ-2 | If STORY-005A-04 bounces 3+ times, do we de-scope to "deploy with mocked OAuth callback returning fake row" to keep the demo flow visible? | A: De-scope, ship a demo seam. B: Hold the sprint open, no shortcut. | A risks shipping a fake demo. B risks slipping Release 1 by a day. | Solo dev | **Open — escalate at 2 bounces, decide before 3rd** |
+| SQ-2 | If STORY-005A-04 bounces 3+ times, do we de-scope to "deploy with mocked OAuth callback returning fake row" to keep the demo flow visible? | A: De-scope, ship a demo seam. B: Hold the sprint open, no shortcut. | A risks shipping a fake demo. B risks slipping Release 1 by a day. | Done | **Open — escalate at 2 bounces, decide before 3rd** |
 | SQ-3 | Who runs the post-merge production smoke test (real OAuth click-through)? | A: Solo dev manually. B: Automated curl in CI. | A is the only viable option for hackathon — no Slack mock in CI. | Solo dev | **Decided — A** |
 
 ---
@@ -213,7 +213,7 @@ Pulled from Phase A epic §6 + sprint-specific concerns:
 | STORY-005A-01 | Done | 0 | 0 | 8 | 5% | Fast Track. 8/8 target + 44/44 full suite. Two skeleton fixes in Green: base64url padding, AsyncApp `request_verification_enabled`. Fingerprint `aecf7b12` matches. |
 | STORY-005A-02 | Done | 0 | 0 | 8 | 0% | Fast Track. 8 new tests + 3 stub tests updated to carry valid signatures (intended behavior change). 52/52 full suite. Flashcards: bare `Response(400)` replaces old JSON body on malformed-JSON path — document in vdoc. |
 | STORY-005A-03 | Done | 0 | 0 | 6 | 5% | Fast Track. 6/6 target + 58/58 full suite (stable 15 runs). Team Lead fixed malformed UUID fixture on line 96 per Step 2c. Flaky pre-existing `test_decode_token_resists_global_options_poison` (BUG-20260411 family) noted; not a regression. |
-| STORY-005A-04 | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ |
+| STORY-005A-04 | Done | 0 | 0 | 10 | 0% | **Full Bounce.** 10/10 target + 68/68 full suite. 0 QA + 0 Architect bounces on first pass. 2 flashcards approved (httpx module-level import, Supabase `.upsert()` DEFAULT NOW() exclusion). 5 Phase B risks documented in Architect audit (TOCTOU on different-owner, unvalidated oauth.v2.access response, coalesced missing-field warning, brittle httpx monkeypatch, no retry/resp.status_code check). |
 | STORY-005A-05 | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ |
 | STORY-005A-06 | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ |
 <!-- EXECUTION_LOG_END -->

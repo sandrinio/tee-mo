@@ -334,3 +334,4 @@ Prefer the optional variant — cleaner separation.
 |-------|-------|--------|-------|
 | Developer | 1,046 | 599 | 1,645 |
 | QA | 16 | 341 | 357 |
+| DevOps | 17 | 446 | 463 |

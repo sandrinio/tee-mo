@@ -11,10 +11,9 @@
  *               (amber) Badge for the overall backend if `status === "degraded"`.
  *   - Error    — `danger` Badge "error"; all table rows show "unreachable".
  *
- * The "Continue" Button is always rendered but always `disabled` in Sprint 1.
- * It becomes interactive when auth lands in Sprint 2.
+ * The "Continue to login" Button links to `/login` (enabled in Sprint 2, STORY-002-04).
  */
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '../lib/api';
 import { Card } from '../components/ui/Card';
@@ -111,9 +110,11 @@ function Landing() {
         )}
       </Card>
 
-      {/* CTA — disabled until auth lands in Sprint 2 */}
+      {/* CTA — enabled in Sprint 2 (STORY-002-04). */}
       <div className="mt-6">
-        <Button variant="primary" disabled>Continue</Button>
+        <Link to="/login">
+          <Button variant="primary">Continue to login</Button>
+        </Link>
       </div>
     </main>
   );

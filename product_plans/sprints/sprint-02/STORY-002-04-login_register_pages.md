@@ -536,3 +536,4 @@ This story consumes the API contracts defined in STORY-002-02 §3.4 via the wrap
 
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| Developer | 2,543 | 2,815 | 5,358 |

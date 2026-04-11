@@ -36,7 +36,7 @@ confirmed_at: "2026-04-11"
 |----------|-------|------|-------|----------------|---------|
 | 1 | [STORY-002-01: Backend Security Primitives + bcrypt Guard](./STORY-002-01-security_primitives.md) | EPIC-002 | L1 | Done | — |
 | 2 | [STORY-002-02: Auth Routes + Cookies + `get_current_user_id`](./STORY-002-02-auth_routes.md) | EPIC-002 | L2 | Done | STORY-002-01 |
-| 3 | [STORY-002-03: Frontend Auth Store + API Client + AuthInitializer](./STORY-002-03-auth_store.md) | EPIC-002 | L2 | Ready to Bounce | STORY-002-02 |
+| 3 | [STORY-002-03: Frontend Auth Store + API Client + AuthInitializer](./STORY-002-03-auth_store.md) | EPIC-002 | L2 | Done | STORY-002-02 |
 | 4 | [STORY-002-04: Login + Register Pages + ProtectedRoute + /app Placeholder](./STORY-002-04-login_register_pages.md) | EPIC-002 | L2 | Ready to Bounce | STORY-002-03 |
 
 ### Story Summaries
@@ -217,4 +217,5 @@ Each story unblocks the next because the artifacts it produces are direct import
 **Process lessons recorded to FLASHCARDS.md**: —
 | STORY-002-01-security_primitives | Done | 0 | 0 | 0% | Fast Track L1. 9/9 tests green first try. Strip audit clean. |
 | STORY-002-02-auth_routes | Done | 0 | 0 | 5% | Fast Track L2. 13/13 live Supabase tests green. LaxEmailStr workaround for email-validator 2.x .test TLD rejection. DEBUG=true added to .env. |
+| STORY-002-03-auth_store | Done | 0 | 0 | 5% | Fast Track L2. 10/10 Vitest store tests green. Lazy dynamic import workaround for Vitest 2.x vi.mock hoisting TDZ. Fixed two S-01 scaffold gaps (vite-env.d.ts, tsconfig.node.json skipLibCheck). Vitest 2.1.9 first use in Tee-Mo. |
 <!-- EXECUTION_LOG_END -->

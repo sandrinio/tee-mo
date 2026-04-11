@@ -34,7 +34,7 @@ confirmed_at: "2026-04-11"
 
 | Priority | Story | Epic | Label | V-Bounce State | Blocker |
 |----------|-------|------|-------|----------------|---------|
-| 1 | [STORY-002-01: Backend Security Primitives + bcrypt Guard](./STORY-002-01-security_primitives.md) | EPIC-002 | L1 | Ready to Bounce | — |
+| 1 | [STORY-002-01: Backend Security Primitives + bcrypt Guard](./STORY-002-01-security_primitives.md) | EPIC-002 | L1 | Done | — |
 | 2 | [STORY-002-02: Auth Routes + Cookies + `get_current_user_id`](./STORY-002-02-auth_routes.md) | EPIC-002 | L2 | Ready to Bounce | STORY-002-01 |
 | 3 | [STORY-002-03: Frontend Auth Store + API Client + AuthInitializer](./STORY-002-03-auth_store.md) | EPIC-002 | L2 | Ready to Bounce | STORY-002-02 |
 | 4 | [STORY-002-04: Login + Register Pages + ProtectedRoute + /app Placeholder](./STORY-002-04-login_register_pages.md) | EPIC-002 | L2 | Ready to Bounce | STORY-002-03 |
@@ -215,4 +215,5 @@ Each story unblocks the next because the artifacts it produces are direct import
 **Aggregate Correction Tax**: —
 
 **Process lessons recorded to FLASHCARDS.md**: —
+| STORY-002-01-security_primitives | Done | 0 | 0 | 0% | Fast Track L1. 9/9 tests green first try. Strip audit clean. |
 <!-- EXECUTION_LOG_END -->

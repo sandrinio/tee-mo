@@ -3,6 +3,7 @@ state.json
 install-meta.json
 backups/
 reports/
+tasks/
 gate-checks.json
 sprint-context-*
 qa-context-*

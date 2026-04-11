@@ -208,3 +208,5 @@ async def slack_events(request: Request):
 ## Token Usage
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| Developer | 25 | 2,199 | 2,224 |
+| Developer | 15 | 1,246 | 1,261 |

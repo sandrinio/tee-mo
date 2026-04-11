@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     supabase_service_role_key: str
     supabase_jwt_secret: str
 
+    # JWT settings — ADR-001 + Roadmap §3
+    access_token_expire_minutes: int = 15
+    refresh_token_expire_days: int = 7
+    jwt_algorithm: str = "HS256"
+
     def cors_origins_list(self) -> list[str]:
         """
         Parse the comma-separated ``cors_origins`` string into a list.

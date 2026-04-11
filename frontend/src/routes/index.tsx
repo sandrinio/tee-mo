@@ -75,9 +75,9 @@ function Landing() {
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-16">
-      {/* Brand swatch + heading — preserved from STORY-001-03 */}
+      {/* Brand logo + heading */}
       <div className="flex items-center gap-4">
-        <div className="h-10 w-10 rounded-md bg-brand-500" aria-hidden="true" />
+        <img src="/favicon.svg" alt="Tee-Mo Logo" className="h-12 w-12" />
         <h1 className="text-4xl font-semibold tracking-tight text-slate-900">Tee-Mo</h1>
       </div>
       <p className="mt-3 text-base text-slate-500">Your BYOK Slack assistant.</p>

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
+    <!-- Knowledge Stem (Background / Foundation - brand-700) -->
+    <rect x="46" y="41" width="28" height="60" rx="14" fill="#BE123C" />
+    
+    <!-- User Intent / Slack Context (Middle layer - brand-600) -->
+    <rect x="18" y="19" width="46" height="28" rx="14" fill="#E11D48" />
+    
+    <!-- Tee-Mo AI Engine (Foreground / Core Brand Accent - brand-500) -->
+    <rect x="56" y="19" width="46" height="28" rx="14" fill="#F43F5E" />
+</svg>

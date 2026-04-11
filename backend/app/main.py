@@ -4,8 +4,9 @@ Tee-Mo FastAPI application entry point.
 Creates the FastAPI ``app`` instance, registers CORS middleware using origins
 from ``settings.cors_origins_list()``, and exposes the health-check route.
 
-The health endpoint checks all four ``teemo_*`` tables (STORY-001-02) and
-returns a structured response indicating per-table reachability.
+The health endpoint checks all six ``teemo_*`` tables (STORY-001-02,
+STORY-003-03) and returns a structured response indicating per-table
+reachability.
 
 In production (Docker/Coolify), the Vite-built frontend is served from
 ``/app/static/`` via FastAPI's StaticFiles with SPA fallback (STORY-003-01).
@@ -45,7 +46,16 @@ app.include_router(auth_router)
 
 # Canonical list of Tee-Mo tables — all must be reachable for status "ok".
 # The teemo_ prefix is non-negotiable: this is a shared Supabase instance.
-TEEMO_TABLES = ("teemo_users", "teemo_workspaces", "teemo_knowledge_index", "teemo_skills")
+# Extended in STORY-003-03 per ADR-024: added teemo_slack_teams (migration 005)
+# and teemo_workspace_channels (migration 006).
+TEEMO_TABLES = (
+    "teemo_users",
+    "teemo_workspaces",
+    "teemo_knowledge_index",
+    "teemo_skills",
+    "teemo_slack_teams",
+    "teemo_workspace_channels",
+)
 
 
 def _check_table(table: str) -> str:

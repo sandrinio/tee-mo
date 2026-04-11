@@ -15,6 +15,7 @@ Usage (from ``backend/`` directory)::
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.routes.auth import router as auth_router
 from app.core.config import settings
 from app.core.db import get_supabase
 
@@ -31,6 +32,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(auth_router)
 
 # Canonical list of Tee-Mo tables — all must be reachable for status "ok".
 # The teemo_ prefix is non-negotiable: this is a shared Supabase instance.

@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "echo 'No tests yet — see story acceptance criteria'"
+    "test": "vitest run"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.6",
@@ -29,6 +29,7 @@
     "@vitejs/plugin-react": "^6.0.1",
     "tailwindcss": "^4.2.0",
     "typescript": "^5.8.3",
-    "vite": "^8.0.8"
+    "vite": "^8.0.8",
+    "vitest": "^2.1.9"
   }
 }

@@ -16,3 +16,4 @@ context-packs/
 
 # Archive is committed (audit trail)
 !archive/
+!archive/**

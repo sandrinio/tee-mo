@@ -1,5 +1,5 @@
 ---
-last_updated: "2026-04-11"
+last_updated: "2026-04-11T21:00"
 status: "Planning"
 charter_ref: "product_plans/strategy/tee_mo_charter.md"
 design_guide_ref: "product_plans/strategy/tee_mo_design_guide.md"
@@ -52,9 +52,9 @@ risk_registry_ref: "product_plans/strategy/RISK_REGISTRY.md"
 
 | Epic | Priority | Status | Notes |
 |------|----------|--------|-------|
-| EPIC-001: Project Scaffold & Supabase Schema | P0 | Draft | Bootstraps everything. Bash, Docker, .env.example, DB migrations for users/workspaces/knowledge_index. |
+| EPIC-001: Project Scaffold & Supabase Schema | P0 | Draft | Bootstraps everything. Bash, Docker, .env.example, DB migrations for users / **slack_teams** / workspaces (with `slack_team_id` FK + `is_default_for_team` + `one_default_per_team` partial unique index) / **workspace_channels** / knowledge_index / skills. See ADR-024. |
 | EPIC-002: Auth (Email + Password + JWT) | P0 | Draft | Copy + strip from new_app. Strip Google OAuth, invite-only, license cap. bcrypt max 72 chars. |
-| EPIC-003: Dashboard Shell + Workspace CRUD | P0 | Draft | Copy frontend scaffolding, minimal styling. List + create workspace. No Slack/Drive/BYOK yet. |
+| EPIC-003: Dashboard Shell + SlackTeam/Workspace CRUD | P0 | Draft | Copy frontend scaffolding, minimal styling. Two-level navigation: **SlackTeam list** (post-Slack-install) → **Workspace list per team** with "New Workspace" CTA. No Slack/Drive/BYOK wiring yet (scaffolding only). Per ADR-024, Slack install is a team-level action and Workspaces are knowledge silos under a team. |
 
 ### Release 2: Core Pipeline (Days 3–6, Sprints 5–12)
 **Target**: 2026-04-16 EOD
@@ -69,7 +69,7 @@ risk_registry_ref: "product_plans/strategy/RISK_REGISTRY.md"
 | Epic | Priority | Status | Notes |
 |------|----------|--------|-------|
 | EPIC-004: BYOK Key Management | P0 | Draft | Copy + strip from new_app. One key per provider. Hard gate for file indexing. |
-| EPIC-005: Slack Integration (OAuth + Events) | P0 | Draft | Slack Bolt AsyncApp. OAuth install, `app_mention` only, thread reply via `thread_ts`. Encrypted bot token. |
+| EPIC-005: Slack Integration (OAuth + Events + Bindings) | P0 | Draft | Slack Bolt AsyncApp. OAuth install writes `slack_teams`. Event handlers: `app_mention` resolves via `workspace_channels` (unbound → setup-nudge reply, no fallback), `message.im` resolves via `is_default_for_team`. Channel binding REST (`GET /api/slack/teams/:id/channels`, `POST/DELETE /api/workspaces/:id/channels`, `POST /api/workspaces/:id/make-default`). Scopes: `app_mentions:read`, `channels:history`, `groups:history`, `im:history`, `chat:write`, **`channels:read`**, **`groups:read`**. See ADR-024 + ADR-025. |
 | EPIC-006: Google Drive Integration | P0 | Draft | Offline refresh token OAuth, Google Picker, knowledge_index CRUD, `read_drive_file` tool with MIME routing (Docs/Sheets/Slides/PDF/Word/Excel). |
 | EPIC-007: AI Agent + Two-Tier Models + Skills | P0 | Draft | Copy + strip orchestrator. `build_agent(tier)` factory. `scan_file_metadata` service. Self-updating `ai_description` via content hash check. Skills: `skills` table + `skill_service.py` (copy + strip from new_app) + 4 orchestrator tools (`load_skill`, `create_skill`, `update_skill`, `delete_skill`) — no `related_tools`, no seeded skills. Chat-only CRUD. |
 
@@ -85,7 +85,7 @@ risk_registry_ref: "product_plans/strategy/RISK_REGISTRY.md"
 
 | Epic | Priority | Status | Notes |
 |------|----------|--------|-------|
-| EPIC-008: Workspace Setup Wizard Polish | P0 | Draft | 4-step flow: Slack → Drive → BYOK → Files. Minimalistic modern Tailwind design. |
+| EPIC-008: Workspace Setup Wizard Polish | P0 | Draft | Two-phase flow per ADR-024: **Phase A** (team install, one-time per team) = Slack OAuth. **Phase B** (per knowledge silo, repeatable) = name → Drive OAuth → BYOK → Drive files → bind Slack channels. Workspace card renders channel chips with Active / Pending /invite status, **Make default** toggle, **📨 DMs route here** badge on the default. Minimalistic modern Tailwind design per `tee_mo_design_guide.md`. |
 | EPIC-009: Error Handling & UX Polish | P0 | Draft | All Charter §6 edge cases wired to user-facing errors with clear messages. |
 | EPIC-010: Demo Hardening & Deploy | P0 | Draft | Seed data, public HTTPS endpoint, README, demo script. |
 
@@ -107,7 +107,7 @@ risk_registry_ref: "product_plans/strategy/RISK_REGISTRY.md"
 | ADR-008 | Slack Event Scope | `app_mention` only — NO `message.channels` | Avoid running AI on every message. All replies posted in originating thread via `thread_ts`. | **Superseded by ADR-021** | 2026-04-10 |
 | ADR-009 | Google Drive Backend Auth | Offline refresh token (one-time OAuth during workspace setup) | Simpler UX than Service Account file-sharing. Backend exchanges refresh → short-lived access token per call. | Decided | 2026-04-10 |
 | ADR-010 | Slack Bot Token Storage | Encrypted at rest with AES-256-GCM (field: `encrypted_slack_bot_token`) | Token has full bot permissions. Cannot be plaintext. Same primitive as BYOK and Drive tokens. | Decided | 2026-04-10 |
-| ADR-011 | Multi-Workspace per User | Supported from day 1, both schema and UI | Low marginal cost. Avoids painful later migration. Each workspace has independent Slack/BYOK/Drive config. | Decided | 2026-04-10 |
+| ADR-011 | Multi-Workspace per User | Supported from day 1, both schema and UI | Low marginal cost. Avoids painful later migration. Each workspace has independent Slack/BYOK/Drive config. | **Superseded by ADR-024** | 2026-04-10 |
 | ADR-012 | Copy-Then-Optimize from `new_app` | Auth, BYOK, Orchestrator directly copied and stripped | Saves estimated 4+ sprints vs writing from scratch. Strip scopes documented in Charter §3.3 + §10 Epic Seed Map. | Decided | 2026-04-10 |
 | ADR-013 | Slack Response Mode | Post full reply via `chat.postMessage` (no streaming) | Simpler than `chat.update` polling. Streaming is v2 concern. | Decided | 2026-04-10 |
 | ADR-014 | Frontend Stack | React 19 + Tailwind 4 + Vite 8 + TanStack Router + TanStack Query + Zustand | Matches new_app; enables maximum copy-reuse of auth components. | Decided | 2026-04-11 |
@@ -120,6 +120,8 @@ risk_registry_ref: "product_plans/strategy/RISK_REGISTRY.md"
 | ADR-021 | Slack Event Scope (supersedes ADR-008) | `app_mention` (channels) + `message.im` (DMs). NO `message.channels`. Self-message filter required on `message.im`. Replies always threaded via `thread_ts`. | Supports both public channel Q&A and private 1:1 assistant use. DMs require self-message filter to prevent bot reply loops. Requires `slack_bot_user_id` stored at install time. | Decided | 2026-04-11 |
 | ADR-022 | Design System | Asana-inspired warm minimalism. Coral brand (`#F43F5E`), slate neutrals, Inter + JetBrains Mono, Tailwind 4 CSS-first, Radix primitives + Lucide icons. No shadcn, no MUI, no Framer Motion. Full spec in `tee_mo_design_guide.md`. | Matches Charter §2.6 minimalistic modern UI principle. Zero dependency on heavy UI frameworks. Implementable in ~1 sprint. | Decided | 2026-04-11 |
 | ADR-023 | Skills Architecture | Copy new_app `skill_service.py` + 4 orchestrator tools, stripped. Simplified schema: `id, workspace_id, name, summary, instructions, is_active, created_at, updated_at`. NO `related_tools` (Tee-Mo has one tool). NO `is_system` (no seeded skills). NO REST endpoints or dashboard UI — chat-only CRUD. L1 catalog auto-injected into conversation-tier system prompt every turn. | Enables live "teach the bot" demo — a killer hackathon moment. Chat-only avoids 1+ sprint of dashboard work. Stripping `related_tools` keeps tools simple. No seed skills avoids tuning work. | Decided | 2026-04-11 |
+| ADR-024 | Workspace Model (supersedes ADR-011) | Shape is `1 user : N SlackTeams : N Workspaces : N channel bindings`. New `slack_teams` table holds one row per Slack install (team_id, bot user, encrypted bot token). `workspaces` table is now a **knowledge silo** (Drive + BYOK + skills + Drive auth) with a `slack_team_id` FK and `is_default_for_team` flag. New `workspace_channels` table binds Slack channels to Workspaces (PK `slack_channel_id` — a channel is owned by at most one Workspace globally). Partial unique index `one_default_per_team` enforces exactly one default Workspace per SlackTeam. | Lets one user run many isolated knowledge silos under the same Slack install (e.g., Marketing brain for `#marketing`, Engineering brain for `#eng`) without re-installing the bot and without leaking data across channels. Separating team install from silo creation also removes duplication of the encrypted bot token. Charter §4 + §5.3 + §5.5 + §10 Slack Epic + §10 Dashboard Epic updated. | Decided | 2026-04-11 |
+| ADR-025 | Explicit Channel Binding (no silent fallback) | A channel must have an explicit `workspace_channels` row to get AI replies. `app_mention` in an unbound channel → bot posts a one-line in-thread reply with a setup link to the dashboard (channel+team pre-filled) and stops. No listener on `member_joined_channel`, no proactive messages, no auto-join. Only `message.im` (DMs) consults the team's default Workspace. Binding UI is the dashboard channel picker (`conversations.list`). Channel status is shown as **Active** (bound + `is_member=true`) or **Pending /invite** (bound + `is_member=false`). Scopes added: `channels:read`, `groups:read`. | Avoids two footguns: (a) silently using the wrong knowledge base for a channel just because a default exists, (b) the bot posting unsolicited welcome messages when invited. Makes the "which channel uses which brain" answer explicit in the DB rather than implicit in fallback logic. Charter §5.5 + §6 + §10 Slack Epic. | Decided | 2026-04-11 |
 
 ---
 
@@ -144,8 +146,8 @@ risk_registry_ref: "product_plans/strategy/RISK_REGISTRY.md"
 | EPIC-002 (Auth) | EPIC-001 (Scaffold) | Needs Supabase `users` table + FastAPI app | Sequential |
 | EPIC-003 (Dashboard Shell) | EPIC-002 (Auth) | Needs login/register flow + JWT cookies | Sequential |
 | EPIC-004 (BYOK) | EPIC-002 + EPIC-003 | Needs authenticated user + workspace CRUD | Sequential |
-| EPIC-005 (Slack) | EPIC-003 | Needs workspace entity to attach `slack_team_id` to | Sequential |
-| EPIC-006 (Google Drive) | EPIC-003 | Needs workspace entity for `encrypted_google_refresh_token` | Sequential |
+| EPIC-005 (Slack) | EPIC-003 | Needs `slack_teams` + `workspaces` + `workspace_channels` tables from EPIC-001 and team/workspace CRUD UI from EPIC-003. Bindings depend on Workspace rows existing first. | Sequential |
+| EPIC-006 (Google Drive) | EPIC-003 | Needs Workspace entity (knowledge silo) for `encrypted_google_refresh_token` — each Workspace has its own Drive auth, not shared across a team | Sequential |
 | EPIC-007 (AI Agent) | EPIC-004 + EPIC-006 | Needs BYOK key (hard gate) + `read_drive_file` tool target | **Critical path** — the last convergence point. |
 | EPIC-005 (Slack) | EPIC-007 (AI Agent) | Slack event handler calls `build_agent` and posts result | Slack + Agent must converge by Sprint 12. |
 | EPIC-008 (Wizard) | EPIC-004 + EPIC-005 + EPIC-006 | Composes all setup steps into one flow | Release 3 entry condition. |
@@ -187,7 +189,10 @@ risk_registry_ref: "product_plans/strategy/RISK_REGISTRY.md"
 
 > Appended by Team Lead when each release is archived.
 
-*(No deliveries yet — Planning phase.)*
+| Sprint | Delivery | Date | Summary | Tag |
+|--------|----------|------|---------|-----|
+| S-01 | D-01 Release 1: Foundation | 2026-04-11 | **Scaffold delivered.** 4/4 stories Done (Fast Track), ~1.75% aggregate correction tax, 1 Dev bounce on STORY-001-03 (version-pin fix from Team Lead sprint-context error — lesson recorded). Ships: FastAPI 0.135.3 scaffold with `/api/health` (per-table `teemo_*` aggregate, cached Supabase singleton, 6 hermetic tests), Vite 8.0.8 + React 19.2.5 + Tailwind 4.2 CSS-first `@theme`, Inter/JetBrains Mono via `@fontsource`, 3 design-system primitives (Button/Card/Badge), TanStack Router file-based routes, landing page with live backend health smoke test via TanStack Query. 3 flashcards recorded (sprint-context must quote Charter verbatim; don't redefine Tailwind 4 built-in slate tokens; bcrypt 5.0 72-byte boundary). | (untagged — release tagging introduced in S-02) |
+| S-02 | D-01 Release 1: Foundation | 2026-04-11 | **Auth delivered end-to-end.** 4/4 stories Done (Fast Track), ~2.5% aggregate correction tax, 0 bounces, 0 escalations. Ships: backend `app/core/security.py` (bcrypt + JWT + `validate_password_length` 72-byte guard per ADR-017), 5 auth routes (`/register`, `/login`, `/refresh`, `/logout`, `/me`) with httpOnly cookies (`samesite="lax"` — deliberate deviation for EPIC-005/006 OAuth redirects), `get_current_user_id` dependency, frontend Zustand `useAuth` store + 5 typed `lib/api.ts` wrappers + `AuthInitializer`, and full UI: `/login`, `/register`, `/app` placeholder (gated by `ProtectedRoute`), `SignOutButton`, enabled landing CTA. 22 backend pytest (9 unit + 13 live Supabase integration) + 10 frontend Vitest (first Vitest setup in Tee-Mo, `vitest@^2.1.9`). Architect integration audit verdict: **SHIP** (zero findings). 4 flashcards recorded (samesite=lax, LaxEmailStr for email-validator 2.x `.test` TLD, Vitest `vi.mock` TDZ, TanStack Router `tsc -b && vite build` ordering). 1 BUG filed for S-03 backlog: PyJWT module-level options leak causing test-order flake (production unaffected). Browser walkthrough (11 steps §2.2) deferred by user — not human-verified. | v0.2.0-auth |
 
 ---
 
@@ -199,3 +204,5 @@ risk_registry_ref: "product_plans/strategy/RISK_REGISTRY.md"
 | 2026-04-11 | Closed 2 open questions: ADR-019 deploy to VPS + Coolify; ADR-020 self-hosted Supabase. §4 External Dependencies updated. §5 Constraints updated. Demo workspace and Google Cloud verification parked until sprints 13 and 8 respectively. | Claude (doc-manager) |
 | 2026-04-11 | DM support decided (ADR-021 supersedes ADR-008). Design Guide decided (ADR-022) — Asana-inspired, full spec in `tee_mo_design_guide.md`. Added `design_guide_ref` to frontmatter. | Claude (doc-manager) |
 | 2026-04-11 | Skills feature decided (ADR-023). Chat-only CRUD, `related_tools` stripped, no seeded skills. Folded into EPIC-007 (AI Agent) — no new epic needed. Adds ~2.5 hours of work to the existing critical path. | Claude (doc-manager) |
+| 2026-04-11 | **Workspace model restructured (ADR-024 supersedes ADR-011, ADR-025 new).** New shape: `1 user : N SlackTeams : N Workspaces : N channel bindings`. Slack install is now team-level (new `slack_teams` table); Workspaces are knowledge silos (Drive + BYOK + skills + Drive auth) hanging off a team; channels bind explicitly to Workspaces via new `workspace_channels` table. Channels never fall back to a default — only DMs do. Binding is dashboard-led only (no `member_joined_channel` listener). Impacts: EPIC-001 (3 new/changed tables + partial unique index), EPIC-003 (two-level team→workspace navigation), EPIC-005 (new resolvers, binding REST, `channels:read`+`groups:read` scopes), EPIC-008 (two-phase wizard, channel chips, make-default toggle). Cost estimate: ~30% on top of EPIC-003 + EPIC-005, absorbed into existing sprint budget. S-02 (auth) unaffected. | Claude (doc-manager) |
+| 2026-04-11 | §7 Delivery Log backfilled with S-01 and S-02 entries. Both delivered into D-01 Release 1: Foundation. S-02 tagged v0.2.0-auth. | Team Lead (S-02 close) |

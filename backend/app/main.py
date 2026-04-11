@@ -25,6 +25,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes.auth import router as auth_router
+from app.api.routes.slack_events import router as slack_events_router
 from app.core.config import settings
 from app.core.db import get_supabase
 
@@ -43,6 +44,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(slack_events_router)
 
 # Canonical list of Tee-Mo tables — all must be reachable for status "ok".
 # The teemo_ prefix is non-negotiable: this is a shared Supabase instance.

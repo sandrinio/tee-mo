@@ -68,3 +68,22 @@ async def get_current_user_id(request: Request) -> str:
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
+
+
+async def get_current_user_id_optional(request: Request) -> str | None:
+    """Return the authenticated user_id, or None if no valid auth cookie.
+
+    Used by routes that want to redirect to /login instead of returning 401
+    on missing auth — e.g. the Slack OAuth callback, which cannot show a
+    blank 401 page after the user just completed a consent flow.
+
+    Args:
+        request: The incoming FastAPI request (injected automatically).
+
+    Returns:
+        The user's UUID as a string, or None if not authenticated.
+    """
+    try:
+        return await get_current_user_id(request)
+    except HTTPException:
+        return None

@@ -242,3 +242,4 @@ Paste all outputs into the Dev report.
 
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| DevOps | 3,383 | 886 | 4,269 |

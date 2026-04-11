@@ -243,7 +243,7 @@ Because QA is skipped for all stories, each Dev agent MUST:
 
 | Story | Final State | QA Bounces | Arch Bounces | Tests Written | Correction Tax | Notes |
 |-------|-------------|------------|--------------|---------------|----------------|-------|
-| STORY-003-01 | — | — | — | — | — | Not yet started |
+| STORY-003-01 | Done | 0 | 0 | 0 | 5% | Fast Track L2 single-pass. Multi-stage Dockerfile verified locally. Image 962MB. Two legit Starlette 1.0.0 spec deviations (StaticFiles html=True not SPA fallback; HEAD not auto-handled). |
 | STORY-003-02 | — | — | — | — | — | Not yet started |
 | STORY-003-03 | — | — | — | — | — | Not yet started |
 | STORY-003-04 | — | — | — | — | — | Not yet started |
@@ -253,5 +253,4 @@ Because QA is skipped for all stories, each Dev agent MUST:
 **Aggregate Correction Tax**: —
 
 **Process lessons recorded to FLASHCARDS.md**: —
-| STORY-003-01-dockerfile | Done | 0 | 0 | 5% | Fast Track L2 single-pass. Multi-stage Dockerfile verified locally. Image 962MB. Two legit Starlette 1.0.0 spec deviations (StaticFiles html=True not SPA fallback; HEAD not auto-handled). |
 <!-- EXECUTION_LOG_END -->

@@ -37,7 +37,7 @@ confirmed_at: "2026-04-12"
 
 | Priority | Story | Epic | Label | V-Bounce State | Blocker |
 |----------|-------|------|-------|----------------|---------|
-| 1 | [STORY-005A-01: Slack Bootstrap (encryption + config + slack.py)](./STORY-005A-01-slack-bootstrap.md) | EPIC-005 Phase A | L2 | Refinement | HUMAN PREREQ 3 |
+| 1 | [STORY-005A-01: Slack Bootstrap (encryption + config + slack.py)](./STORY-005A-01-slack-bootstrap.md) | EPIC-005 Phase A | L2 | Bouncing | — |
 | 2 | [STORY-005A-02: `/api/slack/events` Signing-Secret Verification](./STORY-005A-02-events-signing-verification.md) | EPIC-005 Phase A | L2 | Refinement | STORY-005A-01 |
 | 3 | [STORY-005A-03: `GET /api/slack/install` Install URL Builder](./STORY-005A-03-install-url-builder.md) | EPIC-005 Phase A | L2 | Refinement | STORY-005A-01 |
 | 4 | [STORY-005A-04: `GET /api/slack/oauth/callback` Code Exchange + Encrypt + Upsert](./STORY-005A-04-oauth-callback-upsert.md) | EPIC-005 Phase A | **L3** | Refinement | STORY-005A-01 + STORY-005A-03 |

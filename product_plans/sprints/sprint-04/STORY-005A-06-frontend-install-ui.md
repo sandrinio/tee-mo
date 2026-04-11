@@ -243,3 +243,4 @@ N/A — this story consumes `/api/slack/teams` and `/api/slack/install`, both co
 ## Token Usage
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| Developer | 287 | 8,041 | 8,328 |

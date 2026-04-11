@@ -109,3 +109,40 @@ export function refreshToken() {
 export function getMe(): Promise<AuthUser> {
   return apiGet<AuthUser>('/api/auth/me');
 }
+
+// ---------------------------------------------------------------------------
+// Slack wrappers (STORY-005A-06)
+// ---------------------------------------------------------------------------
+
+/**
+ * A single Slack workspace record returned by GET /api/slack/teams.
+ * Mirrors backend/app/api/routes/slack.py::SlackTeamResponse (ADR-024).
+ */
+export interface SlackTeam {
+  /** Slack-assigned team identifier, e.g. "T0123ABCDEF". */
+  slack_team_id: string;
+  /** Slack bot user ID associated with the installation. */
+  slack_bot_user_id: string;
+  /** ISO 8601 timestamp of when Tee-Mo was installed in this workspace. */
+  installed_at: string;
+}
+
+/**
+ * Response shape for GET /api/slack/teams.
+ */
+export interface SlackTeamsResponse {
+  teams: SlackTeam[];
+}
+
+/**
+ * Fetches all Slack teams where Tee-Mo is installed for the current user.
+ *
+ * Requires a valid session cookie (set by POST /api/auth/login). Throws an
+ * Error with the HTTP status code on non-2xx responses so TanStack Query's
+ * `isError` state is populated correctly.
+ *
+ * @returns List of installed Slack teams wrapped in a `SlackTeamsResponse`.
+ */
+export async function listSlackTeams(): Promise<SlackTeamsResponse> {
+  return apiGet<SlackTeamsResponse>('/api/slack/teams');
+}

@@ -82,8 +82,12 @@ def _check_table(table: str) -> str:
         keep the health response payload compact.
     """
     try:
-        # LIMIT 0 confirms table + permissions without fetching any rows
-        get_supabase().table(table).select("id").limit(0).execute()
+        # LIMIT 0 confirms table + permissions without fetching any rows.
+        # Use select("*") not select("id") — not every teemo_* table has an
+        # `id` column. teemo_slack_teams uses slack_team_id as PK (ADR-024)
+        # and teemo_workspace_channels uses slack_channel_id as PK (ADR-024/025).
+        # "*" is column-agnostic; with LIMIT 0 no row data is transferred.
+        get_supabase().table(table).select("*").limit(0).execute()
         return "ok"
     except Exception as exc:  # noqa: BLE001 — graceful degradation by design
         msg = str(exc)

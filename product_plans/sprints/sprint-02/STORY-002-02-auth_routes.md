@@ -571,3 +571,4 @@ All error responses follow FastAPI's default `{"detail": "<message>"}` shape. Do
 
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| DevOps | 29 | 1,248 | 1,277 |

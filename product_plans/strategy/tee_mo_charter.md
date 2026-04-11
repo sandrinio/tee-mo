@@ -120,12 +120,23 @@ Tee-Mo uses **two model tiers per provider**. The user's BYOK key is the same fo
 
 ## 4. Core Entities
 
+> ⚠️ **Terminology:** Slack calls its top-level team a "workspace". Tee-Mo reuses the word "Workspace" for a **knowledge silo** (Drive files + BYOK key + skills). To avoid collision, this charter uses **SlackTeam** for the Slack-side install and **Workspace** for the Tee-Mo knowledge silo. One SlackTeam can host many Workspaces.
+
+**Relationship shape:** `1 User : N SlackTeams : N Workspaces : N channel bindings`. A channel is bound to at most one Workspace; a Workspace can be bound to many channels. Exactly one Workspace per SlackTeam is marked `is_default_for_team` — it serves DMs (and only DMs; unbound channels never fall back, see §5.5).
+
 | Entity | Purpose | Key Fields |
 |--------|---------|------------|
-| **User** | Account holder. Can own multiple workspaces. | id, email, password_hash |
-| **Workspace** | One Slack team installation. One user can have many workspaces. | id, user_id, slack_team_id, slack_bot_user_id, encrypted_slack_bot_token, ai_provider, ai_model, encrypted_api_key, encrypted_google_refresh_token |
+| **User** | Account holder. Can own multiple SlackTeams and multiple Workspaces within each. | id, email, password_hash |
+| **SlackTeam** | One Slack app install per Slack team. The user installs the bot once per team; all Workspaces underneath share this install and its encrypted bot token. | slack_team_id (PK), owner_user_id, slack_bot_user_id, encrypted_slack_bot_token, installed_at |
+| **Workspace** | A Tee-Mo knowledge silo: one brain = Drive files + BYOK key + skills + Drive auth. Belongs to exactly one SlackTeam. Many Workspaces per SlackTeam is supported. | id, user_id, slack_team_id (FK → SlackTeam), name, ai_provider, ai_model, encrypted_api_key, encrypted_google_refresh_token, is_default_for_team (bool) |
+| **WorkspaceChannel** | Binding between a Slack channel and exactly one Workspace. Created via the dashboard channel picker (§5.5). A channel has at most one binding. | slack_channel_id (PK), workspace_id (FK), slack_team_id, bound_at |
 | **KnowledgeIndex** | A single registered Google Drive file | id, workspace_id, drive_file_id, title, link, mime_type, ai_description (AI-generated summary), content_hash (MD5 of last read content), last_scanned_at |
 | **Skill** | A workspace-scoped named instruction bundle the agent can load and invoke. Created/updated/deleted exclusively through agent chat. | id, workspace_id, name (slug, 1-60 chars), summary (1-160 chars, "Use when..." format), instructions (1-2000 chars, full workflow text), is_active, created_at, updated_at |
+
+**DB constraints:**
+- `slack_teams`: primary key on `slack_team_id`.
+- `workspaces`: `FOREIGN KEY (slack_team_id) REFERENCES slack_teams`, `UNIQUE(slack_team_id, name)`, **partial unique index** `CREATE UNIQUE INDEX one_default_per_team ON workspaces (slack_team_id) WHERE is_default_for_team` (enforces at most one default per team).
+- `workspace_channels`: primary key on `slack_channel_id` (a channel is owned by at most one workspace globally), `FOREIGN KEY (workspace_id) REFERENCES workspaces ON DELETE CASCADE`. The denormalized `slack_team_id` must equal the parent workspace's `slack_team_id` (enforced in service layer).
 
 ---
 
@@ -143,11 +154,14 @@ Tee-Mo uses **two model tiers per provider**. The user's BYOK key is the same fo
 
 **Reply rule:** Both triggers post their response in-thread via `thread_ts`. Tee-Mo never posts top-level messages — even in DMs, replies are threaded for consistency.
 
-**Self-message filter:** `message.im` fires on the bot's own replies too, which would cause infinite loops. The handler MUST early-exit when `event.get("bot_id")` is set OR `event.get("user") == workspace.slack_bot_user_id`.
+**Self-message filter:** `message.im` fires on the bot's own replies too, which would cause infinite loops. The handler MUST early-exit when `event.get("bot_id")` is set OR `event.get("user") == slack_team.slack_bot_user_id` (stored on the `slack_teams` row keyed by `event.team`).
 
 1. User triggers Tee-Mo via either @mention in a channel OR a message in a DM with the bot.
 2. Slack delivers the `app_mention` or `message.im` event to the FastAPI webhook. `[NEW — Slack Bolt AsyncApp handlers, 2 listeners]`
-3. Backend looks up the workspace config by `slack_team_id` (provider, model, encrypted key).
+3. Backend resolves the **Workspace** (knowledge silo) for this event. The lookup differs by trigger:
+   - **`app_mention`**: `SELECT w.* FROM workspace_channels wc JOIN workspaces w ON w.id = wc.workspace_id WHERE wc.slack_channel_id = $1`. If no row → the bot posts the unbound-channel reply in-thread (see §5.5) and stops. **Channels NEVER fall back to the team's default workspace.**
+   - **`message.im`**: `SELECT * FROM workspaces WHERE slack_team_id = $1 AND is_default_for_team = true`. If no row → the bot replies with a setup nudge and stops.
+   The resolved Workspace row provides `ai_provider`, `ai_model`, `encrypted_api_key`, `encrypted_google_refresh_token`, and the indexed files + skills used below. The `encrypted_slack_bot_token` used to post the reply comes from the parent `slack_teams` row, not the workspace.
 4. Backend decrypts the API key in-memory. `[COPY: backend/app/core/encryption.py → decrypt()]`
 5. Backend fetches the thread history using `conversations.replies(channel, thread_ts)`. `[NEW — Slack Web API]`
    — If the trigger is top-level (no existing thread), `thread_ts = event["ts"]` starts a new thread.
@@ -184,14 +198,23 @@ Tee-Mo uses **two model tiers per provider**. The user's BYOK key is the same fo
 8. Backend stores `[drive_file_id, title, link, mime_type, ai_description, content_hash, last_scanned_at]` in `knowledge_index`. User never writes a description. `[NEW]`
 9. Dashboard shows the AI-generated description to the user (read-only, with a "Rescan" button). `[NEW]`
 
-### 5.3 Workspace Setup Flow (First-Time Onboarding)
+### 5.3 Setup Flow (First-Time Onboarding)
+
+Setup has **two phases**: a one-time **Slack team install** and a repeatable **Workspace (knowledge silo) creation**. A user doing first-time setup runs both phases back-to-back. Adding a second knowledge silo under the same SlackTeam re-runs only Phase B.
+
+**Phase A — Slack Team Install (once per Slack team)**
 1. User registers with email + password (max 72 chars, no verification). `[COPY: backend/app/api/routes/auth.py → POST /api/auth/register — strip invite gate, license cap, link_pending_invites]`
 2. JWT pair issued: access token (15min, httpOnly) + refresh token (7d, httpOnly, path `/api/auth`). `[COPY: backend/app/core/security.py → create_access_token(), create_refresh_token(), _set_auth_cookies()]`
-3. User creates a new workspace (name). Dashboard shows workspace list; user can create multiple. `[NEW]`
-4. User installs the Slack app via Slack OAuth; backend encrypts and stores `slack_team_id` + `slack_bot_token`. `[NEW — Slack OAuth flow]`
-5. User clicks "Connect Google Drive" → Google OAuth consent (scopes: `drive.readonly`). Backend encrypts and stores the offline `refresh_token` against the workspace. `[NEW — Google OAuth offline flow]`
-6. User selects AI provider + model and inputs their BYOK API key. `[COPY: frontend key components + backend/app/api/routes/keys.py]`
-7. Backend validates the key with a lightweight provider API call, encrypts and stores it. Workspace is now active. `[COPY: backend/app/api/routes/keys.py → POST /api/keys/validate + encrypt()]`
+3. Dashboard shows an empty "Slack Teams" list with an **"Install Slack"** button. User clicks it → Slack OAuth v2 consent → redirect to backend callback. `[NEW — Slack OAuth flow]`
+4. Backend extracts `team.id`, `authed_user.id` (the bot user), and `bot_token` from the OAuth response. Writes (or upserts on re-install) a `slack_teams` row with the team ID, bot user ID, and AES-256-GCM-encrypted bot token. Redirects back to the dashboard. `[NEW]`
+
+**Phase B — Workspace Creation (repeatable per knowledge silo)**
+5. Dashboard now shows the installed SlackTeam card with a **"New Workspace"** button. User clicks it, names the Workspace (e.g., "Marketing Knowledge"). Backend creates a `workspaces` row linked to that `slack_team_id`. If this is the first workspace under that team, it is automatically set to `is_default_for_team = true`. `[NEW]`
+6. User clicks **"Connect Google Drive"** → Google OAuth consent (scopes: `drive.readonly`). Backend encrypts and stores the offline `refresh_token` against **this** workspace's `encrypted_google_refresh_token`. Each Workspace has its own Drive credential — Workspaces under the same SlackTeam never share Drive auth. `[NEW — Google OAuth offline flow]`
+7. User selects AI provider + model and inputs their BYOK API key. Each Workspace has its own BYOK key. `[COPY: frontend key components + backend/app/api/routes/keys.py]`
+8. Backend validates the key with a lightweight provider API call, encrypts and stores it. `[COPY: backend/app/api/routes/keys.py → POST /api/keys/validate + encrypt()]`
+9. User adds Drive files via the Google Picker (§5.2) — up to 15 per Workspace. Each file triggers a scan-tier summarization call.
+10. User binds Slack channels to this Workspace via the dashboard channel picker (§5.5). The `default-for-team` workspace handles DMs + is the recommended home for general-purpose channels. Additional Workspaces under the same team exist specifically to hold isolated data for specific channels.
 
 ### 5.4 Skill Creation Flow (Chat-Only)
 Skills are created, updated, and deleted entirely through Slack chat with the agent — never through the dashboard.
@@ -218,6 +241,40 @@ Skills are created, updated, and deleted entirely through Slack chat with the ag
 
 **Discovery:** Users can ask *"What skills do I have?"* — the agent answers from its own system prompt context (it already sees the full catalog every turn), so no listing tool is needed.
 
+### 5.5 Channel Binding Flow (Dashboard-Led)
+
+Binding a Slack channel to a Tee-Mo Workspace is **dashboard-led only**. The bot never sends proactive messages — it does not subscribe to `member_joined_channel` and does not auto-join channels. It only ever speaks when summoned.
+
+**Intent vs. permission:** Two independent things must both be true before the bot can answer in a channel:
+1. **Intent** — a `workspace_channels` row exists (set in the dashboard).
+2. **Permission** — the bot is a member of the channel (set in Slack via `/invite @tee-mo`).
+
+They can happen in either order. The dashboard surfaces both as a combined status.
+
+**Binding from the dashboard:**
+1. User opens a Workspace card → clicks **"+ Add channel"**.
+2. Dashboard calls `GET /api/slack/channels?team=<slack_team_id>` → backend loads the team's decrypted bot token and calls `conversations.list` (types: `public_channel`, `private_channel`). `[NEW — needs channels:read + groups:read scopes]`
+3. User picks `#channel-name`. Backend writes a `workspace_channels` row: `(slack_channel_id, workspace_id, slack_team_id, bound_at=now())`. If `slack_channel_id` is already bound to any workspace → backend returns 409 with `{"error": "channel_already_bound", "current_workspace": "..."}`. The user must unbind first. `[NEW]`
+4. Dashboard renders a chip for the new channel with status **⚠ Pending /invite** and copy-to-clipboard snippet: *"Run `/invite @tee-mo` in #channel-name to activate."*
+5. User runs `/invite @tee-mo` in Slack. The bot becomes a member of the channel. (Tee-Mo never auto-joins; the explicit Slack command is required so the user's consent to grant bot access stays with Slack, not with us.)
+6. On next dashboard render, the chip status is refreshed by calling `conversations.info(channel).is_member` for each binding. Bindings where `is_member=true` render as **✅ Active** (green). Bindings where `is_member=false` continue to show **⚠ Pending /invite**.
+
+**Unbinding:**
+- Clicking the `x` on a chip deletes the `workspace_channels` row. It does **not** kick the bot out of the channel — leaving Slack is a Slack-side action. The bot simply stops answering in that channel (any subsequent `@mention` hits the unbound-channel fallback below). The user can re-bind the same channel to any workspace later.
+
+**Unbound-channel reply (`app_mention` fallback):**
+- When `app_mention` fires in a channel with **no** `workspace_channels` row, the event handler posts one reply in-thread:
+  > *"I'm not bound to a workspace in <#C12345> yet. An owner can bind me here → https://dash.tee-mo/bind?team=T67890&channel=C12345"*
+- The reply uses the team's bot token for `chat.postMessage`; no workspace context is loaded. The link carries `team` and `channel` query params so the dashboard can pre-fill the picker.
+- **Channels never fall back to the default workspace.** Explicit binding is required.
+
+**Default workspace and DMs:**
+- Exactly one Workspace per SlackTeam has `is_default_for_team = true`. The first Workspace created under a team is auto-marked default. The user can transfer the default flag to another Workspace via a **"Make default"** toggle on each Workspace card. The partial unique index `one_default_per_team` enforces mutual exclusion.
+- The default Workspace card shows a visible badge: **📨 DMs route here** (plus unbound-channel nudges are posted with the team's bot token, independent of any Workspace).
+- `message.im` (DM) events always resolve to `is_default_for_team = true`. There is no DM channel binding mechanism. If the user deletes their only Workspace, DMs reply with a setup nudge.
+
+**No Slack-led setup path in v1.** The bot does not listen for `member_joined_channel`. If a user invites the bot to a channel before binding it in the dashboard, the bot stays silent until it is `@mentioned`, at which point it posts the unbound-channel reply above.
+
 ---
 
 ## 6. Constraints & Edge Cases
@@ -242,12 +299,18 @@ Skills are created, updated, and deleted entirely through Slack chat with the ag
 | Large Drive files may increase latency | `read_drive_file` is invoked only when the agent judges it necessary; no pre-fetch |
 | LLM provider rate limits are user-side | Backend catches provider errors and posts a user-friendly error message into the Slack thread |
 | No email verification means no account recovery path | Out of scope for v1 — password reset is a future concern |
-| `slack_bot_token` encrypted at rest | AES-256-GCM, same as BYOK keys. Decrypted in-memory per request only. Field renamed `encrypted_slack_bot_token` in `workspaces` table. |
+| `slack_bot_token` encrypted at rest | AES-256-GCM, same as BYOK keys. Decrypted in-memory per request only. Stored as `encrypted_slack_bot_token` on the `slack_teams` row (one row per Slack team install; shared by all Workspaces under that team). |
 | Context window overflow | Agent prunes oldest thread messages first until the payload fits the model's context window. If pruning occurs, append a note to the reply: "_(Note: earlier messages were trimmed to fit context.)_" |
 | Google Drive MIME type handling | `read_drive_file` branches by MIME type. Supported types and extraction method: Google Docs → `files.export(text/plain)`; Google Sheets → `files.export(text/csv)`; Google Slides → `files.export(text/plain)`; PDF → `files.get` media + `pypdf` text extraction; Word (.docx) → `files.get` media + `python-docx`; Excel (.xlsx) → `files.get` media + `openpyxl`. Unsupported types (images, video, etc.) rejected at index time with a dashboard error. |
 | Slack `chat.postMessage` rate limit (Tier 3) | ~50 calls/min per workspace. On `SlackApiError` with `ratelimited`, catch the error and post a single graceful message: "_(Tee-Mo is busy — please try again in a moment.)_" No retry loops in v1. |
 | bcrypt 5.0 password length | Tee-Mo dashboard password max 72 characters. `POST /api/auth/register` validates `len(password) ≤ 72`, returns 422 with clear message if exceeded. |
-| Multi-workspace per user | `workspaces` table has a `user_id` FK (1 user : many workspaces). Dashboard shows workspace list and allows creation/switching. Each workspace is independently configured (Slack, BYOK, Drive). |
+| Multi-workspace per user | Shape is `1 user : N SlackTeams : N Workspaces : N channel bindings`. Slack install is team-level (one `slack_teams` row per Slack team install). Knowledge silos (`workspaces` rows) hang off a team — same team can host many silos, each with its own BYOK key, Drive auth, files, and skills. Dashboard shows the nested list and allows creation/switching at both the SlackTeam and Workspace level. |
+| Explicit channel binding (no silent fallback) | A Slack channel must have a `workspace_channels` row to receive bot answers. `app_mention` in an unbound channel → bot replies in-thread with a setup-nudge link to the dashboard (channel+team pre-filled) and stops. Channels NEVER fall back to the team's default workspace. Only DMs (`message.im`) consult the default. |
+| 1 channel : 1 workspace | `slack_channel_id` is the primary key of `workspace_channels` — a channel has at most one binding globally. Attempting to bind an already-bound channel returns 409. User must unbind first, then re-bind. |
+| 1 workspace : N channels | One Workspace (knowledge silo) can be bound to many channels — e.g., "Marketing Knowledge" answers in both `#marketing` and `#social`. Dashboard renders bound channels as chips on the Workspace card. |
+| Default workspace is mandatory per SlackTeam | Exactly one Workspace per team has `is_default_for_team = true`, enforced by the partial unique index `one_default_per_team`. First Workspace created under a team is auto-default. User can transfer the flag to another Workspace via a "Make default" toggle, which is a single atomic swap. The default is the only Workspace that handles DMs. |
+| No Slack-led setup (v1) | Bot does not subscribe to `member_joined_channel` and never sends unsolicited messages. A user inviting the bot to a channel before binding it in the dashboard sees no reply until they `@mention` the bot, which returns the unbound-channel nudge. |
+| Channel status refresh | Dashboard calls `conversations.info(channel).is_member` to show **Active** vs **Pending /invite** chips. The DB only stores binding *intent*; Slack membership is authoritative for *permission* and is queried lazily. |
 | Google refresh token expiry | Offline refresh tokens can be revoked by the user in Google Account settings. Backend must detect `invalid_grant` errors from Google and prompt the user to reconnect Drive via the dashboard. |
 
 ---
@@ -397,20 +460,32 @@ Skills are created, updated, and deleted entirely through Slack chat with the ag
 ---
 
 ### EPIC: Slack Integration
-**Goal:** Receive Slack events, fetch thread history, route to AI agent, post reply.
+**Goal:** Receive Slack events, resolve the correct Workspace via channel binding (or team default for DMs), fetch thread history, route to AI agent, post reply. Provide the channel-list API + binding CRUD the dashboard needs.
 
 | Item | Action | Source |
 |------|--------|--------|
-| Slack Bolt event handlers (2) | Build new | Two listeners on `AsyncApp`: `@app.event("app_mention")` and `@app.event("message")` filtered to `channel_type == "im"`. Both route to a shared pipeline function. |
-| Self-message filter (DM only) | Build new | On `message.im`: early-exit if `event.get("bot_id")` is set OR sender matches `workspace.slack_bot_user_id`. Prevents infinite reply loops. |
-| Thread reply routing | Build new | All responses via `chat.postMessage(thread_ts=event["ts"])`. Top-level trigger starts a new thread; in-thread trigger continues it. Uniform for channels and DMs. |
+| `slack_teams` table migration | Build new | Columns: `slack_team_id` (PK), `owner_user_id` (FK users), `slack_bot_user_id`, `encrypted_slack_bot_token`, `installed_at`. Created during Slack OAuth callback (upsert on re-install). |
+| `workspace_channels` table migration | Build new | Columns: `slack_channel_id` (PK), `workspace_id` (FK workspaces ON DELETE CASCADE), `slack_team_id`, `bound_at`. Channel is globally unique — a channel can only be bound to one workspace at a time. |
+| Workspace table restructure | Build new | Drop `slack_bot_user_id` and `encrypted_slack_bot_token` from `workspaces` (now on `slack_teams`). Add `slack_team_id` FK. Add `is_default_for_team boolean NOT NULL DEFAULT false`. Partial unique index `one_default_per_team ON workspaces (slack_team_id) WHERE is_default_for_team`. |
+| Slack Bolt event handlers (2) | Build new | Two listeners on `AsyncApp`: `@app.event("app_mention")` and `@app.event("message")` filtered to `channel_type == "im"`. Each owns its own workspace-resolution logic (see next rows). |
+| Workspace resolver — `app_mention` | Build new | `SELECT w.* FROM workspace_channels wc JOIN workspaces w ON w.id = wc.workspace_id WHERE wc.slack_channel_id = $1`. No row → post unbound-channel nudge (see below) and return. No fallback to default. |
+| Workspace resolver — `message.im` | Build new | `SELECT * FROM workspaces WHERE slack_team_id = $1 AND is_default_for_team = true`. No row → post "set up a workspace first" nudge. DMs are the only caller that consults the default. |
+| Unbound-channel nudge handler | Build new | For `app_mention` in an unbound channel: use the team's bot token (fetched from `slack_teams`, decrypted in-memory) to post `chat.postMessage(thread_ts=event.ts)` with the nudge text and a dashboard link carrying `?team=<id>&channel=<id>`. No AI inference. |
+| Self-message filter (DM only) | Build new | On `message.im`: early-exit if `event.get("bot_id")` is set OR sender matches `slack_team.slack_bot_user_id` (looked up by `event.team`). Prevents infinite reply loops. |
+| Thread reply routing | Build new | All answers via `chat.postMessage(thread_ts=event["ts"])`. Top-level trigger starts a new thread; in-thread trigger continues it. Uniform for channels and DMs. |
 | Thread history fetch | Build new | Slack Web API `conversations.replies(channel, thread_ts)`. Same call for channels and DMs. |
-| Store bot user ID at install | Build new | On Slack OAuth install callback, extract `authed_user.id` → save as `slack_bot_user_id` in `workspaces` table. Required for self-message filter. |
-| Workspace config lookup | Build new | Query `workspaces` table by `slack_team_id`. |
-| Event deduplication | Build new | Check `event_id` before processing; store seen IDs to skip Slack replays. |
-| `slack_bot_token` encryption | Build new | Encrypt at rest with AES-256-GCM same as BYOK keys. Decrypt in-memory per request. |
-| Slack app install / OAuth | Build new | Slack OAuth v2. Scopes: `app_mentions:read`, `channels:history`, `groups:history`, `im:history`, `chat:write`. Store `slack_team_id`, `encrypted_slack_bot_token`, and `slack_bot_user_id`. |
+| Store team + bot user ID at install | Build new | On Slack OAuth install callback, extract `team.id` + `authed_user.id` + `bot_token`. Upsert into `slack_teams`. Owner = authenticated dashboard user. |
+| Event deduplication | Build new | Check `event_id` before processing; store seen IDs to skip Slack replays. Keyed by `(event_id, team_id)`. |
+| `encrypted_slack_bot_token` encryption | Build new | AES-256-GCM, same primitive as BYOK keys. Decrypt in-memory per request. Field now on `slack_teams`, not `workspaces`. |
+| Slack app install / OAuth | Build new | Slack OAuth v2. Scopes: `app_mentions:read`, `channels:history`, `groups:history`, `im:history`, `chat:write`, `channels:read`, `groups:read`. (`channels:read`/`groups:read` added for the dashboard channel picker.) |
+| `GET /api/slack/teams` | Build new | Lists the caller's `slack_teams` rows — powers the dashboard team list. |
+| `GET /api/slack/teams/:team_id/channels` | Build new | Calls `conversations.list` (types=`public_channel,private_channel`) using the team's decrypted bot token. Returns `[{id, name, is_private, is_member}]`. Used by the dashboard channel picker. |
+| `POST /api/workspaces/:ws_id/channels` | Build new | Body: `{slack_channel_id}`. Inserts into `workspace_channels`. Validates that the channel belongs to the workspace's team via the Slack API. Returns 409 `channel_already_bound` if the channel already has a row. |
+| `DELETE /api/workspaces/:ws_id/channels/:channel_id` | Build new | Deletes the binding. Does not affect Slack membership. |
+| `GET /api/workspaces/:ws_id/channels` | Build new | Lists bindings for a workspace with refreshed status via `conversations.info(channel).is_member`. Returns `[{slack_channel_id, name, is_member, bound_at}]`. |
+| `POST /api/workspaces/:ws_id/make-default` | Build new | Atomic swap: within a single transaction, set `is_default_for_team = false` for any existing default in that team, then set `true` on `:ws_id`. Partial unique index ensures correctness. |
 | Rate limit error handling | Build new | Catch `SlackApiError` with `ratelimited`. Post single graceful message into thread: "_(Tee-Mo is busy — please try again in a moment.)_" No retry loops. |
+| Event-loop reply posting | Build new | All `chat.postMessage` calls use the **team**'s bot token (from `slack_teams`), regardless of which Workspace supplied the inference config. |
 
 ---
 
@@ -429,7 +504,7 @@ Skills are created, updated, and deleted entirely through Slack chat with the ag
 ---
 
 ### EPIC: Dashboard / Workspace Setup UI
-**Goal:** Minimalistic React dashboard for account creation, Slack install, BYOK config, and Drive file management.
+**Goal:** Minimalistic React dashboard for account creation, Slack install (Phase A), knowledge-silo creation + Drive/BYOK/files configuration (Phase B), and channel-binding management.
 
 | Item | Action | Source |
 |------|--------|--------|
@@ -437,9 +512,16 @@ Skills are created, updated, and deleted entirely through Slack chat with the ag
 | Route structure + root layout | Copy + strip | `frontend/src/routes/__root.tsx`, `frontend/src/routes/index.tsx` — remove workspace.$workspaceId routes, admin route, usage route |
 | Auth store + `AuthInitializer` | Copy as-is | `frontend/src/components/auth/AuthInitializer.tsx`, Zustand auth store |
 | `ProtectedRoute` | Copy as-is | `frontend/src/components/auth/ProtectedRoute.tsx` |
-| Workspace list + create | Build new | Landing page after login: list of user's workspaces + "New Workspace" button. |
-| Workspace setup pages | Build new | Minimalistic 4-step flow: (1) Slack install, (2) Connect Google Drive OAuth, (3) BYOK key input, (4) Drive file index. No copy source. |
-| Design system | Build new | Tailwind CSS utility-first. No heavy component library. Clean, modern, functional aesthetic. |
+| SlackTeam list page | Build new | Landing after login. Lists the user's `slack_teams` rows. If none, shows **"Install Slack"** CTA as the only option. Each team card shows team name + count of Workspaces under it. |
+| Slack install flow | Build new | "Install Slack" button → Slack OAuth v2 authorize URL → backend callback → upsert `slack_teams` → redirect back to team list. |
+| Workspace list (per team) | Build new | Drill-in from a SlackTeam card. Lists the Workspaces under that team + **"New Workspace"** button. Default Workspace carries a visible **📨 DMs route here** badge. |
+| New Workspace wizard (Phase B) | Build new | 4 steps: (1) name → creates workspaces row with `is_default_for_team=true` if first in team; (2) Connect Google Drive OAuth; (3) BYOK provider + key input + validate; (4) Drive Picker to add up to 15 files. |
+| Workspace card — channel chips | Build new | Per-workspace card shows bound channels as chips. Each chip renders the channel name (via `conversations.info`), status (**✅ Active** or **⚠ Pending /invite**), and an `x` to unbind. |
+| Channel picker modal | Build new | "+ Add channel" button on a Workspace card opens a modal that calls `GET /api/slack/teams/:team_id/channels` and renders a searchable list (public + private). Selecting a channel calls `POST /api/workspaces/:ws_id/channels`. Shows 409 error inline if channel is already bound (with link to the current owner workspace). |
+| Binding status refresh | Build new | On workspace list mount, `GET /api/workspaces/:ws_id/channels` returns bindings with live `is_member` — dashboard renders chip states from that. Poll every ~30s while the page is focused so "Pending /invite" flips to "Active" shortly after the user runs `/invite @tee-mo`. |
+| "Make default" toggle | Build new | Button on non-default Workspace cards. Calls `POST /api/workspaces/:ws_id/make-default`. On success, badge moves + list re-renders. |
+| Unbind confirmation | Build new | Clicking `x` on a channel chip shows a confirm dialog: *"Unbind #marketing from Marketing Knowledge? Tee-Mo will stop answering there. (It will remain a member of the channel — remove it from Slack separately if you want.)"* |
+| Design system | Build new | Tailwind CSS utility-first. No heavy component library. Clean, modern, functional aesthetic per `tee_mo_design_guide.md`. |
 
 ---
 
@@ -459,4 +541,5 @@ Skills are created, updated, and deleted entirely through Slack chat with the ag
 | 2026-04-11 | Claude (doc-manager) | Two-tier model strategy added (§3.4): conversation tier user-selectable, scan tier hardcoded per provider (`gemini-2.5-flash`, `claude-haiku-4-5`, `gpt-4o-mini`). Hard gate: no file indexing without BYOK. Updated §5.2, §6, §10 AI Agent Epic with `scan_file_metadata` service and tiered `build_agent`. |
 | 2026-04-11 | Claude (doc-manager) | DM support added: second trigger `message.im` alongside `app_mention`. Self-message filter required. `slack_bot_user_id` added to Workspace entity. Slack Epic §10 expanded with DM handler + install-time bot user ID capture. Scopes updated: added `im:history`. |
 | 2026-04-11 | Claude (doc-manager) | Design Guide created at `tee_mo_design_guide.md` — Asana-inspired. Charter §2.6 and §9 updated to reference it. Required reading for all frontend work. |
+| 2026-04-11 | Claude (doc-manager) | **Workspace model restructured.** Shape changed from `1 user : N workspaces (each = 1 Slack install)` → `1 user : N SlackTeams : N Workspaces : N channel bindings`. Slack install is now a team-level artifact (new `slack_teams` table); Tee-Mo "Workspace" now means a knowledge silo (Drive + BYOK + skills + per-Workspace Drive auth) that hangs off a SlackTeam. Channels bind explicitly to Workspaces via new `workspace_channels` table (1 channel : 1 workspace, 1 workspace : N channels). `app_mention` in an unbound channel → bot posts setup-nudge reply with dashboard link; channels NEVER fall back to default. Only DMs (`message.im`) use the team's default Workspace (enforced by partial unique index `one_default_per_team`). Binding is dashboard-led only — no `member_joined_channel` listener, no proactive bot messages. Updated §4 (entities + terminology callout), §5.1 (per-trigger workspace resolver), §5.3 (split into Phase A Slack install + Phase B workspace creation), added **§5.5 Channel Binding Flow**, §6 (removed old multi-workspace row, added 6 new constraints), §10 Slack Epic (huge expansion — new tables, new endpoints, new resolvers, new scopes `channels:read`+`groups:read`), §10 Dashboard Epic (team list page, per-team workspace list, channel picker modal, status chips, make-default toggle, unbind confirm). |
 | 2026-04-11 | Claude (doc-manager) | Skills feature added. Design: chat-only CRUD (no dashboard UI), no seeded skills, `related_tools` stripped. Added Skill entity (§4), §5.4 Skill Creation Flow, design principle #7 "Chat-First Extensibility", 5 new edge cases (§6), 3 glossary entries (§8), AI Agent Epic skills tools (§10). Copy sources updated (§3.3) to include `skill_service.py` and 4 skill tools from new_app with strip list. |

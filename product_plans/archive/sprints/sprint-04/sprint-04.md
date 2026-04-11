@@ -228,3 +228,11 @@ Pulled from Phase A epic §6 + sprint-specific concerns:
 | 2026-04-12 | All §0 human prereqs cleared: PREREQ 1 Request URL ✅ Verified, PREREQ 2 consent screen eyeballed + cancel 404 confirmed, PREREQ 3b Coolify env var set. Human confirmation received from sandrinio. Status: **Planning → Active**. Sprint Readiness Gate cleared; proceeding to sprint branch cut and Step 1 STORY-005A-01 worktree creation. | Team Lead |
 | 2026-04-12 | **STORY-005A-01 Slack Bootstrap merged** (merge commit `466dc4e` into `sprint/S-04`). Fast Track, 0 QA / 0 Arch bounces, 5% correction tax. 8/8 target tests + 44/44 full backend suite passing. Fingerprint `aecf7b12` verified post-merge. Worktree removed, story branch deleted. 2 flashcards flagged for sprint close (base64url padding; slack_bolt `request_verification_enabled`). | Team Lead |
 | 2026-04-12 | **Sprint plan table cell corruption recovered.** `complete_story.mjs STORY-005A-01` over-aggressively replaced multiple table cells and column headers with the string "Done" (rows 3–5 in §1 Active Scope, §2 Merge Ordering row 2 + "Reason" header, §2 Execution Mode Architect-Override cell for 005A-01, §2 Dependency Chain "Reason" header + rows 003/005, §3 Open Questions "Options" header, §4 Execution Log Tests-Written cell). All cells restored by hand from the original plan content. Execution Log row for 005A-01 rewritten in-place (the script appended a duplicate, missing the Tests-Written column). **Framework issue filed for `/improve` at sprint close.** | Team Lead |
+
+---
+
+## Token Usage
+
+| Agent | Input | Output | Total |
+|-------|-------|--------|-------|
+| DevOps | 28 | 1,440 | 1,468 |

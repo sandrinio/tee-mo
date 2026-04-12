@@ -2,7 +2,7 @@
 sprint_id: "sprint-05"
 sprint_goal: "Close Release 1 — ship EPIC-003 Slice B workspace CRUD end-to-end."
 dates: "2026-04-12 – 2026-04-13"
-status: "Active"
+status: "Done"
 delivery: "D-01"
 confirmed_by: ""
 confirmed_at: ""
@@ -191,4 +191,11 @@ The Developer agent can retrieve salvage code via `git show e98d378:<path>`.
 
 | Story | Final State | QA Bounces | Arch Bounces | Tests Written | Correction Tax | Notes |
 |-------|-------------|------------|--------------|---------------|----------------|-------|
+| B01 | Done | 0 | 0 | 1 | 0% | Salvaged from S-05-fasttrack |
+| B02 | Done | 0 | 0 | 2 | 0% | CRUD routes + auth guard |
+| B03 | Done | 0 | 0 | 13 | 0% | Comprehensive integration tests |
+| B04 | Done | 0 | 0 | 2 | 0% | Salvaged hooks + additive api.ts |
+| B05 | Done | 0 | 0 | 2 | 0% | Team detail page + workspace grid |
+| B06 | Done | 0 | 0 | 3 | 0% | Optimistic make-default UI |
+| B07 | Done | 0 | 0 | 0 | 0% | 87 backend + 26 frontend tests pass |
 <!-- EXECUTION_LOG_END -->

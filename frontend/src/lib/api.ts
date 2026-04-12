@@ -434,6 +434,9 @@ export interface IndexFileRequest {
   link: string;
   /** MIME type from the Picker callback. */
   mime_type: string;
+  /** Short-lived access token from picker-token endpoint. Used for initial file fetch
+   *  since drive.file scope ties access to the Picker session, not the refresh token. */
+  access_token?: string;
 }
 
 /**

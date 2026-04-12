@@ -90,7 +90,7 @@ async def _assert_workspace_owner(workspace_id: str, user_id: str) -> dict:
     """Verify the authenticated user owns the given workspace.
 
     Queries ``teemo_workspaces`` for a row matching both ``id`` and
-    ``owner_user_id``. Returns 404 (not 403) on mismatch to avoid leaking
+    ``user_id``. Returns 404 (not 403) on mismatch to avoid leaking
     whether a workspace exists for another user (IDOR protection).
 
     The workspace row is returned because it contains the encrypted refresh
@@ -109,9 +109,9 @@ async def _assert_workspace_owner(workspace_id: str, user_id: str) -> dict:
     result = (
         _db.get_supabase()
         .table("teemo_workspaces")
-        .select("id, owner_user_id, encrypted_google_refresh_token, encrypted_api_key, provider")
+        .select("id, user_id, encrypted_google_refresh_token, encrypted_api_key, ai_provider")
         .eq("id", workspace_id)
-        .eq("owner_user_id", user_id)
+        .eq("user_id", user_id)
         .limit(1)
         .execute()
     )
@@ -163,6 +163,7 @@ async def index_file(
         HTTPException(404): Workspace not found or not owned by user.
         HTTPException(409): File with same drive_file_id already indexed.
     """
+    logger.info("index_file payload: %s", payload.model_dump())
     workspace = await _assert_workspace_owner(workspace_id, user_id)
 
     # Step 2: Drive connection check
@@ -215,11 +216,17 @@ async def index_file(
             raise HTTPException(status_code=409, detail="File already indexed in this workspace")
 
         # Step 8: Fetch file content from Drive
-        # drive_service functions are imported at module level so tests can monkeypatch them.
-        # get_drive_client and compute_content_hash are sync; tests may patch fetch_file_content
-        # as AsyncMock (async) so we call it via await — asyncio.iscoroutinefunction check
-        # handles both the real sync impl (wrapped in asyncio.to_thread) and the async mock.
-        drive_client = _drive_service.get_drive_client(encrypted_refresh_token)
+        # If the frontend passed an access_token (from the Picker session), use it
+        # directly — drive.file scope ties file access to the Picker token, not the
+        # refresh token. Otherwise fall back to the stored refresh token.
+        logger.info("index_file: access_token present=%s", bool(payload.access_token))
+        if payload.access_token:
+            from google.oauth2.credentials import Credentials
+            from googleapiclient.discovery import build as _build_drive
+            creds = Credentials(token=payload.access_token)
+            drive_client = _build_drive("drive", "v3", credentials=creds)
+        else:
+            drive_client = _drive_service.get_drive_client(encrypted_refresh_token)
         _fetch = _drive_service.fetch_file_content
         if asyncio.iscoroutinefunction(_fetch):
             content = await _fetch(drive_client, payload.drive_file_id, payload.mime_type)
@@ -232,7 +239,7 @@ async def index_file(
         content_hash = _drive_service.compute_content_hash(content)
 
         # Step 10: Generate AI description with BYOK key (ADR-004/006)
-        provider = workspace.get("provider", "anthropic")
+        provider = workspace.get("ai_provider", "anthropic")
         api_key_plaintext = _enc.decrypt(encrypted_api_key)
         ai_description = await _scan_service.generate_ai_description(
             content, provider, api_key_plaintext

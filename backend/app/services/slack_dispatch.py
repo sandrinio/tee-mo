@@ -191,13 +191,13 @@ async def _handle_app_mention(event: dict) -> None:
     if sender_user_id:
         try:
             user_info = await client.users_info(user=sender_user_id)
-            profile = user_info.get("user", {}).get("profile", {})
-            sender_name = (
-                profile.get("display_name")
-                or user_info.get("user", {}).get("real_name")
-                or sender_user_id
-            )
-        except Exception:
+            user_data = user_info.get("user", {})
+            profile = user_data.get("profile", {})
+            dn = (profile.get("display_name") or "").strip()
+            rn = (user_data.get("real_name") or "").strip()
+            sender_name = dn or rn or sender_user_id
+        except Exception as e:
+            logger.warning("Failed to resolve display name for %s: %s", sender_user_id, e)
             sender_name = sender_user_id
 
     user_prompt = f"{sender_name}: {stripped_text}"
@@ -377,12 +377,11 @@ async def _handle_dm(event: dict) -> None:
     if sender_user_id:
         try:
             user_info = await client.users_info(user=sender_user_id)
-            profile = user_info.get("user", {}).get("profile", {})
-            sender_name = (
-                profile.get("display_name")
-                or user_info.get("user", {}).get("real_name")
-                or sender_user_id
-            )
+            user_data = user_info.get("user", {})
+            profile = user_data.get("profile", {})
+            dn = (profile.get("display_name") or "").strip()
+            rn = (user_data.get("real_name") or "").strip()
+            sender_name = dn or rn or sender_user_id
         except Exception:
             sender_name = sender_user_id
 

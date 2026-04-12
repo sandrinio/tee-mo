@@ -24,7 +24,7 @@ Import note on get_supabase:
   local reference at import time that is not affected by module-level monkeypatching.
 """
 
-from __future__ import annotations
+from typing import Optional
 
 import logging
 import httpx  # MUST be at module level so tests can monkeypatch httpx.AsyncClient
@@ -46,14 +46,14 @@ router = APIRouter(tags=["drive"])
 
 # Google OAuth 2.0 scopes (ADR — drive.file only, non-sensitive).
 # openid + email are needed so we can call the userinfo endpoint for status display.
-DRIVE_SCOPES = "openid email https://www.googleapis.com/auth/drive.file"
+DRIVE_SCOPES = "openid email https://www.googleapis.com/auth/drive.readonly"
 
 
 async def _assert_workspace_owner(workspace_id: str, user_id: str) -> dict:
     """Verify the authenticated user owns the given workspace.
 
     Queries ``teemo_workspaces`` for a row with matching ``id`` AND
-    ``owner_user_id``. If no row is found (workspace doesn't exist or belongs
+    ``user_id``. If no row is found (workspace doesn't exist or belongs
     to another user), raises HTTPException(404) — a generic 404 avoids leaking
     whether a workspace exists for a different user (IDOR protection).
 
@@ -74,9 +74,9 @@ async def _assert_workspace_owner(workspace_id: str, user_id: str) -> dict:
     result = (
         _db.get_supabase()
         .table("teemo_workspaces")
-        .select("id, owner_user_id, encrypted_google_refresh_token")
+        .select("id, user_id, encrypted_google_refresh_token")
         .eq("id", workspace_id)
-        .eq("owner_user_id", user_id)
+        .eq("user_id", user_id)
         .limit(1)
         .execute()
     )
@@ -138,9 +138,9 @@ async def drive_connect(
 
 @router.get("/api/drive/oauth/callback")
 async def drive_oauth_callback(
-    code: str | None = None,
-    state: str | None = None,
-    error: str | None = None,
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
 ) -> RedirectResponse:
     """Handle the Google OAuth redirect after user consent.
 
@@ -169,9 +169,15 @@ async def drive_oauth_callback(
     Raises:
         HTTPException(400): Missing params or invalid/tampered state.
     """
+    # Resolve frontend base URL for post-OAuth redirects.
+    # In production (same-origin), cors_origins is the app origin.
+    # In dev (split ports), it points to the Vite dev server (e.g. http://localhost:5173).
+    s = get_settings()
+    frontend = s.cors_origins_list()[0] if s.cors_origins_list() else ""
+
     # --- 1. Cancellation branch — no API calls, no DB writes ---
     if error == "access_denied":
-        return RedirectResponse("/app?drive_connect=cancelled", status_code=302)
+        return RedirectResponse(f"{frontend}/app?drive_connect=cancelled", status_code=302)
 
     # --- 2. Required params ---
     if not state or not code:
@@ -181,12 +187,11 @@ async def drive_oauth_callback(
     try:
         state_payload = verify_drive_state_token(state)
     except jwt.ExpiredSignatureError:
-        return RedirectResponse("/app?drive_connect=expired", status_code=302)
+        return RedirectResponse(f"{frontend}/app?drive_connect=expired", status_code=302)
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=400, detail="invalid state")
 
     # --- 4. Exchange auth code for tokens ---
-    s = get_settings()
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.post(
             "https://oauth2.googleapis.com/token",
@@ -209,7 +214,7 @@ async def drive_oauth_callback(
             "drive_oauth_callback: Google token response missing refresh_token "
             "(workspace_id=%s)", state_payload.workspace_id
         )
-        return RedirectResponse("/app?drive_connect=error", status_code=302)
+        return RedirectResponse(f"{frontend}/app?drive_connect=error", status_code=302)
 
     # --- 5. Encrypt + store ---
     # NOTE: refresh_token is NEVER passed to logger — ADR-002/009 security constraint.
@@ -220,7 +225,7 @@ async def drive_oauth_callback(
         {"encrypted_google_refresh_token": encrypted_token}
     ).eq("id", state_payload.workspace_id).execute()
 
-    return RedirectResponse("/app?drive_connect=ok", status_code=302)
+    return RedirectResponse(f"{frontend}/app?drive_connect=ok", status_code=302)
 
 
 @router.get("/api/workspaces/{workspace_id}/drive/status")

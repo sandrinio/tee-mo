@@ -199,6 +199,8 @@ interface PickerSectionProps {
    * Receives the new KnowledgeFile record (including any warning).
    */
   onFileIndexed: (file: KnowledgeFile) => void;
+  /** Callback when indexing state changes — for showing a visible progress banner. */
+  onIndexingChange?: (indexing: boolean) => void;
 }
 
 /**
@@ -225,6 +227,7 @@ function PickerSection({
   hasKey,
   fileCount,
   onFileIndexed,
+  onIndexingChange,
 }: PickerSectionProps) {
   const [indexing, setIndexing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -259,18 +262,21 @@ function PickerSection({
             if (!doc) return;
 
             setIndexing(true);
+            onIndexingChange?.(true);
             try {
               const result = await addKnowledgeMutation.mutateAsync({
                 drive_file_id: doc.id,
                 title: doc.name,
                 link: doc.url,
                 mime_type: doc.mimeType,
+                access_token,
               });
               onFileIndexed(result);
             } catch (err) {
               setError(err instanceof Error ? err.message : 'Failed to index file.');
             } finally {
               setIndexing(false);
+              onIndexingChange?.(false);
             }
           })
           .build();
@@ -491,6 +497,7 @@ function TruncationToast({
 function WorkspaceDetailPage() {
   const { teamId, workspaceId } = Route.useParams();
   const [truncationWarning, setTruncationWarning] = useState<string | null>(null);
+  const [isIndexing, setIsIndexing] = useState(false);
 
   // Data queries
   const { data: workspace } = useWorkspaceQuery(workspaceId);
@@ -560,7 +567,15 @@ function WorkspaceDetailPage() {
           hasKey={hasKey}
           fileCount={files.length}
           onFileIndexed={handleFileIndexed}
+          onIndexingChange={setIsIndexing}
         />
+
+        {/* Visible indexing progress banner */}
+        {isIndexing && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 animate-pulse">
+            Reading file from Google Drive and generating AI description... This may take a few seconds.
+          </div>
+        )}
 
         {/* Knowledge file list */}
         <KnowledgeList

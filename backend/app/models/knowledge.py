@@ -33,6 +33,7 @@ class IndexFileRequest(BaseModel):
     title: str
     link: str
     mime_type: str
+    access_token: Optional[str] = None
 
 
 class KnowledgeIndexResponse(BaseModel):

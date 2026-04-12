@@ -361,3 +361,178 @@ export async function deleteWorkspaceKey(workspaceId: string): Promise<{ message
 export function validateKey(body: ValidateKeyRequest): Promise<ValidateKeyResponse> {
   return apiPost<ValidateKeyRequest, ValidateKeyResponse>('/api/keys/validate', body);
 }
+
+// ---------------------------------------------------------------------------
+// Drive wrappers (STORY-006-05)
+// ---------------------------------------------------------------------------
+
+/**
+ * Google Drive connection status for a workspace.
+ * Mirrors backend DriveStatusResponse: connected flag + connected account email.
+ */
+export interface DriveStatus {
+  /** Whether a Google Drive OAuth token is stored for this workspace. */
+  connected: boolean;
+  /** The Google account email address if connected, or null if not connected. */
+  email: string | null;
+}
+
+/**
+ * A single indexed knowledge file record returned by the knowledge CRUD endpoints.
+ * Mirrors backend/app/models/knowledge.py::KnowledgeFileResponse (STORY-006-03).
+ */
+export interface KnowledgeFile {
+  /** UUID primary key for this knowledge file record. */
+  id: string;
+  /** UUID of the workspace this file belongs to. */
+  workspace_id: string;
+  /** Google Drive file ID. */
+  drive_file_id: string;
+  /** Human-readable file title from Google Drive. */
+  title: string;
+  /** Direct link to the file in Google Drive. */
+  link: string;
+  /** MIME type of the file (e.g. "application/vnd.google-apps.document"). */
+  mime_type: string;
+  /** AI-generated description of the file content. */
+  ai_description: string;
+  /** SHA-256 hash of the extracted file content for change detection. */
+  content_hash: string;
+  /** ISO 8601 timestamp when this record was created. */
+  created_at: string | null;
+  /** ISO 8601 timestamp of the last successful content scan. */
+  last_scanned_at: string | null;
+  /**
+   * Optional warning message when file content was truncated.
+   * Present when the file exceeded 50,000 characters and was cut short.
+   */
+  warning?: string;
+}
+
+/**
+ * Short-lived access token pair returned by the picker-token endpoint.
+ * Used to initialise the Google Picker API widget without exposing
+ * long-lived OAuth tokens to the frontend.
+ */
+export interface PickerToken {
+  /** Short-lived Google OAuth access token scoped to Google Picker. */
+  access_token: string;
+  /** Google Cloud project API key — controls Picker API quota. */
+  picker_api_key: string;
+}
+
+/**
+ * Request body for indexing a Google Drive file into the knowledge base.
+ * Sent to POST /api/workspaces/{id}/knowledge after the user picks a file.
+ */
+export interface IndexFileRequest {
+  /** Google Drive file ID from the Picker callback. */
+  drive_file_id: string;
+  /** File title from the Picker callback. */
+  title: string;
+  /** Direct link to the file in Google Drive. */
+  link: string;
+  /** MIME type from the Picker callback. */
+  mime_type: string;
+  /** Short-lived access token from picker-token endpoint. Used for initial file fetch
+   *  since drive.file scope ties access to the Picker session, not the refresh token. */
+  access_token?: string;
+}
+
+/**
+ * GET /api/workspaces/{workspaceId}/drive/status
+ * Returns whether Google Drive is connected for this workspace and which
+ * Google account was used.
+ *
+ * @param workspaceId - UUID of the workspace to check Drive status for.
+ * @returns Drive connection status including connected flag and email.
+ */
+export function getDriveStatus(workspaceId: string): Promise<DriveStatus> {
+  return apiGet<DriveStatus>(`/api/workspaces/${encodeURIComponent(workspaceId)}/drive/status`);
+}
+
+/**
+ * POST /api/workspaces/{workspaceId}/drive/disconnect
+ * Revokes the stored Google Drive OAuth token and clears the Drive connection.
+ *
+ * @param workspaceId - UUID of the workspace whose Drive connection should be cleared.
+ * @returns Confirmation with status field.
+ */
+export function disconnectDrive(workspaceId: string): Promise<{ status: string }> {
+  return apiPost<Record<string, never>, { status: string }>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/drive/disconnect`,
+    {},
+  );
+}
+
+/**
+ * GET /api/workspaces/{workspaceId}/drive/picker-token
+ * Returns a short-lived access token and API key for initialising the Google Picker.
+ *
+ * The token is scoped to the connected Google account and expires in ~1 hour.
+ * Must only be called when Drive is connected (getDriveStatus.connected === true).
+ *
+ * @param workspaceId - UUID of the workspace whose Drive OAuth token to use.
+ * @returns Short-lived access token + Picker API key.
+ */
+export function getPickerToken(workspaceId: string): Promise<PickerToken> {
+  return apiGet<PickerToken>(`/api/workspaces/${encodeURIComponent(workspaceId)}/drive/picker-token`);
+}
+
+/**
+ * GET /api/workspaces/{workspaceId}/knowledge
+ * Returns all indexed knowledge files for a workspace.
+ *
+ * @param workspaceId - UUID of the workspace whose knowledge files to list.
+ * @returns Array of indexed knowledge file records.
+ */
+export function listKnowledgeFiles(workspaceId: string): Promise<KnowledgeFile[]> {
+  return apiGet<KnowledgeFile[]>(`/api/workspaces/${encodeURIComponent(workspaceId)}/knowledge`);
+}
+
+/**
+ * POST /api/workspaces/{workspaceId}/knowledge
+ * Triggers AI description generation and indexes a Google Drive file into the
+ * workspace knowledge base.
+ *
+ * This is a long-running operation (seconds to tens of seconds) while the
+ * backend fetches the file content and generates an AI description.
+ * The response includes a `warning` field if the file content was truncated.
+ *
+ * @param workspaceId - UUID of the workspace to index the file into.
+ * @param body        - Drive file metadata from the Google Picker callback.
+ * @returns The newly created knowledge file record, potentially with a truncation warning.
+ */
+export function indexKnowledgeFile(workspaceId: string, body: IndexFileRequest): Promise<KnowledgeFile> {
+  return apiPost<IndexFileRequest, KnowledgeFile>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/knowledge`,
+    body,
+  );
+}
+
+/**
+ * DELETE /api/workspaces/{workspaceId}/knowledge/{knowledgeId}
+ * Removes an indexed knowledge file from the workspace knowledge base.
+ *
+ * Uses raw fetch (no apiDelete helper) to match the pattern established by
+ * `deleteWorkspaceKey` — keeping the change additive per story scope.
+ * Throws an Error with the backend `detail` message on non-2xx responses.
+ *
+ * @param workspaceId - UUID of the workspace the file belongs to.
+ * @param knowledgeId - UUID of the knowledge file record to remove.
+ * @returns Confirmation with status field.
+ */
+export async function removeKnowledgeFile(workspaceId: string, knowledgeId: string): Promise<{ status: string }> {
+  const r = await fetch(
+    `${API_URL}/api/workspaces/${encodeURIComponent(workspaceId)}/knowledge/${encodeURIComponent(knowledgeId)}`,
+    {
+      method: 'DELETE',
+      credentials: 'include',
+    },
+  );
+  if (!r.ok) {
+    const payload = await r.json().catch(() => ({}));
+    throw new Error(payload?.detail ?? `HTTP ${r.status}`);
+  }
+  return r.json();
+}

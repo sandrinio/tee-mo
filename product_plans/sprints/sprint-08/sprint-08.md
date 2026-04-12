@@ -2,10 +2,10 @@
 sprint_id: "sprint-08"
 sprint_goal: "Ship EPIC-006 — Google Drive OAuth, file indexing with AI descriptions, read_drive_file agent tool, and frontend Picker. Complete the demo pipeline: register → workspace → Slack → Drive → @mention → answer from file."
 dates: "2026-04-13"
-status: "Planning"
+status: "Active"
 delivery: "D-04"
-confirmed_by: ""
-confirmed_at: ""
+confirmed_by: "sandrinio"
+confirmed_at: "2026-04-12"
 ---
 
 # Sprint S-08 Plan
@@ -19,7 +19,7 @@ confirmed_at: ""
 - [x] No stories have 🔴 High ambiguity (spike first)
 - [x] Dependencies identified and sequencing agreed
 - [x] Risk flags reviewed from Risk Registry
-- [ ] **Human has confirmed this sprint plan**
+- [x] **Human has confirmed this sprint plan**
 
 ---
 
@@ -28,12 +28,12 @@ confirmed_at: ""
 
 | Priority | Story | Epic | Label | V-Bounce State | Blocker |
 |----------|-------|------|-------|----------------|---------|
-| 1a | [STORY-006-01: Drive Service + Config](./STORY-006-01-drive-service.md) | EPIC-006 | L2 | Ready to Bounce | — |
-| 1b | [STORY-006-04: Agent Drive Tool](./STORY-006-04-agent-drive-tool.md) | EPIC-006 | L2 | Ready to Bounce | — (can start in parallel, merges after 006-01) |
-| 2 | [STORY-006-02: Drive OAuth](./STORY-006-02-drive-oauth.md) | EPIC-006 | L3 | Ready to Bounce | 006-01 |
-| 3 | [STORY-006-03: Knowledge CRUD](./STORY-006-03-knowledge-crud.md) | EPIC-006 | L3 | Ready to Bounce | 006-01, 006-02 |
-| 4 | [STORY-006-05: Frontend Drive](./STORY-006-05-frontend-drive.md) | EPIC-006 | L3 | Ready to Bounce | 006-02, 006-03 |
-| 5 | [STORY-006-06: E2E Verification](./STORY-006-06-e2e-verification.md) | EPIC-006 | L1 | Ready to Bounce | All above |
+| 1a | [STORY-006-01: Drive Service + Config](./STORY-006-01-drive-service.md) | EPIC-006 | L2 | Done | — |
+| 1b | [STORY-006-04: Agent Drive Tool](./STORY-006-04-agent-drive-tool.md) | EPIC-006 | L2 | Done | — (can start in parallel, merges after 006-01) |
+| 2 | [STORY-006-02: Drive OAuth](./STORY-006-02-drive-oauth.md) | EPIC-006 | L3 | Done | 006-01 |
+| 3 | [STORY-006-03: Knowledge CRUD](./STORY-006-03-knowledge-crud.md) | EPIC-006 | L3 | Done | 006-01, 006-02 |
+| 4 | [STORY-006-05: Frontend Drive](./STORY-006-05-frontend-drive.md) | EPIC-006 | L3 | Done | 006-02, 006-03 |
+| 5 | [STORY-006-06: E2E Verification](./STORY-006-06-e2e-verification.md) | EPIC-006 | L1 | Done | All above |
 
 ### Context Pack Readiness
 
@@ -165,4 +165,10 @@ confirmed_at: ""
 
 | Story | Final State | QA Bounces | Arch Bounces | Tests Written | Correction Tax | Notes |
 |-------|-------------|------------|--------------|---------------|----------------|-------|
+| STORY-006-01 | Done | 0 | 0 | — | 0% | Fast Track. 30/30 tests pass. drive_service + scan_service + config Google vars. |
+| STORY-006-04 | Done | 0 | 0 | — | 0% | Fast Track. 17/18 tests pass (1 pre-existing). read_drive_file tool + file catalog in prompt. |
+| STORY-006-02 | Done | 0 | 1 | — | 5% | Full Bounce. Arch bounce: drive_status used refresh token as Bearer instead of exchanging for access token. Fixed. 34 tests. |
+| STORY-006-03 | Done | 1 | 1 | — | 10% | Full Bounce. QA+Arch bounce: py39 compat, decrypt mock pattern, dead class removed. 26 tests. |
+| STORY-006-05 | Done | 0 | 0 | — | 0% | Full Bounce. Clean first-pass QA+Arch. 10 new tests. Layout refactor for TanStack Router. |
+| STORY-006-06 | Done | 0 | 0 | — | 15% | E2E verification. Fixed: py39 compat, column names, OAuth scope drive.readonly, redirect URL, display name, indexing progress banner, WorkspaceCard link. |
 <!-- EXECUTION_LOG_END -->

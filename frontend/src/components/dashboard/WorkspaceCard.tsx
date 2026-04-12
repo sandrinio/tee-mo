@@ -24,6 +24,7 @@
  * and the validateKey API call directly (not via a hook) for pre-save validation.
  */
 import { useState } from 'react';
+import { Link } from '@tanstack/react-router';
 import { Card } from '../ui/Card';
 import type { Workspace, ValidateKeyResponse } from '../../lib/api';
 import { validateKey } from '../../lib/api';
@@ -396,10 +397,14 @@ export function WorkspaceCard({ workspace, teamId }: WorkspaceCardProps) {
       <Card className="shadow-sm">
         <div className="flex items-start justify-between gap-2">
           <div className="flex flex-col gap-1 min-w-0">
-            {/* Workspace name */}
-            <div className="font-semibold text-slate-900 truncate">
+            {/* Workspace name — links to detail page */}
+            <Link
+              to="/app/teams/$teamId/$workspaceId"
+              params={{ teamId, workspaceId: workspace.id }}
+              className="font-semibold text-slate-900 truncate hover:text-rose-500 transition-colors"
+            >
               {workspace.name}
-            </div>
+            </Link>
 
             {/* Creation date */}
             <div className="text-xs text-slate-400">

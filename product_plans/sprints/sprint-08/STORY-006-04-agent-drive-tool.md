@@ -172,3 +172,4 @@ Add `read_drive_file` to the tools list alongside skill tools.
 ## Token Usage
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| Developer | 16 | 341 | 357 |

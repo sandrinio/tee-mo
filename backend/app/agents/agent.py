@@ -224,17 +224,25 @@ def _build_pydantic_ai_model(model_id: str, provider: str, api_key: str) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def _build_system_prompt(skills: list[dict]) -> str:
+def _build_system_prompt(
+    skills: list[dict],
+    knowledge_files: list[dict] | None = None,
+) -> str:
     """Assemble the system prompt for the Tee-Mo agent.
 
-    Combines a static identity preamble with an optional skill catalog
-    section. The skills section is only included when the workspace has at
-    least one active skill — omitting it entirely when empty prevents the LLM
-    from being confused by an empty catalog header.
+    Combines a static identity preamble with an optional skill catalog section
+    and an optional file catalog section. Sections are only included when the
+    workspace has at least one active skill or indexed file respectively —
+    omitting them entirely when empty prevents the LLM from being confused by
+    empty catalog headers.
 
     Args:
-        skills: List of skill dicts with ``name`` and ``summary`` keys,
-                as returned by skill_service.list_skills(). May be empty.
+        skills:          List of skill dicts with ``name`` and ``summary`` keys,
+                         as returned by skill_service.list_skills(). May be empty.
+        knowledge_files: Optional list of knowledge index dicts with
+                         ``drive_file_id``, ``title``, and ``ai_description``
+                         keys, as returned from teemo_knowledge_index. May be
+                         None or empty when no files are indexed.
 
     Returns:
         A fully assembled system prompt string.
@@ -258,15 +266,22 @@ def _build_system_prompt(skills: list[dict]) -> str:
         "webhooks, and data retrieval from REST endpoints."
     )
 
-    if not skills:
-        return preamble
+    prompt = preamble
 
-    skill_lines = "\n".join(
-        f"- {s['name']}: {s['summary']}" for s in skills
-    )
-    skills_section = f"\n\n## Available Skills\n{skill_lines}"
+    if skills:
+        skill_lines = "\n".join(
+            f"- {s['name']}: {s['summary']}" for s in skills
+        )
+        prompt += f"\n\n## Available Skills\n{skill_lines}"
 
-    return preamble + skills_section
+    if knowledge_files:
+        file_lines = "\n".join(
+            f"- [{f['drive_file_id']}] \"{f['title']}\" — {f['ai_description']}"
+            for f in knowledge_files
+        )
+        prompt += f"\n\n## Available Files\n{file_lines}"
+
+    return prompt
 
 
 # ---------------------------------------------------------------------------
@@ -293,9 +308,12 @@ async def build_agent(
       5. Lazy-import model/provider classes for the provider.
       6. Instantiate the pydantic-ai model via _build_pydantic_ai_model.
       7. Fetch active skills via skill_service.list_skills.
-      8. Assemble system prompt with optional skill catalog.
+      7.5. Fetch knowledge file catalog from teemo_knowledge_index.
+      8. Assemble system prompt with optional skill + file catalogs.
       9. Build 4 skill tool functions (load_skill, create_skill, update_skill, delete_skill).
-      10. Construct and return (Agent, AgentDeps).
+      10. Build web tools (web_search, crawl_page, http_request).
+      11.5. Build read_drive_file tool (Drive content fetch with self-healing).
+      12. Construct and return (Agent, AgentDeps).
 
     Args:
         workspace_id: String UUID of the requesting workspace.
@@ -353,8 +371,22 @@ async def build_agent(
     # --- 7. Fetch skills ---
     skills = list_skills(workspace_id, supabase)
 
+    # --- 7.5. Fetch knowledge files for system prompt ---
+    # Query teemo_knowledge_index to build the file catalog injected into the
+    # system prompt (ADR-005: real-time retrieval — agent picks file by
+    # ai_description, then calls read_drive_file to fetch content on-demand).
+    knowledge_result = (
+        supabase.table("teemo_knowledge_index")
+        .select("drive_file_id, title, ai_description")
+        .eq("workspace_id", workspace_id)
+        .execute()
+    )
+    # Guard against mocks or unexpected non-list data from the DB client.
+    raw_files = knowledge_result.data
+    knowledge_files: list[dict] = raw_files if isinstance(raw_files, list) else []
+
     # --- 8. Build system prompt ---
-    prompt = _build_system_prompt(skills)
+    prompt = _build_system_prompt(skills, knowledge_files)
 
     # --- 9. Build skill tool functions ---
     # Tools are defined as closures capturing (workspace_id, supabase) from
@@ -562,12 +594,99 @@ async def build_agent(
         except httpx.ConnectError as e:
             return f"Connection failed: {e}"
 
+    # --- 11.5. Drive file reader tool ---
+    async def read_drive_file(ctx: Any, drive_file_id: str) -> str:
+        """Read a file from the workspace's Google Drive knowledge base.
+
+        Fetches the file content from Drive, checks for content changes
+        (self-healing), and returns the plain text content to the agent.
+        If the file has changed since the last scan, re-generates the AI
+        description automatically and upserts the updated row into
+        teemo_knowledge_index.
+
+        Workspace isolation is enforced: only files indexed under the
+        calling workspace's teemo_knowledge_index rows are accessible.
+
+        Args:
+            ctx:           pydantic-ai RunContext with deps.
+            drive_file_id: The Google Drive file ID to read (as listed in
+                           the '## Available Files' section of the system prompt).
+
+        Returns:
+            The plain text content of the file, or a user-friendly error
+            message if the file is not found or Drive access is unavailable.
+        """
+        from app.services.drive_service import (
+            get_drive_client,
+            fetch_file_content,
+            compute_content_hash,
+        )
+        from app.services.scan_service import generate_ai_description
+
+        deps = ctx.deps
+
+        # 1. Look up file in knowledge index — enforces workspace isolation.
+        file_result = (
+            deps.supabase.table("teemo_knowledge_index")
+            .select("*")
+            .eq("workspace_id", deps.workspace_id)
+            .eq("drive_file_id", drive_file_id)
+            .execute()
+        )
+        if not file_result.data:
+            return "File not found in this workspace's knowledge base."
+
+        file_row = file_result.data[0]
+
+        # 2. Get workspace's Drive refresh token.
+        ws_result = (
+            deps.supabase.table("teemo_workspaces")
+            .select("encrypted_google_refresh_token, ai_provider, encrypted_api_key")
+            .eq("id", deps.workspace_id)
+            .maybe_single()
+            .execute()
+        )
+        if ws_result.data is None or not ws_result.data.get("encrypted_google_refresh_token"):
+            return "Google Drive access has been revoked. Please reconnect Drive from the dashboard."
+
+        ws_row = ws_result.data
+
+        # 3. Build Drive client and fetch content.
+        try:
+            drive_client = get_drive_client(ws_row["encrypted_google_refresh_token"])
+        except Exception as e:
+            if "invalid_grant" in str(e):
+                return "Google Drive access has been revoked. Please reconnect Drive from the dashboard."
+            return f"Drive access error: {e}"
+
+        content = fetch_file_content(drive_client, drive_file_id, file_row["mime_type"])
+
+        # 4. Self-healing: if content hash has changed, re-generate the AI
+        #    description and update teemo_knowledge_index (ADR-006).
+        new_hash = compute_content_hash(content)
+        if new_hash != file_row.get("content_hash"):
+            from app.core.encryption import decrypt as _decrypt_key
+            api_key_plain = _decrypt_key(ws_row["encrypted_api_key"])
+            new_description = await generate_ai_description(
+                content, ws_row["ai_provider"], api_key_plain
+            )
+            # Upsert only the changed fields — omit DEFAULT NOW() columns
+            # (FLASHCARDS.md: Supabase upsert + DEFAULT NOW() rule).
+            deps.supabase.table("teemo_knowledge_index").upsert({
+                "workspace_id": deps.workspace_id,
+                "drive_file_id": drive_file_id,
+                "content_hash": new_hash,
+                "ai_description": new_description,
+            }).execute()
+
+        return content
+
     # --- 12. Construct Agent and deps ---
     agent = Agent(
         model,
         system_prompt=prompt,
         deps_type=AgentDeps,
-        tools=[load_skill, create_skill, update_skill, delete_skill, web_search, crawl_page, http_request],
+        tools=[load_skill, create_skill, update_skill, delete_skill, web_search, crawl_page, http_request, read_drive_file],
     )
     deps = AgentDeps(
         workspace_id=workspace_id,

@@ -1,0 +1,590 @@
+/**
+ * /app/teams/$teamId/$workspaceId — Workspace detail page (STORY-006-05).
+ *
+ * Displays Drive connection status, a Google Picker button for indexing files,
+ * and the list of indexed knowledge files for a specific workspace.
+ *
+ * Route params:
+ *   - `teamId`      — Slack team ID (e.g. "T0123ABCDEF")
+ *   - `workspaceId` — workspace UUID
+ *
+ * Layout sections:
+ *   1. DriveSection   — Connect / Disconnect Google Drive
+ *   2. PickerSection  — "Add File" button (gated by Drive + BYOK) + file count
+ *   3. KnowledgeList  — table of indexed files with Remove action
+ *
+ * Design system (ADR-022):
+ *   - Coral brand: text-rose-500, bg-[#E94560]
+ *   - Slate neutrals for backgrounds and text
+ *   - Inter font (inherited from app.css)
+ *   - Max font weight: font-semibold (600) — never font-bold
+ *   - Tailwind 4 built-ins only — no new @theme tokens
+ *
+ * Google Picker integration:
+ *   - `gapi` script loaded dynamically once (checked via `window.gapi`)
+ *   - On "Add File" click: fetch picker token → gapi.load('picker') → PickerBuilder
+ *   - File select callback → POST to /api/workspaces/{id}/knowledge
+ *   - Shows loading state while AI description is generated (backend is ~5-30s)
+ *   - Shows truncation warning toast if response.warning is present (R8)
+ *
+ * BYOK gate (R6): picker button disabled with explanatory message when
+ *   `useKeyQuery(workspaceId).data.has_key !== true`.
+ * 15-file cap (R5): picker button disabled with count badge when files.length >= 15.
+ */
+import { useState, useCallback } from 'react';
+import { createFileRoute, Link } from '@tanstack/react-router';
+
+import { Card } from '../components/ui/Card';
+import { useWorkspaceQuery } from '../hooks/useWorkspaces';
+import { useKeyQuery } from '../hooks/useKey';
+import { useDriveStatusQuery, useDisconnectDriveMutation } from '../hooks/useDrive';
+import { useKnowledgeQuery, useAddKnowledgeMutation, useRemoveKnowledgeMutation } from '../hooks/useKnowledge';
+import { getPickerToken, type KnowledgeFile } from '../lib/api';
+
+// ---------------------------------------------------------------------------
+// Route declaration
+// ---------------------------------------------------------------------------
+
+/**
+ * TanStack Router file-based route for /app/teams/$teamId/$workspaceId.
+ * Params available via `Route.useParams()`.
+ */
+export const Route = createFileRoute('/app/teams/$teamId/$workspaceId')({
+  component: WorkspaceDetailPage,
+});
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/** Maximum number of files that can be indexed per workspace (R5). */
+const MAX_FILES = 15;
+
+/** Google API client script URL for loading the Picker API. */
+const GAPI_SCRIPT_URL = 'https://apis.google.com/js/api.js';
+
+// ---------------------------------------------------------------------------
+// Helper utilities
+// ---------------------------------------------------------------------------
+
+/**
+ * Loads the Google API client script into the document if it hasn't been
+ * loaded yet. Resolves when the script is ready. Idempotent — safe to call
+ * multiple times; only injects the script once.
+ *
+ * @returns A promise that resolves once the gapi global is available.
+ */
+function loadGapiScript(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof gapi !== 'undefined') {
+      resolve();
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = GAPI_SCRIPT_URL;
+    script.onload = () => resolve();
+    document.head.appendChild(script);
+  });
+}
+
+/**
+ * Returns a human-readable file type label derived from a Google Drive MIME type.
+ * Used in the KnowledgeList table to give a visual type indicator without icons.
+ *
+ * @param mimeType - MIME type string from Google Drive.
+ * @returns Short label string, e.g. "Doc", "Sheet", "Slide", "PDF", "File".
+ */
+function mimeTypeLabel(mimeType: string): string {
+  if (mimeType.includes('document')) return 'Doc';
+  if (mimeType.includes('spreadsheet')) return 'Sheet';
+  if (mimeType.includes('presentation')) return 'Slide';
+  if (mimeType === 'application/pdf') return 'PDF';
+  return 'File';
+}
+
+// ---------------------------------------------------------------------------
+// DriveSection
+// ---------------------------------------------------------------------------
+
+/** Props for DriveSection. */
+interface DriveSectionProps {
+  workspaceId: string;
+}
+
+/**
+ * DriveSection — shows Google Drive connection status with Connect/Disconnect actions.
+ *
+ * Connected state: "Connected as user@example.com" + "Disconnect" button.
+ *   Disconnect calls useDisconnectDriveMutation which invalidates the drive-status
+ *   cache so the section re-renders immediately.
+ *
+ * Not connected state: "Google Drive not connected" + "Connect Google Drive" button.
+ *   The connect button performs a full-page redirect to the backend OAuth initiation
+ *   endpoint (same pattern as Slack install — browser must carry the session cookie).
+ *
+ * @param workspaceId - UUID of the workspace to check/modify Drive connection for.
+ */
+function DriveSection({ workspaceId }: DriveSectionProps) {
+  const { data: driveStatus, isLoading } = useDriveStatusQuery(workspaceId);
+  const disconnectMutation = useDisconnectDriveMutation(workspaceId);
+
+  if (isLoading) {
+    return (
+      <Card className="animate-pulse">
+        <div className="h-4 w-1/3 rounded bg-slate-200 mb-2" />
+        <div className="h-3 w-1/2 rounded bg-slate-100" />
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <h2 className="text-base font-semibold text-slate-900 mb-3">Google Drive</h2>
+
+      {driveStatus?.connected ? (
+        /* Connected state */
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-sm text-slate-700">
+            Connected as{' '}
+            <span className="font-semibold text-slate-900">{driveStatus.email}</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => disconnectMutation.mutate()}
+            disabled={disconnectMutation.isPending}
+            className="text-sm font-semibold text-rose-500 hover:opacity-70 disabled:opacity-40"
+          >
+            {disconnectMutation.isPending ? 'Disconnecting…' : 'Disconnect'}
+          </button>
+          {disconnectMutation.error && (
+            <p className="w-full text-xs text-rose-600" role="alert">
+              {disconnectMutation.error instanceof Error
+                ? disconnectMutation.error.message
+                : 'Failed to disconnect. Please try again.'}
+            </p>
+          )}
+        </div>
+      ) : (
+        /* Not connected state */
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-sm text-slate-500">Google Drive not connected.</span>
+          {/* Full-page redirect: browser must carry session cookie to OAuth endpoint */}
+          <a
+            href={`/api/workspaces/${encodeURIComponent(workspaceId)}/drive/connect`}
+            className="rounded-md bg-[#E94560] px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90"
+          >
+            Connect Google Drive
+          </a>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// PickerSection
+// ---------------------------------------------------------------------------
+
+/** Props for PickerSection. */
+interface PickerSectionProps {
+  workspaceId: string;
+  /** Whether Google Drive is currently connected for this workspace. */
+  driveConnected: boolean;
+  /** Whether a BYOK key is configured for this workspace. */
+  hasKey: boolean;
+  /** Current count of indexed knowledge files. */
+  fileCount: number;
+  /**
+   * Callback invoked after a file is successfully indexed.
+   * Receives the new KnowledgeFile record (including any warning).
+   */
+  onFileIndexed: (file: KnowledgeFile) => void;
+  /** Callback when indexing state changes — for showing a visible progress banner. */
+  onIndexingChange?: (indexing: boolean) => void;
+}
+
+/**
+ * PickerSection — "Add File" button with Google Picker integration.
+ *
+ * Button disabled conditions (in priority order):
+ *   1. Drive not connected — shows "Connect Drive first" tooltip
+ *   2. No BYOK key — shows "Configure an API key first" message below button
+ *   3. File cap reached (fileCount >= 15) — button text shows "15/15 files"
+ *
+ * On click:
+ *   1. Fetches a short-lived picker token from the backend
+ *   2. Loads gapi script if not already present
+ *   3. gapi.load('picker') → builds PickerBuilder with OAuth token + API key
+ *   4. User selects a file → callback fires → POST to /knowledge endpoint
+ *   5. Shows loading state while backend generates AI description
+ *   6. Calls onFileIndexed with the result (caller handles truncation warning)
+ *
+ * @param props - See PickerSectionProps.
+ */
+function PickerSection({
+  workspaceId,
+  driveConnected,
+  hasKey,
+  fileCount,
+  onFileIndexed,
+  onIndexingChange,
+}: PickerSectionProps) {
+  const [indexing, setIndexing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const addKnowledgeMutation = useAddKnowledgeMutation(workspaceId);
+
+  const atCap = fileCount >= MAX_FILES;
+  const buttonDisabled = !driveConnected || !hasKey || atCap || indexing;
+
+  /**
+   * Opens the Google Picker dialog.
+   * Handles token fetch, script load, and picker construction.
+   */
+  const handleOpenPicker = useCallback(async () => {
+    setError(null);
+    try {
+      // Fetch short-lived picker token from backend
+      const { access_token, picker_api_key } = await getPickerToken(workspaceId);
+
+      // Load gapi script if needed
+      await loadGapiScript();
+
+      // Load the picker module then build and open the picker
+      gapi.load('picker', () => {
+        const picker = new google.picker.PickerBuilder()
+          .setOAuthToken(access_token)
+          .setDeveloperKey(picker_api_key)
+          .addView(google.picker.ViewId.DOCS)
+          .setCallback(async (data: google.picker.CallbackData) => {
+            if (data.action !== google.picker.Action.PICKED) return;
+            const doc = data.docs?.[0];
+            if (!doc) return;
+
+            setIndexing(true);
+            onIndexingChange?.(true);
+            try {
+              const result = await addKnowledgeMutation.mutateAsync({
+                drive_file_id: doc.id,
+                title: doc.name,
+                link: doc.url,
+                mime_type: doc.mimeType,
+                access_token,
+              });
+              onFileIndexed(result);
+            } catch (err) {
+              setError(err instanceof Error ? err.message : 'Failed to index file.');
+            } finally {
+              setIndexing(false);
+              onIndexingChange?.(false);
+            }
+          })
+          .build();
+
+        picker.setVisible(true);
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to open file picker.');
+    }
+  }, [workspaceId, addKnowledgeMutation, onFileIndexed]);
+
+  return (
+    <Card>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
+        <h2 className="text-base font-semibold text-slate-900">Knowledge Files</h2>
+
+        {/* File count indicator + Add File button */}
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-slate-500">
+            {fileCount}/{MAX_FILES} files
+          </span>
+          <button
+            type="button"
+            onClick={handleOpenPicker}
+            disabled={buttonDisabled}
+            title={
+              !driveConnected
+                ? 'Connect Drive first'
+                : atCap
+                  ? `${MAX_FILES} file limit reached`
+                  : undefined
+            }
+            className="rounded-md bg-[#E94560] px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {indexing ? 'Indexing…' : 'Add File'}
+          </button>
+        </div>
+      </div>
+
+      {/* BYOK gate message (R6) */}
+      {driveConnected && !hasKey && (
+        <p className="text-xs text-amber-600 mt-1">
+          Configure an API key first to enable file indexing.
+        </p>
+      )}
+
+      {/* Indexing error */}
+      {error && (
+        <p className="text-xs text-rose-600 mt-1" role="alert">
+          {error}
+        </p>
+      )}
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// KnowledgeList
+// ---------------------------------------------------------------------------
+
+/** Props for KnowledgeList. */
+interface KnowledgeListProps {
+  workspaceId: string;
+  files: KnowledgeFile[];
+  isLoading: boolean;
+}
+
+/**
+ * KnowledgeList — table of indexed knowledge files with Remove actions.
+ *
+ * Columns: Title (link to Drive), AI Description (truncated ~100 chars),
+ * Type label, Remove button.
+ *
+ * Empty state: "No files indexed yet. Use the picker above to add files."
+ * Loading state: skeleton rows.
+ *
+ * Remove button calls useRemoveKnowledgeMutation and the list updates
+ * automatically via query cache invalidation on success.
+ *
+ * @param workspaceId - UUID of the workspace (used by remove mutation).
+ * @param files       - Array of knowledge file records to display.
+ * @param isLoading   - Whether the knowledge query is loading.
+ */
+function KnowledgeList({ workspaceId, files, isLoading }: KnowledgeListProps) {
+  const removeMutation = useRemoveKnowledgeMutation(workspaceId);
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="animate-pulse rounded-lg border border-slate-200 bg-white p-4">
+            <div className="h-4 w-1/3 rounded bg-slate-200 mb-2" />
+            <div className="h-3 w-2/3 rounded bg-slate-100" />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (files.length === 0) {
+    return (
+      <Card className="py-10 text-center">
+        <p className="text-sm text-slate-500">
+          No files indexed yet. Use the picker above to add files.
+        </p>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {files.map((file) => (
+        <Card key={file.id} className="p-4">
+          <div className="flex items-start justify-between gap-4">
+            {/* File info */}
+            <div className="min-w-0 flex-1">
+              {/* Title + type badge */}
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-xs bg-slate-100 text-slate-600 rounded px-1.5 py-0.5 font-semibold shrink-0">
+                  {mimeTypeLabel(file.mime_type)}
+                </span>
+                <a
+                  href={file.link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm font-semibold text-slate-900 truncate hover:text-rose-500"
+                >
+                  {file.title}
+                </a>
+              </div>
+
+              {/* AI description (truncated) */}
+              {file.ai_description && (
+                <p className="text-xs text-slate-500 line-clamp-2">
+                  {file.ai_description.length > 100
+                    ? `${file.ai_description.slice(0, 100)}…`
+                    : file.ai_description}
+                </p>
+              )}
+            </div>
+
+            {/* Remove button */}
+            <button
+              type="button"
+              onClick={() => removeMutation.mutate(file.id)}
+              disabled={removeMutation.isPending}
+              className="shrink-0 text-xs font-semibold text-rose-500 hover:opacity-70 disabled:opacity-40"
+              aria-label={`Remove ${file.title}`}
+            >
+              {removeMutation.isPending ? 'Removing…' : 'Remove'}
+            </button>
+          </div>
+
+          {/* Remove error */}
+          {removeMutation.error && (
+            <p className="mt-1 text-xs text-rose-600" role="alert">
+              {removeMutation.error instanceof Error
+                ? removeMutation.error.message
+                : 'Failed to remove file.'}
+            </p>
+          )}
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// TruncationToast
+// ---------------------------------------------------------------------------
+
+/**
+ * TruncationToast — inline banner shown when a just-indexed file was truncated.
+ *
+ * Displayed for 10 seconds after a successful file index where the response
+ * includes a `warning` field (file content > 50,000 chars, R8).
+ *
+ * @param message - Warning message text from the backend response.
+ * @param onDismiss - Callback to dismiss the banner.
+ */
+function TruncationToast({
+  message,
+  onDismiss,
+}: {
+  message: string;
+  onDismiss: () => void;
+}) {
+  return (
+    <div
+      role="alert"
+      className="flex items-start justify-between gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800"
+    >
+      <span>⚠ {message}</span>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="shrink-0 text-xs font-semibold text-amber-700 hover:opacity-70"
+        aria-label="Dismiss warning"
+      >
+        Dismiss
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// WorkspaceDetailPage
+// ---------------------------------------------------------------------------
+
+/**
+ * WorkspaceDetailPage — top-level page component for the workspace detail route.
+ *
+ * Composes DriveSection, PickerSection, and KnowledgeList with shared state
+ * for the truncation warning toast. Route params are read via `Route.useParams()`.
+ *
+ * Auth protection is inherited from the grandparent `app.tsx` layout route.
+ */
+function WorkspaceDetailPage() {
+  const { teamId, workspaceId } = Route.useParams();
+  const [truncationWarning, setTruncationWarning] = useState<string | null>(null);
+  const [isIndexing, setIsIndexing] = useState(false);
+
+  // Data queries
+  const { data: workspace } = useWorkspaceQuery(workspaceId);
+  const { data: keyData } = useKeyQuery(workspaceId);
+  const { data: driveStatus } = useDriveStatusQuery(workspaceId);
+  const {
+    data: knowledgeFiles,
+    isLoading: knowledgeLoading,
+  } = useKnowledgeQuery(workspaceId);
+
+  const files = knowledgeFiles ?? [];
+  const driveConnected = driveStatus?.connected ?? false;
+  const hasKey = keyData?.has_key === true;
+
+  /**
+   * Handles the result of a successful file indexing operation.
+   * Shows a truncation warning banner if the response includes a warning field.
+   */
+  const handleFileIndexed = useCallback((file: KnowledgeFile) => {
+    if (file.warning) {
+      setTruncationWarning(file.warning);
+    }
+  }, []);
+
+  return (
+    <div className="min-h-screen bg-slate-50 px-4 py-8">
+      <div className="mx-auto max-w-2xl space-y-6">
+
+        {/* Breadcrumb */}
+        <div>
+          <nav className="flex items-center gap-1 text-sm text-slate-500 mb-2" aria-label="Breadcrumb">
+            <Link to="/app" className="hover:text-slate-700">Teams</Link>
+            <span className="text-slate-300">/</span>
+            <Link
+              to="/app/teams/$teamId"
+              params={{ teamId }}
+              className="hover:text-slate-700"
+            >
+              {teamId}
+            </Link>
+            <span className="text-slate-300">/</span>
+            <span className="text-slate-700 font-semibold">
+              {workspace?.name ?? workspaceId}
+            </span>
+          </nav>
+
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
+            {workspace?.name ?? 'Workspace'}
+          </h1>
+        </div>
+
+        {/* Truncation warning banner (R8) */}
+        {truncationWarning && (
+          <TruncationToast
+            message={truncationWarning}
+            onDismiss={() => setTruncationWarning(null)}
+          />
+        )}
+
+        {/* Drive connection section */}
+        <DriveSection workspaceId={workspaceId} />
+
+        {/* Picker section (file count + Add File button) */}
+        <PickerSection
+          workspaceId={workspaceId}
+          driveConnected={driveConnected}
+          hasKey={hasKey}
+          fileCount={files.length}
+          onFileIndexed={handleFileIndexed}
+          onIndexingChange={setIsIndexing}
+        />
+
+        {/* Visible indexing progress banner */}
+        {isIndexing && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 animate-pulse">
+            Reading file from Google Drive and generating AI description... This may take a few seconds.
+          </div>
+        )}
+
+        {/* Knowledge file list */}
+        <KnowledgeList
+          workspaceId={workspaceId}
+          files={files}
+          isLoading={knowledgeLoading}
+        />
+
+      </div>
+    </div>
+  );
+}

@@ -1,7 +1,7 @@
 ---
 story_id: "STORY-003-B01-workspace-models"
 parent_epic_ref: "EPIC-003"
-status: "Ready for Parallel"
+status: "Ready to Bounce"
 ambiguity: "🟢 Low"
 context_source: "Epic §5, §4"
 actor: "Developer Agent"
@@ -56,6 +56,12 @@ Feature: Workspace Response Model Security
 | Prerequisite | Value | Verified? |
 |-------------|-------|-----------|
 | **Migrations** | DB migrated to at least 007 (S-03 completed) | [ ] |
+
+### 3.0a Salvage Source (Sprint S-05 — from aborted S-05-fasttrack)
+All three files below are pre-validated and SHOULD be copied verbatim via `git show e98d378:<path>`:
+- `backend/app/models/workspace.py` — 52 lines, `WorkspaceBase`, `WorkspaceCreate`, `WorkspaceUpdate`, `WorkspaceResponse`
+- `backend/tests/test_workspace_models.py` — 38 lines, `test_workspace_response_omits_secrets`
+- `backend/app/models/__init__.py` — adds `WorkspaceCreate`, `WorkspaceResponse`, `WorkspaceUpdate` to `__all__`
 
 ### 3.1 Test Implementation
 - Add schema unit tests in `backend/tests/test_workspace_models.py` to explicitly enforce secret exclusion.

@@ -1,14 +1,14 @@
 ---
 story_id: "STORY-003-B04-frontend-api-hooks"
 parent_epic_ref: "EPIC-003"
-status: "Ready for Parallel"
+status: "Ready to Bounce"
 ambiguity: "🟢 Low"
 context_source: "Epic §5"
 actor: "Developer Agent"
 complexity_label: "L2"
 ---
 
-# STORY-003-B04: Frontend API API Wrappers & Hooks
+# STORY-003-B04: Frontend API Wrappers & Hooks
 
 **Complexity: L2** — TanStack Query hooks for workspace data.
 
@@ -53,7 +53,14 @@ Feature: API Hooks Caching and Invalidation
 ### 3.0 Environment Prerequisites
 | Prerequisite | Value | Verified? |
 |-------------|-------|-----------|
-| **Backend** | B02 running | [ ] |
+| **Models** | B01 models merged (type contract for `Workspace`) | [ ] |
+| **Backend B02** | NOT required — hooks are tested against mocked API module (`vi.mock('../lib/api')`) | N/A |
+
+### 3.0a Salvage Source (Sprint S-05 — from aborted S-05-fasttrack)
+Pre-validated files from `git show e98d378:<path>`:
+- `frontend/src/hooks/useWorkspaces.ts` — 90 lines, 6 hooks. Copy verbatim.
+- `frontend/src/hooks/useWorkspaces.test.tsx` — 45 lines, 1 test. Copy + **extend with 1 more test** (e.g. `useMakeDefaultMutation` invalidation) to meet §4.1 minimum of 2.
+- `frontend/src/lib/api.ts` — **DO NOT apply the branch diff as-is.** It destructively rewrites S-04's `SlackTeam`/`SlackTeamsResponse`/`listSlackTeams`. Instead, ADDITIVELY copy only: `Workspace` interface, `apiPatch<TReq, TRes>()` helper, and the 5 new workspace wrappers (`listWorkspaces`, `getWorkspace`, `createWorkspace`, `renameWorkspace`, `makeWorkspaceDefault`). Leave all S-04 exports untouched.
 
 ### 3.1 Test Implementation
 - Write `frontend/src/hooks/useWorkspaces.test.tsx`. Note: Remember Vitest TDZ `vi.hoisted()` for mocking API calls or setting up query clients.

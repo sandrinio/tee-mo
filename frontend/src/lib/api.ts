@@ -201,13 +201,13 @@ export async function apiPatch<TReq, TRes>(path: string, body: TReq): Promise<TR
 }
 
 /**
- * GET /api/workspaces?team_id={teamId} — fetches all workspaces for a Slack team.
+ * GET /api/slack-teams/{teamId}/workspaces — fetches all workspaces for a Slack team.
  *
  * @param teamId - The Slack team ID to filter workspaces by.
  * @returns Array of workspace records belonging to the team.
  */
 export async function listWorkspaces(teamId: string): Promise<Workspace[]> {
-  return apiGet<Workspace[]>(`/api/workspaces?team_id=${encodeURIComponent(teamId)}`);
+  return apiGet<Workspace[]>(`/api/slack-teams/${encodeURIComponent(teamId)}/workspaces`);
 }
 
 /**
@@ -221,16 +221,16 @@ export async function getWorkspace(id: string): Promise<Workspace> {
 }
 
 /**
- * POST /api/workspaces — creates a new workspace under the given Slack team.
+ * POST /api/slack-teams/{teamId}/workspaces — creates a new workspace under the given Slack team.
  *
  * @param teamId - The Slack team ID this workspace belongs to.
  * @param name   - The human-readable workspace name.
  * @returns The newly created workspace record.
  */
 export async function createWorkspace(teamId: string, name: string): Promise<Workspace> {
-  return apiPost<{ slack_team_id: string; name: string }, Workspace>(
-    '/api/workspaces',
-    { slack_team_id: teamId, name },
+  return apiPost<{ name: string }, Workspace>(
+    `/api/slack-teams/${encodeURIComponent(teamId)}/workspaces`,
+    { name },
   );
 }
 
@@ -249,7 +249,7 @@ export async function renameWorkspace(id: string, name: string): Promise<Workspa
 }
 
 /**
- * PATCH /api/workspaces/{id}/default — sets a workspace as the team default.
+ * POST /api/workspaces/{id}/make-default — sets a workspace as the team default.
  *
  * The backend clears `is_default_for_team` on all other workspaces in the
  * same Slack team before setting the flag on the target workspace.
@@ -258,8 +258,8 @@ export async function renameWorkspace(id: string, name: string): Promise<Workspa
  * @returns The updated workspace record with `is_default_for_team: true`.
  */
 export async function makeWorkspaceDefault(id: string): Promise<Workspace> {
-  return apiPatch<Record<string, never>, Workspace>(
-    `/api/workspaces/${encodeURIComponent(id)}/default`,
+  return apiPost<Record<string, never>, Workspace>(
+    `/api/workspaces/${encodeURIComponent(id)}/make-default`,
     {},
   );
 }

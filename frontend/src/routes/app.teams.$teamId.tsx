@@ -146,7 +146,7 @@ export function TeamDetailContent() {
         {!isLoading && !error && workspaces && workspaces.length > 0 && (
           <div className="grid gap-3">
             {workspaces.map((ws) => (
-              <WorkspaceCard key={ws.id} workspace={ws} />
+              <WorkspaceCard key={ws.id} workspace={ws} teamId={teamId} />
             ))}
           </div>
         )}

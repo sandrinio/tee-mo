@@ -86,3 +86,11 @@ Feature: Workspace Card Actions
 ### 4.2 Definition of Done (The Gate)
 - [ ] No Radix toasts used.
 - [ ] Optimistic update logic handles rollbacks cleanly.
+
+---
+
+## Token Usage
+
+| Agent | Input | Output | Total |
+|-------|-------|--------|-------|
+| Developer | 1,078 | 1,174 | 2,252 |

@@ -137,26 +137,95 @@ export function useRenameWorkspaceMutation() {
 /**
  * Promotes a workspace as the default for its Slack team.
  *
- * On success:
- *   1. Updates the individual `['workspace', id]` cache entry directly.
- *   2. Invalidates the `['workspaces', teamId]` list so the "Default" badge
- *      moves correctly across all workspace cards without a manual refetch.
+ * When `teamId` is provided (recommended), uses TanStack Query optimistic updates
+ * for instant UI feedback:
+ *   - `onMutate`: snapshots the current workspace list and immediately flips
+ *     `is_default_for_team` flags so only the targeted workspace shows as default.
+ *   - `onError`: rolls back to the snapshot if the server call fails.
+ *   - `onSettled`: invalidates `['workspaces', teamId]` to sync with the server.
  *
+ * When `teamId` is omitted (legacy / test usage), falls back to the original
+ * `onSuccess` behaviour: reads `slack_team_id` from the server response and
+ * invalidates the list for that team. No optimistic update is applied.
+ *
+ * @param teamId - Slack team ID whose workspace list will be optimistically updated.
+ *   Pass a non-empty string to enable optimistic UI. Omit (or pass `''`) for the
+ *   non-optimistic fallback path used by unit tests and legacy call sites.
  * @returns TanStack Mutation object. Call `.mutate(id)` to make a workspace default.
  */
-export function useMakeDefaultMutation() {
+export function useMakeDefaultMutation(teamId?: string) {
   const queryClient = useQueryClient();
+
+  // Whether to engage the optimistic update path.
+  const optimistic = !!teamId;
 
   return useMutation({
     mutationFn: (id: string) => makeWorkspaceDefault(id),
-    onSuccess: (updatedWorkspace) => {
-      queryClient.setQueryData(['workspace', updatedWorkspace.id], updatedWorkspace);
-      if (updatedWorkspace.slack_team_id) {
-        // Force refresh the list so the "Default" badge moves correctly
-        queryClient.invalidateQueries({
-          queryKey: ['workspaces', updatedWorkspace.slack_team_id],
-        });
-      }
-    },
+
+    /**
+     * Optimistically update the workspace list before the server responds.
+     * Only runs when `teamId` is provided. Returns a rollback snapshot.
+     */
+    onMutate: optimistic
+      ? async (id: string) => {
+          // Cancel any in-flight refetches so they don't overwrite the optimistic update.
+          await queryClient.cancelQueries({ queryKey: ['workspaces', teamId] });
+
+          // Snapshot the current list for rollback on error.
+          const previous = queryClient.getQueryData<Workspace[]>(['workspaces', teamId]);
+
+          // Flip is_default_for_team: only the targeted workspace is default.
+          queryClient.setQueryData<Workspace[]>(['workspaces', teamId], (old) =>
+            old?.map((ws) => ({ ...ws, is_default_for_team: ws.id === id }))
+          );
+
+          return { previous };
+        }
+      : undefined,
+
+    /**
+     * On error, roll back the optimistic update using the snapshot from onMutate.
+     * Only active in the optimistic path.
+     */
+    onError: optimistic
+      ? (
+          _err: unknown,
+          _id: string,
+          context: { previous: Workspace[] | undefined } | undefined
+        ) => {
+          if (context?.previous !== undefined) {
+            queryClient.setQueryData(['workspaces', teamId], context.previous);
+          }
+        }
+      : undefined,
+
+    /**
+     * On settle (success or error): invalidate the list query to sync with the server.
+     * - Optimistic path: invalidates `['workspaces', teamId]`.
+     * - Legacy path: reads `slack_team_id` from the resolved value and invalidates
+     *   that team's list (mirrors the original B04 behaviour, keeps existing tests green).
+     */
+    onSettled: optimistic
+      ? () => {
+          queryClient.invalidateQueries({ queryKey: ['workspaces', teamId] });
+        }
+      : undefined,
+
+    /**
+     * Legacy (non-optimistic) success handler.
+     * Updates the individual workspace cache entry and invalidates the team's list
+     * using `slack_team_id` from the server response. Only active when `teamId`
+     * is not provided.
+     */
+    onSuccess: optimistic
+      ? undefined
+      : (updatedWorkspace: Workspace) => {
+          queryClient.setQueryData(['workspace', updatedWorkspace.id], updatedWorkspace);
+          if (updatedWorkspace.slack_team_id) {
+            queryClient.invalidateQueries({
+              queryKey: ['workspaces', updatedWorkspace.slack_team_id],
+            });
+          }
+        },
   });
 }

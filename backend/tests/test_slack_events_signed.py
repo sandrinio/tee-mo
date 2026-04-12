@@ -312,19 +312,17 @@ def test_expired_timestamp_returns_401(client):
 
 
 def test_valid_signed_app_mention_event_callback_returns_202(client):
-    """Integration test 7 — valid signed event_callback → 202 empty body.
+    """Integration test 7 — valid signed event_callback → 200 empty body.
 
-    Gherkin scenario: 'valid signed app_mention event → 202 empty body'
+    Gherkin scenario: 'valid signed app_mention event → 200 empty body'
 
-    A signed event that is NOT url_verification must still receive 202.
-    Tests that hardening doesn't break the passthrough behavior.
+    STORY-007-05 changed this from 202 to 200: event_callback payloads are now
+    dispatched via asyncio.create_task to handle_slack_event, and the endpoint
+    acknowledges immediately with 200 OK.
 
     Failure mode in Red: `verify_slack_signature` doesn't exist yet, so we
     re-raise the ImportError — same guard as tests 1, 2, and 3. This prevents
     the test from accidentally passing against the unarmed stub.
-
-    In Green Phase: the signed request passes verification, falls through to
-    the 202 Accepted passthrough → 202 with empty body.
     """
     if _IMPORT_ERROR is not None:
         raise _IMPORT_ERROR
@@ -347,7 +345,7 @@ def test_valid_signed_app_mention_event_callback_returns_202(client):
         },
     )
 
-    assert response.status_code == 202
+    assert response.status_code == 200
     assert response.content == b""
 
 

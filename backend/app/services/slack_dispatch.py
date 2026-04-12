@@ -208,7 +208,7 @@ async def _handle_app_mention(event: dict) -> None:
         # 10. Post reply
         await client.chat_postMessage(
             channel=channel,
-            text=str(result.data),
+            text=str(result.output),
             thread_ts=thread_ts,
         )
 
@@ -368,7 +368,7 @@ async def _handle_dm(event: dict) -> None:
         # 7. Post reply to DM channel
         await client.chat_postMessage(
             channel=channel,
-            text=str(result.data),
+            text=str(result.output),
             thread_ts=thread_ts,
         )
 

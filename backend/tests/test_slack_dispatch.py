@@ -305,7 +305,7 @@ async def test_app_mention_bound_channel_happy_path(
 
     # --- Mock agent ---
     mock_agent_result = MagicMock()
-    mock_agent_result.data = "Hello from agent!"
+    mock_agent_result.output ="Hello from agent!"
 
     mock_agent = MagicMock()
     mock_agent.run = AsyncMock(return_value=mock_agent_result)
@@ -446,7 +446,7 @@ async def test_dm_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(enc_module, "decrypt", lambda _: "xoxb-fake-bot-token")
 
     mock_agent_result = MagicMock()
-    mock_agent_result.data = "DM reply from agent"
+    mock_agent_result.output ="DM reply from agent"
     mock_agent = MagicMock()
     mock_agent.run = AsyncMock(return_value=mock_agent_result)
 
@@ -772,7 +772,7 @@ async def test_mention_prefix_stripped_before_agent(monkeypatch: pytest.MonkeyPa
 
     # Capture the argument passed to agent.run()
     mock_agent_result = MagicMock()
-    mock_agent_result.data = "stripped prefix response"
+    mock_agent_result.output ="stripped prefix response"
     mock_agent = MagicMock()
     mock_agent.run = AsyncMock(return_value=mock_agent_result)
 

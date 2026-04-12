@@ -1,6 +1,6 @@
 ---
-last_updated: "2026-04-12T18:30"
-status: "In Execution — Release 1 ~92% delivered (S-01 + S-02 + S-03 + S-04 shipped; live at https://teemo.soula.ge; Slack OAuth install end-to-end; EPIC-003 Slice B [S-05 workspace CRUD] remaining to close Release 1)"
+last_updated: "2026-04-12T21:30"
+status: "In Execution — Release 1 delivered (S-01–S-05). Release 2 started: EPIC-004 done (S-06, v0.6.0). Next: EPIC-006 Google Drive."
 charter_ref: "product_plans/strategy/tee_mo_charter.md"
 design_guide_ref: "product_plans/strategy/tee_mo_design_guide.md"
 risk_registry_ref: "product_plans/strategy/RISK_REGISTRY.md"
@@ -73,7 +73,7 @@ risk_registry_ref: "product_plans/strategy/RISK_REGISTRY.md"
 
 | Epic | Priority | Status | Notes |
 |------|----------|--------|-------|
-| EPIC-004: BYOK Key Management | P0 | Draft | Copy + strip from new_app. One key per provider. Hard gate for file indexing. |
+| EPIC-004: BYOK Key Management | P0 | **Done (S-06)** — tagged `v0.6.0` | 4 routes, provider validation, key resolvers, frontend KeySection UI. 23 tests. Unlocks EPIC-006 + EPIC-007. |
 | EPIC-005: Slack Integration (OAuth + Events + Bindings) | P0 | Draft | Slack Bolt AsyncApp. OAuth install writes `slack_teams`. Event handlers: `app_mention` resolves via `workspace_channels` (unbound → setup-nudge reply, no fallback), `message.im` resolves via `is_default_for_team`. Channel binding REST (`GET /api/slack/teams/:id/channels`, `POST/DELETE /api/workspaces/:id/channels`, `POST /api/workspaces/:id/make-default`). Scopes: `app_mentions:read`, `channels:history`, `groups:history`, `im:history`, `chat:write`, **`channels:read`**, **`groups:read`**. See ADR-024 + ADR-025. |
 | EPIC-006: Google Drive Integration | P0 | Draft | Offline refresh token OAuth, Google Picker, knowledge_index CRUD, `read_drive_file` tool with MIME routing (Docs/Sheets/Slides/PDF/Word/Excel). |
 | EPIC-007: AI Agent + Two-Tier Models + Skills | P0 | Draft | Copy + strip orchestrator. `build_agent(tier)` factory. `scan_file_metadata` service. Self-updating `ai_description` via content hash check. Skills: `skills` table + `skill_service.py` (copy + strip from new_app) + 4 orchestrator tools (`load_skill`, `create_skill`, `update_skill`, `delete_skill`) — no `related_tools`, no seeded skills. Chat-only CRUD. |

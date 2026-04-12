@@ -1,6 +1,6 @@
 ---
 epic_id: "EPIC-004"
-status: "Ready"
+status: "Done"
 ambiguity: "🟢 Low"
 context_source: "Charter §3.3, §5.2, §5.3, §10 BYOK Epic Seed Map / Roadmap §2 Release 2"
 release: "Release 2: Core Pipeline (Days 3–6, Sprints 5–12)"

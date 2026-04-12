@@ -229,3 +229,13 @@ Use the existing httpx monkeypatch pattern from `tests/test_slack_routes.py` (sh
 | Date | Change | By |
 |------|--------|-----|
 | 2026-04-12 | Story created from EPIC-004 decomposition | Claude (doc-manager) |
+
+---
+
+## Token Usage
+
+| Agent | Input | Output | Total |
+|-------|-------|--------|-------|
+| Developer | 53 | 6,324 | 6,377 |
+| QA | 7 | 147 | 154 |
+| DevOps | 13 | 536 | 549 |

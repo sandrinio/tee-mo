@@ -236,3 +236,11 @@ Use the same RTL + Vitest + `jest-dom` infrastructure established in S-04 (see `
 | Date | Change | By |
 |------|--------|-----|
 | 2026-04-12 | Story created from EPIC-004 decomposition | Claude (doc-manager) |
+
+---
+
+## Token Usage
+
+| Agent | Input | Output | Total |
+|-------|-------|--------|-------|
+| Developer | 1,974 | 1,230 | 3,204 |

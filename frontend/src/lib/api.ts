@@ -263,3 +263,101 @@ export async function makeWorkspaceDefault(id: string): Promise<Workspace> {
     {},
   );
 }
+
+// ---------------------------------------------------------------------------
+// BYOK Key wrappers (STORY-004-03)
+// ---------------------------------------------------------------------------
+
+/**
+ * Response shape for GET /api/workspaces/{id}/keys.
+ * Mirrors backend/app/models/key.py::KeyResponse (ADR-002).
+ * The plaintext key is NEVER returned — only the mask.
+ */
+export interface ProviderKey {
+  /** true if an encrypted key is stored for this workspace */
+  has_key: boolean;
+  /** 'google' | 'openai' | 'anthropic' — null if has_key is false */
+  provider: string | null;
+  /** Masked key string e.g. "sk-a...xyz9" — null if has_key is false */
+  key_mask: string | null;
+  /** User-selected conversation-tier model ID */
+  ai_model: string | null;
+}
+
+/** Request body for POST /api/workspaces/{id}/keys */
+export interface SaveKeyRequest {
+  provider: 'google' | 'openai' | 'anthropic';
+  key: string;
+  ai_model?: string;
+}
+
+/** Request body for POST /api/keys/validate */
+export interface ValidateKeyRequest {
+  provider: 'google' | 'openai' | 'anthropic';
+  key: string;
+}
+
+/** Response from POST /api/keys/validate */
+export interface ValidateKeyResponse {
+  valid: boolean;
+  message: string;
+}
+
+/**
+ * GET /api/workspaces/{workspaceId}/keys
+ * Returns key status for a workspace — never returns the plaintext key.
+ *
+ * @param workspaceId - UUID of the workspace to fetch key status for.
+ * @returns Key status including has_key, provider, key_mask, and ai_model.
+ */
+export function getKey(workspaceId: string): Promise<ProviderKey> {
+  return apiGet<ProviderKey>(`/api/workspaces/${encodeURIComponent(workspaceId)}/keys`);
+}
+
+/**
+ * POST /api/workspaces/{workspaceId}/keys
+ * Encrypt and store the user's BYOK API key for this workspace.
+ *
+ * @param workspaceId - UUID of the workspace to associate the key with.
+ * @param body        - Provider, plaintext key, and optional model selection.
+ * @returns Updated key status (plaintext key stripped — returns mask only).
+ */
+export function saveKey(workspaceId: string, body: SaveKeyRequest): Promise<ProviderKey> {
+  return apiPost<SaveKeyRequest, ProviderKey>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/keys`,
+    body,
+  );
+}
+
+/**
+ * DELETE /api/workspaces/{workspaceId}/keys
+ * Clears the stored key, ai_provider, and ai_model for this workspace.
+ *
+ * Uses raw fetch (no apiDelete helper — keeping the change additive per §3.4).
+ * Throws an Error with the backend `detail` message on non-2xx responses.
+ *
+ * @param workspaceId - UUID of the workspace whose key should be deleted.
+ * @returns Confirmation message from the backend.
+ */
+export async function deleteWorkspaceKey(workspaceId: string): Promise<{ message: string }> {
+  const r = await fetch(`${API_URL}/api/workspaces/${encodeURIComponent(workspaceId)}/keys`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+  if (!r.ok) {
+    const payload = await r.json().catch(() => ({}));
+    throw new Error(payload?.detail ?? `HTTP ${r.status}`);
+  }
+  return r.json();
+}
+
+/**
+ * POST /api/keys/validate
+ * Probes the provider API with the key to verify it is valid — does NOT store it.
+ *
+ * @param body - Provider and plaintext key to validate.
+ * @returns Validation result with `valid` flag and human-readable `message`.
+ */
+export function validateKey(body: ValidateKeyRequest): Promise<ValidateKeyResponse> {
+  return apiPost<ValidateKeyRequest, ValidateKeyResponse>('/api/keys/validate', body);
+}

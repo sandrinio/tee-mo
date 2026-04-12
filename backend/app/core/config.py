@@ -50,6 +50,14 @@ class Settings(BaseSettings):
     teemo_encryption_key : str
         Base64url-encoded 32-byte key for AES-256-GCM encryption (ADR-002).
         NEVER log this value — log only key_fingerprint() from encryption.py.
+    google_api_client_id : str
+        Google OAuth 2.0 client ID from Google Cloud Console (EPIC-006).
+    google_api_secret : str
+        Google OAuth 2.0 client secret. NEVER log this value (EPIC-006).
+    google_picker_api_key : str
+        Optional Google Picker API key. Defaults to empty string.
+    google_oauth_redirect_uri : str
+        Redirect URI registered in Google Cloud Console for the Drive OAuth flow.
     """
 
     model_config = SettingsConfigDict(
@@ -83,6 +91,16 @@ class Settings(BaseSettings):
     # Web search services (self-hosted) — optional, used by agent tools
     searxng_url: str = "https://searxng.soula.ge"
     crawl4ai_url: str = "https://crawler.soula.ge"
+
+    # Google Drive integration — EPIC-006, STORY-006-01
+    # google_api_client_id: OAuth 2.0 client ID from Google Cloud Console.
+    # google_api_secret: OAuth 2.0 client secret. NEVER log this value.
+    # google_picker_api_key: Optional Google Picker API key (not required for Drive scope).
+    # google_oauth_redirect_uri: Redirect URI registered in Google Cloud Console for OAuth flow.
+    google_api_client_id: str
+    google_api_secret: str
+    google_picker_api_key: str = ""
+    google_oauth_redirect_uri: str
 
     @model_validator(mode="after")
     def _validate_encryption_key(self) -> "Settings":

@@ -169,3 +169,6 @@ Feature: Frontend Drive Integration
 ## Token Usage
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| Developer | 108 | 4,721 | 4,829 |
+| QA | 12 | 243 | 255 |
+| Architect | 13 | 183 | 196 |

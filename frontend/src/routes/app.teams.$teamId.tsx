@@ -19,7 +19,6 @@ import { useState } from 'react';
 import { createFileRoute, Link } from '@tanstack/react-router';
 
 import { Card } from '../components/ui/Card';
-import { ProtectedRoute } from '../components/auth/ProtectedRoute';
 import { WorkspaceCard } from '../components/dashboard/WorkspaceCard';
 import { CreateWorkspaceModal } from '../components/dashboard/CreateWorkspaceModal';
 import { useWorkspacesQuery } from '../hooks/useWorkspaces';
@@ -41,17 +40,13 @@ export const Route = createFileRoute('/app/teams/$teamId')({
 // ---------------------------------------------------------------------------
 
 /**
- * TeamDetailPage — shell that wraps TeamDetailContent in ProtectedRoute.
+ * TeamDetailPage — renders TeamDetailContent directly.
  *
- * ProtectedRoute handles the spinner/redirect-to-login logic; content only
- * renders when the user session is active.
+ * Auth protection is handled by the parent layout route (app.tsx) which wraps
+ * all /app/* routes in ProtectedRoute.
  */
 function TeamDetailPage() {
-  return (
-    <ProtectedRoute>
-      <TeamDetailContent />
-    </ProtectedRoute>
-  );
+  return <TeamDetailContent />;
 }
 
 /**

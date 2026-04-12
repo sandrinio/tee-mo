@@ -146,3 +146,120 @@ export interface SlackTeamsResponse {
 export async function listSlackTeams(): Promise<SlackTeamsResponse> {
   return apiGet<SlackTeamsResponse>('/api/slack/teams');
 }
+
+// ---------------------------------------------------------------------------
+// Workspace wrappers (STORY-003-B04)
+// ---------------------------------------------------------------------------
+
+/**
+ * A single Tee-Mo workspace record returned by the workspace CRUD endpoints.
+ * Mirrors backend/app/models/workspace.py::WorkspaceResponse (ADR-022).
+ */
+export interface Workspace {
+  /** UUID primary key for this workspace. */
+  id: string;
+  /** Human-readable workspace name. */
+  name: string;
+  /** Slack team this workspace belongs to. */
+  slack_team_id: string;
+  /** UUID of the user who owns/created this workspace. */
+  owner_user_id: string;
+  /** Whether this workspace is the default for its Slack team. */
+  is_default_for_team: boolean;
+  /** ISO 8601 creation timestamp. */
+  created_at: string;
+}
+
+/**
+ * Generic PATCH helper with cookie forwarding and backend-detail error propagation.
+ *
+ * Functionally identical to `apiPost` but uses HTTP PATCH — suitable for
+ * partial updates (rename, make-default) where only the changed fields are sent.
+ *
+ * @param path - Path relative to the API base, e.g. `/api/workspaces/123`.
+ * @param body - Partial update payload to JSON-encode.
+ * @returns Parsed JSON body cast to `TRes`.
+ */
+export async function apiPatch<TReq, TRes>(path: string, body: TReq): Promise<TRes> {
+  const r = await fetch(`${API_URL}${path}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    let detail: string;
+    try {
+      const payload = await r.json();
+      detail = payload?.detail ?? `HTTP ${r.status}`;
+    } catch {
+      detail = `HTTP ${r.status}`;
+    }
+    throw new Error(detail);
+  }
+  return r.json() as Promise<TRes>;
+}
+
+/**
+ * GET /api/slack-teams/{teamId}/workspaces — fetches all workspaces for a Slack team.
+ *
+ * @param teamId - The Slack team ID to filter workspaces by.
+ * @returns Array of workspace records belonging to the team.
+ */
+export async function listWorkspaces(teamId: string): Promise<Workspace[]> {
+  return apiGet<Workspace[]>(`/api/slack-teams/${encodeURIComponent(teamId)}/workspaces`);
+}
+
+/**
+ * GET /api/workspaces/{id} — fetches a single workspace by UUID.
+ *
+ * @param id - The workspace UUID.
+ * @returns The workspace record.
+ */
+export async function getWorkspace(id: string): Promise<Workspace> {
+  return apiGet<Workspace>(`/api/workspaces/${encodeURIComponent(id)}`);
+}
+
+/**
+ * POST /api/slack-teams/{teamId}/workspaces — creates a new workspace under the given Slack team.
+ *
+ * @param teamId - The Slack team ID this workspace belongs to.
+ * @param name   - The human-readable workspace name.
+ * @returns The newly created workspace record.
+ */
+export async function createWorkspace(teamId: string, name: string): Promise<Workspace> {
+  return apiPost<{ name: string }, Workspace>(
+    `/api/slack-teams/${encodeURIComponent(teamId)}/workspaces`,
+    { name },
+  );
+}
+
+/**
+ * PATCH /api/workspaces/{id} — renames an existing workspace.
+ *
+ * @param id   - The workspace UUID to rename.
+ * @param name - The new workspace name.
+ * @returns The updated workspace record.
+ */
+export async function renameWorkspace(id: string, name: string): Promise<Workspace> {
+  return apiPatch<{ name: string }, Workspace>(
+    `/api/workspaces/${encodeURIComponent(id)}`,
+    { name },
+  );
+}
+
+/**
+ * POST /api/workspaces/{id}/make-default — sets a workspace as the team default.
+ *
+ * The backend clears `is_default_for_team` on all other workspaces in the
+ * same Slack team before setting the flag on the target workspace.
+ *
+ * @param id - The workspace UUID to promote as default.
+ * @returns The updated workspace record with `is_default_for_team: true`.
+ */
+export async function makeWorkspaceDefault(id: string): Promise<Workspace> {
+  return apiPost<Record<string, never>, Workspace>(
+    `/api/workspaces/${encodeURIComponent(id)}/make-default`,
+    {},
+  );
+}

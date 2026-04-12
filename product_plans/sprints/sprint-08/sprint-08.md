@@ -29,7 +29,7 @@ confirmed_at: "2026-04-12"
 | Priority | Story | Epic | Label | V-Bounce State | Blocker |
 |----------|-------|------|-------|----------------|---------|
 | 1a | [STORY-006-01: Drive Service + Config](./STORY-006-01-drive-service.md) | EPIC-006 | L2 | Done | — |
-| 1b | [STORY-006-04: Agent Drive Tool](./STORY-006-04-agent-drive-tool.md) | EPIC-006 | L2 | Ready to Bounce | — (can start in parallel, merges after 006-01) |
+| 1b | [STORY-006-04: Agent Drive Tool](./STORY-006-04-agent-drive-tool.md) | EPIC-006 | L2 | Done | — (can start in parallel, merges after 006-01) |
 | 2 | [STORY-006-02: Drive OAuth](./STORY-006-02-drive-oauth.md) | EPIC-006 | L3 | Ready to Bounce | 006-01 |
 | 3 | [STORY-006-03: Knowledge CRUD](./STORY-006-03-knowledge-crud.md) | EPIC-006 | L3 | Ready to Bounce | 006-01, 006-02 |
 | 4 | [STORY-006-05: Frontend Drive](./STORY-006-05-frontend-drive.md) | EPIC-006 | L3 | Ready to Bounce | 006-02, 006-03 |
@@ -166,4 +166,5 @@ confirmed_at: "2026-04-12"
 | Story | Final State | QA Bounces | Arch Bounces | Tests Written | Correction Tax | Notes |
 |-------|-------------|------------|--------------|---------------|----------------|-------|
 | STORY-006-01 | Done | 0 | 0 | — | 0% | Fast Track. 30/30 tests pass. drive_service + scan_service + config Google vars. |
+| STORY-006-04 | Done | 0 | 0 | — | 0% | Fast Track. 17/18 tests pass (1 pre-existing). read_drive_file tool + file catalog in prompt. |
 <!-- EXECUTION_LOG_END -->

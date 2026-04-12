@@ -183,7 +183,24 @@ async def _handle_app_mention(event: dict) -> None:
     client = AsyncWebClient(token=bot_token)
 
     # 6. Strip mention prefix: "<@UBOT123> some question" → "some question"
-    user_prompt = re.sub(r"<@[A-Z0-9]+>\s*", "", text).strip()
+    stripped_text = re.sub(r"<@[A-Z0-9]+>\s*", "", text).strip()
+
+    # 6b. Resolve sender display name so the agent knows who is speaking
+    sender_user_id: str = event.get("user", "")
+    sender_name = sender_user_id  # fallback
+    if sender_user_id:
+        try:
+            user_info = await client.users_info(user=sender_user_id)
+            profile = user_info.get("user", {}).get("profile", {})
+            sender_name = (
+                profile.get("display_name")
+                or user_info.get("user", {}).get("real_name")
+                or sender_user_id
+            )
+        except Exception:
+            sender_name = sender_user_id
+
+    user_prompt = f"{sender_name}: {stripped_text}"
 
     try:
         # 7. Build agent first — raises ValueError("no_key_configured") if no BYOK key
@@ -354,6 +371,23 @@ async def _handle_dm(event: dict) -> None:
 
     workspace_id: str = workspace_row["id"]
 
+    # Resolve sender display name
+    sender_user_id: str = event.get("user", "")
+    sender_name = sender_user_id
+    if sender_user_id:
+        try:
+            user_info = await client.users_info(user=sender_user_id)
+            profile = user_info.get("user", {}).get("profile", {})
+            sender_name = (
+                profile.get("display_name")
+                or user_info.get("user", {}).get("real_name")
+                or sender_user_id
+            )
+        except Exception:
+            sender_name = sender_user_id
+
+    user_prompt = f"{sender_name}: {text}"
+
     try:
         # 5. Build agent first — raises ValueError("no_key_configured") if no BYOK key
         agent, deps = await _agent_module.build_agent(
@@ -363,7 +397,7 @@ async def _handle_dm(event: dict) -> None:
         )
 
         # 6. Run agent — DMs don't use threaded history (no parent thread context)
-        result = await agent.run(text, deps=deps)
+        result = await agent.run(user_prompt, deps=deps)
 
         # 7. Post reply to DM channel
         await client.chat_postMessage(

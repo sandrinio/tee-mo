@@ -191,3 +191,43 @@ vi.mock('../../main', () => ({ queryClient: { clear: clearMock } }));
 **What happened:** Without `globals: true` in `vitest.config.ts`, `@testing-library/react` silently skips its auto-cleanup hook. The library registers `afterEach(cleanup)` only if `typeof afterEach === 'function'` at load time — which requires the vitest globals injected into the test environment. Without it, every `render()` call leaks DOM nodes into the next test, producing false positives and cross-test pollution (one `screen.findByText('X')` matching content from a previous test's DOM).
 **Rule:** Any Vitest project using `@testing-library/react` MUST set `globals: true` in `vitest.config.ts`. If you prefer explicit imports, manually add `import { cleanup } from '@testing-library/react'; afterEach(() => cleanup())` to the test setup file — but `globals: true` is the simpler fix.
 **How to apply:** In `frontend/vitest.config.ts`, set `test.globals: true`. The accompanying `frontend/src/test-setup.ts` file imports `@testing-library/jest-dom` to register the matchers (`toBeInTheDocument`, etc.). Both files shipped with STORY-005A-06 — reference them when setting up a new component test file in a different frontend package.
+
+---
+
+## Worktree Environment (S-05)
+
+### [2026-04-12] Worktree `.env` resolves from `parents[3]` of config.py — copy `.env` to worktree root
+**Seen in:** STORY-003-B03 (integration tests in worktree)
+**What happened:** `pydantic-settings` in `backend/app/core/config.py` resolves the `.env` file using `Path(__file__).resolve().parents[3]`, which in the main repo points to the project root. Inside a worktree at `.worktrees/STORY-003-B03/`, `parents[3]` resolves to `.worktrees/STORY-003-B03/` — not the main repo root. Tests failed with missing env vars because no `.env` existed at the worktree root.
+**Rule:** Before running backend tests in a worktree, copy (or symlink) the project root `.env` to the worktree root directory. The `.env` is gitignored so this is safe.
+**How to apply:** Add a pre-bounce step in the Team Lead's worktree setup: `cp .env .worktrees/STORY-{ID}/.env` after `git worktree add`. This applies to any story that runs backend tests.
+
+---
+
+## jsdom Limitations (S-05)
+
+### [2026-04-12] jsdom does not implement `HTMLDialogElement.showModal()` — use div overlay modals
+**Seen in:** STORY-003-B05 (CreateWorkspaceModal)
+**What happened:** The initial implementation used a native `<dialog>` element with `showModal()`. jsdom (used by Vitest's `environment: 'jsdom'`) does not implement `HTMLDialogElement.showModal()` — calling it throws `TypeError: dialog.showModal is not a function`. All component tests that rendered the modal failed at setup.
+**Rule:** Components that need modal behavior should use a div-based overlay pattern (conditional rendering + backdrop + focus trap) rather than native `<dialog>` with `showModal()`. The native `<form>` element inside the modal is fine — only the dialog API is missing.
+**How to apply:** When building modals, follow the pattern in `frontend/src/components/dashboard/CreateWorkspaceModal.tsx` (div overlay). If native `<dialog>` is strongly preferred, polyfill `showModal`/`close` in `frontend/src/test-setup.ts` before any tests run.
+
+---
+
+## TanStack Router (S-05)
+
+### [2026-04-12] File-based routes with children are layout routes — parent MUST render `<Outlet>`
+**Seen in:** STORY-003-B05 (app.tsx + app.teams.$teamId.tsx)
+**What happened:** `app.tsx` defined the `/app` route with `component: AppPage`, rendering the Slack Teams list directly. When `app.teams.$teamId.tsx` was added as a child route, TanStack Router's route tree made `/app` the parent. Navigating to `/app/teams/$teamId` changed the URL but rendered nothing — the parent's component had no `<Outlet>` for the child to render into.
+**Rule:** In TanStack Router file-based routing, any route file whose name is a prefix of another route file automatically becomes a layout route. Layout routes MUST render `<Outlet />` from `@tanstack/react-router`. Page content that was in the layout file must move to an index route (e.g., `app.tsx` → layout with `<Outlet>`, `app.index.tsx` → page content).
+**How to apply:** When adding a new nested route like `foo.bar.tsx`, check whether `foo.tsx` already exists. If it does and renders page content directly, refactor: move content to `foo.index.tsx`, make `foo.tsx` a layout with `<Outlet>`. Auth wrappers like `ProtectedRoute` belong in the layout so all children inherit them.
+
+---
+
+## Frontend ↔ Backend Contract (S-05)
+
+### [2026-04-12] Salvaged frontend API URLs must be verified against actual backend route paths
+**Seen in:** STORY-003-B04 (frontend API hooks — salvaged from S-05-fasttrack)
+**What happened:** The salvaged `api.ts` wrappers used flat URLs (`/api/workspaces?team_id=`, `POST /api/workspaces`, `PATCH /api/workspaces/{id}/default`) that didn't match the actual backend routes decided in sprint planning (`/api/slack-teams/{teamId}/workspaces`, `POST /api/workspaces/{id}/make-default`). The orphan branch was written before the route prefix was finalized. Hermetic tests (which mock the API module) passed — the mismatch only surfaced during manual QA when live requests hit 404/401.
+**Rule:** When salvaging frontend code from an orphan or stale branch, cross-check every URL string in the salvaged file against the current backend route definitions. Do NOT trust that the salvaged URLs match the final API contract.
+**How to apply:** In the Developer task prompt for salvage stories, include the backend API contract table (endpoint, method, path) and add an explicit instruction: "Verify every URL in the salvaged code matches this table before committing." The Team Lead should grep for URL patterns in the salvaged diff during the test pattern validation step.

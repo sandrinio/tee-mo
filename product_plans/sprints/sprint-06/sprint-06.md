@@ -2,7 +2,7 @@
 sprint_id: "sprint-06"
 sprint_goal: "Ship full EPIC-004 — BYOK key management end-to-end (backend routes, resolvers, frontend hooks, Key Section UI)."
 dates: "2026-04-12 – 2026-04-13"
-status: "Confirmed"
+status: "Active"
 delivery: "D-02"
 confirmed_by: "sandrinio"
 confirmed_at: "2026-04-12"

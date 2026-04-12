@@ -4,7 +4,7 @@
   "roadmap": "product_plans/strategy/roadmap.md",
   "stories": {
     "STORY-006-01": {
-      "state": "Ready to Bounce",
+      "state": "Bouncing",
       "qa_bounces": 0,
       "arch_bounces": 0,
       "worktree": null
@@ -41,6 +41,6 @@
     }
   },
   "phase": "Phase 1",
-  "last_action": "STORY-006-06: Draft → Ready to Bounce",
-  "updated_at": "2026-04-12T17:42:15.094Z"
+  "last_action": "STORY-006-01: Ready to Bounce → Bouncing",
+  "updated_at": "2026-04-12T17:42:50.986Z"
 }

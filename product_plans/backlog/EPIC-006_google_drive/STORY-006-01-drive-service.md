@@ -180,3 +180,4 @@ async def generate_ai_description(content: str, provider: str, api_key: str) -> 
 ## Token Usage
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| Developer | 1,832 | 1,599 | 3,431 |

@@ -252,17 +252,41 @@ async def drive_status(
     if not encrypted_token:
         return {"connected": False, "email": None}
 
-    # Decrypt the stored refresh token and call userinfo to retrieve the email.
+    # Decrypt the stored refresh token, exchange it for a transient access token,
+    # then call the userinfo endpoint with the access token to retrieve the email.
     # Any failure (revoked token, network error, missing email) → connected=false.
-    # The refresh token is used as the bearer credential for the userinfo call;
-    # the userinfo endpoint validates it server-side and returns the account info.
+    # ADR-009: only the offline refresh token is persisted; access tokens are transient
+    # and must be obtained fresh for each status check via the token endpoint.
     try:
         refresh_token = decrypt(encrypted_token)
 
+        # Exchange the refresh token for a short-lived access token.
+        # Google's userinfo endpoint requires an access token, not a refresh token.
+        s = get_settings()
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            token_resp = await client.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "client_id": s.google_api_client_id,
+                    "client_secret": s.google_api_secret,
+                    "refresh_token": refresh_token,
+                    "grant_type": "refresh_token",
+                },
+            )
+        token_data = token_resp.json()
+        access_token = token_data.get("access_token")
+        if not access_token:
+            logger.warning(
+                "drive_status: token exchange returned no access_token "
+                "(workspace_id=%s)", workspace_id
+            )
+            return {"connected": False, "email": None}
+
+        # Use the access token (never the refresh token) as the Bearer credential.
         async with httpx.AsyncClient(timeout=10.0) as client:
             userinfo_resp = await client.get(
                 "https://www.googleapis.com/oauth2/v3/userinfo",
-                headers={"Authorization": f"Bearer {refresh_token}"},
+                headers={"Authorization": f"Bearer {access_token}"},
             )
         userinfo = userinfo_resp.json()
         email = userinfo.get("email")

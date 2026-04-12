@@ -251,3 +251,4 @@ await _post_reply(bot_token, channel, thread_ts, result.data)
 ## Token Usage
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| Architect | 1,636 | 402 | 2,038 |

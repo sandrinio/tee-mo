@@ -221,3 +221,6 @@ async def load_skill(ctx: RunContext[AgentDeps], skill_name: str) -> str:
 ## Token Usage
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| Developer | 14 | 472 | 486 |
+| Developer | 20 | 4,760 | 4,780 |
+| QA | 8 | 165 | 173 |

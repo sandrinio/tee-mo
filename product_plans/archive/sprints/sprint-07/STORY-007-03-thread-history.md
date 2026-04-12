@@ -173,3 +173,5 @@ Key design decisions:
 ## Token Usage
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| Developer | 159 | 1,078 | 1,237 |
+| Developer | 21 | 1,253 | 1,274 |

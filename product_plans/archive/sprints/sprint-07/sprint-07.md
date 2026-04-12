@@ -2,7 +2,7 @@
 sprint_id: "sprint-07"
 sprint_goal: "Ship EPIC-007 — AI agent responds to Slack @mentions and DMs using BYOK key, with thread history context and speaker identification. Skills via chat."
 dates: "2026-04-12 – 2026-04-13"
-status: "Confirmed"
+status: "Completed"
 delivery: "D-03"
 confirmed_by: "sandrinio"
 confirmed_at: "2026-04-12"
@@ -28,12 +28,12 @@ confirmed_at: "2026-04-12"
 
 | Priority | Story | Epic | Label | V-Bounce State | Blocker |
 |----------|-------|------|-------|----------------|---------|
-| 1 | [STORY-007-01: Skill Service](./STORY-007-01-skill-service.md) | EPIC-007 | L1 | Ready to Bounce | — |
-| 2 | [STORY-007-03: Thread History Service](./STORY-007-03-thread-history.md) | EPIC-007 | L2 | Ready to Bounce | — |
-| 3 | [STORY-007-04: Channel Binding REST](./STORY-007-04-channel-binding-rest.md) | EPIC-007 | L2 | Ready to Bounce | — |
-| 4 | [STORY-007-02: Agent Factory + Skill Tools](./STORY-007-02-agent-factory.md) | EPIC-007 | L3 | Ready to Bounce | 007-01 |
-| 5 | [STORY-007-05: Slack Event Dispatch](./STORY-007-05-slack-dispatch.md) | EPIC-007 | L3 | Ready to Bounce | 007-02, 007-03 |
-| 6 | [STORY-007-06: Manual E2E Verification](./STORY-007-06-manual-e2e.md) | EPIC-007 | L1 | Ready to Bounce | 007-05 |
+| 1 | [STORY-007-01: Skill Service](./STORY-007-01-skill-service.md) | EPIC-007 | L1 | Done | — |
+| 2 | [STORY-007-03: Thread History Service](./STORY-007-03-thread-history.md) | EPIC-007 | L2 | Done | — |
+| 3 | [STORY-007-04: Channel Binding REST](./STORY-007-04-channel-binding-rest.md) | EPIC-007 | L2 | Done | — |
+| 4 | [STORY-007-02: Agent Factory + Skill Tools](./STORY-007-02-agent-factory.md) | EPIC-007 | L3 | Done | 007-01 |
+| 5 | [STORY-007-05: Slack Event Dispatch](./STORY-007-05-slack-dispatch.md) | EPIC-007 | L3 | Done | 007-02, 007-03 |
+| 6 | [STORY-007-06: Manual E2E Verification](./STORY-007-06-manual-e2e.md) | EPIC-007 | L1 | Done | 007-05 |
 
 ### Context Pack Readiness
 
@@ -162,4 +162,10 @@ confirmed_at: "2026-04-12"
 
 | Story | Final State | QA Bounces | Arch Bounces | Tests Written | Correction Tax | Notes |
 |-------|-------------|------------|--------------|---------------|----------------|-------|
+| STORY-007-01 | Done | 0 | 0 | — | 0% | 15 tests, Fast Track, clean merge |
+| STORY-007-03 | Done | 0 | 0 | — | 0% | 5 tests, Fast Track, clean merge |
+| STORY-007-04 | Done | 0 | 0 | — | 0% | 8 tests, Fast Track, 107/107 full suite, clean merge |
+| STORY-007-02 | Done | 0 | 0 | — | 0% | 12 tests, Full Bounce, QA+Arch PASS, clean merge |
+| STORY-007-05 | Done | 0 | 1 | — | 5% | 9 tests, Full Bounce, 1 arch bounce (thread_ts + error handling fix), 148/148 suite |
+| STORY-007-06 | Done | 0 | 0 | — | 0% | Manual E2E, user-verified, all providers working |
 <!-- EXECUTION_LOG_END -->

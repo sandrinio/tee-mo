@@ -143,3 +143,5 @@ Feature: Skill Service CRUD
 ## Token Usage
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| Developer | 74 | 581 | 655 |
+| Developer | 17 | 982 | 999 |

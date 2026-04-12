@@ -192,3 +192,4 @@ result = await client.conversations_list(types="public_channel,private_channel")
 ## Token Usage
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| Developer | 80 | 1,117 | 1,197 |

@@ -27,13 +27,62 @@ Module isolation (enforced by sprint rule):
 
 from __future__ import annotations
 
+import ipaddress
 import logging
+import socket
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# IP safety — block requests to private/internal networks
+# ---------------------------------------------------------------------------
+
+_BLOCKED_NETWORKS = [
+    ipaddress.ip_network(cidr)
+    for cidr in [
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "127.0.0.0/8",
+        "169.254.0.0/16",
+        "::1/128",
+        "fd00::/8",
+        "fe80::/10",
+    ]
+]
+
+
+def _is_safe_url(url: str) -> bool:
+    """Check that a URL does not resolve to a private/internal IP address.
+
+    Resolves the hostname via DNS first, then checks all returned addresses
+    against the blocked CIDR list. This prevents DNS rebinding attacks where
+    a hostname initially resolves to a public IP but later resolves to an
+    internal one.
+
+    Args:
+        url: Fully-qualified URL to check.
+
+    Returns:
+        True if all resolved IPs are public, False otherwise.
+    """
+    hostname = urlparse(url).hostname
+    if not hostname:
+        return False
+    try:
+        addr_infos = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        return False
+    for addr_info in addr_infos:
+        ip = ipaddress.ip_address(addr_info[4][0])
+        if any(ip in net for net in _BLOCKED_NETWORKS):
+            return False
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -198,8 +247,15 @@ def _build_system_prompt(skills: list[dict]) -> str:
         "- Never reveal internal workspace IDs, API keys, or stack traces.\n"
         "- When a skill is available that fits the request, load it first with load_skill.\n"
         "- Always confirm destructive actions before executing them.\n"
-        "- You can search the web with web_search(query) and read pages with crawl_page(url).\n"
-        "- Always identify who you're responding to by name when the thread has multiple participants."
+        "- Always identify who you're responding to by name when the thread has multiple participants.\n\n"
+        "## Tools — when to use which\n"
+        "- **web_search(query)**: Search the internet for general information.\n"
+        "- **crawl_page(url)**: Fetch a public web page and return its content as readable markdown. "
+        "Best for reading articles, docs, and web pages.\n"
+        "- **http_request(method, url, ...)**: Make raw HTTP requests to APIs. Use this when you need "
+        "custom headers (e.g. Authorization tokens), non-GET methods (POST, PUT, DELETE), "
+        "or need to work with structured API responses (JSON). Best for authenticated API calls, "
+        "webhooks, and data retrieval from REST endpoints."
     )
 
     if not skills:
@@ -459,12 +515,59 @@ async def build_agent(
         except (httpx.TimeoutException, httpx.ConnectError) as e:
             return f"Crawl service unavailable: {e}"
 
-    # --- 11. Construct Agent and deps ---
+    # --- 11. HTTP request tool (authenticated API calls) ---
+
+    async def http_request(
+        ctx: Any,
+        method: str,
+        url: str,
+        headers: dict[str, str] | None = None,
+        body: str | None = None,
+    ) -> str:
+        """Make an HTTP request to a public URL and return the response.
+
+        Use this for authenticated API calls, webhooks, and REST endpoints.
+        Supports custom headers (e.g. Authorization) and all HTTP methods.
+        Requests to private/internal network addresses are blocked for security.
+
+        Args:
+            ctx:     pydantic-ai RunContext.
+            method:  HTTP method — GET, POST, PUT, PATCH, DELETE.
+            url:     Fully-qualified public URL (e.g. "https://api.github.com/repos/...").
+            headers: Optional dict of HTTP headers (e.g. {"Authorization": "Bearer tok_..."}).
+            body:    Optional request body string (typically JSON).
+        """
+        method = method.upper()
+        if method not in {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}:
+            return f"Unsupported HTTP method: {method}"
+
+        if not _is_safe_url(url):
+            return "Blocked: this URL resolves to a private/internal network address."
+
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as http:
+                resp = await http.request(
+                    method,
+                    url,
+                    headers=headers,
+                    content=body,
+                )
+                status_line = f"HTTP {resp.status_code} {resp.reason_phrase}\n\n"
+                body_text = resp.text
+                if len(body_text) > 8000:
+                    body_text = body_text[:8000] + f"\n\n[Truncated — {len(resp.text)} chars total]"
+                return status_line + body_text
+        except httpx.TimeoutException:
+            return f"Request timed out after 15 seconds: {url}"
+        except httpx.ConnectError as e:
+            return f"Connection failed: {e}"
+
+    # --- 12. Construct Agent and deps ---
     agent = Agent(
         model,
         system_prompt=prompt,
         deps_type=AgentDeps,
-        tools=[load_skill, create_skill, update_skill, delete_skill, web_search, crawl_page],
+        tools=[load_skill, create_skill, update_skill, delete_skill, web_search, crawl_page, http_request],
     )
     deps = AgentDeps(
         workspace_id=workspace_id,

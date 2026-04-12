@@ -2,10 +2,10 @@
 sprint_id: "sprint-08"
 sprint_goal: "Ship EPIC-006 — Google Drive OAuth, file indexing with AI descriptions, read_drive_file agent tool, and frontend Picker. Complete the demo pipeline: register → workspace → Slack → Drive → @mention → answer from file."
 dates: "2026-04-13"
-status: "Planning"
+status: "Active"
 delivery: "D-04"
-confirmed_by: ""
-confirmed_at: ""
+confirmed_by: "sandrinio"
+confirmed_at: "2026-04-12"
 ---
 
 # Sprint S-08 Plan
@@ -19,7 +19,7 @@ confirmed_at: ""
 - [x] No stories have 🔴 High ambiguity (spike first)
 - [x] Dependencies identified and sequencing agreed
 - [x] Risk flags reviewed from Risk Registry
-- [ ] **Human has confirmed this sprint plan**
+- [x] **Human has confirmed this sprint plan**
 
 ---
 

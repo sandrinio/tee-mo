@@ -92,3 +92,11 @@ Feature: API Integration test Suite
 
 ### 4.2 Definition of Done (The Gate)
 - [ ] No flaky test executions when running `pytest-randomly`.
+
+---
+
+## Token Usage
+
+| Agent | Input | Output | Total |
+|-------|-------|--------|-------|
+| Developer | 3,054 | 1,532 | 4,586 |

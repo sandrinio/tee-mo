@@ -94,3 +94,11 @@ All three files below are pre-validated and SHOULD be copied verbatim via `git s
 - [ ] Minimum test expectations (§4.1) met.
 - [ ] FLASHCARDS.md + Sprint Context consulted before implementation.
 - [ ] Models exported properly in `backend/app/models/__init__.py`.
+
+---
+
+## Token Usage
+
+| Agent | Input | Output | Total |
+|-------|-------|--------|-------|
+| Developer | 19 | 1,643 | 1,662 |

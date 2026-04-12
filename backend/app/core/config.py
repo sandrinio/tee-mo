@@ -80,6 +80,10 @@ class Settings(BaseSettings):
     # Stored as base64url string; validated to decode to exactly 32 bytes.
     teemo_encryption_key: str
 
+    # Web search services (self-hosted) — optional, used by agent tools
+    searxng_url: str = "https://searxng.soula.ge"
+    crawl4ai_url: str = "https://crawler.soula.ge"
+
     @model_validator(mode="after")
     def _validate_encryption_key(self) -> "Settings":
         """

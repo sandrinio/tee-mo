@@ -31,6 +31,8 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
+
 logger = logging.getLogger(__name__)
 
 
@@ -195,7 +197,9 @@ def _build_system_prompt(skills: list[dict]) -> str:
         "- Be concise and helpful.\n"
         "- Never reveal internal workspace IDs, API keys, or stack traces.\n"
         "- When a skill is available that fits the request, load it first with load_skill.\n"
-        "- Always confirm destructive actions before executing them."
+        "- Always confirm destructive actions before executing them.\n"
+        "- You can search the web with web_search(query) and read pages with crawl_page(url).\n"
+        "- Always identify who you're responding to by name when the thread has multiple participants."
     )
 
     if not skills:
@@ -401,12 +405,66 @@ async def build_agent(
             logger.error("[AGENT] delete_skill unexpected error: %s", exc)
             return f"Failed to delete skill: {exc}"
 
-    # --- 10. Construct Agent and deps ---
+    # --- 10. Web search tools (SearXNG + Crawl4AI) ---
+
+    async def web_search(ctx: Any, query: str) -> str:
+        """Search the web for information.
+
+        Args:
+            ctx:   pydantic-ai RunContext.
+            query: Search query string.
+        """
+        from app.core.config import get_settings
+        s = get_settings()
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as http:
+                response = await http.get(
+                    f"{s.searxng_url}/search",
+                    params={"format": "json", "q": query},
+                )
+                data = response.json()
+                results = data.get("results", [])[:5]
+                if not results:
+                    return "No search results found."
+                lines = []
+                for i, r in enumerate(results, 1):
+                    lines.append(f"{i}. **{r['title']}**\n   {r['url']}\n   {r.get('content', '')}\n")
+                return "\n".join(lines)
+        except (httpx.TimeoutException, httpx.ConnectError) as e:
+            return f"Search service unavailable: {e}"
+
+    async def crawl_page(ctx: Any, url: str) -> str:
+        """Fetch a web page and return its content as markdown.
+
+        Args:
+            ctx: pydantic-ai RunContext.
+            url: Fully-qualified URL to crawl (e.g. "https://example.com/page").
+        """
+        from app.core.config import get_settings
+        s = get_settings()
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as http:
+                response = await http.post(
+                    f"{s.crawl4ai_url}/md",
+                    json={"url": url},
+                )
+                data = response.json()
+                if not data.get("success", False):
+                    return f"Crawl failed for {url}"
+                markdown = data.get("markdown", "")
+                if len(markdown) > 15_000:
+                    total = len(markdown)
+                    markdown = markdown[:15_000] + f"\n\n[Content truncated — {total} chars total]"
+                return markdown
+        except (httpx.TimeoutException, httpx.ConnectError) as e:
+            return f"Crawl service unavailable: {e}"
+
+    # --- 11. Construct Agent and deps ---
     agent = Agent(
         model,
         system_prompt=prompt,
         deps_type=AgentDeps,
-        tools=[load_skill, create_skill, update_skill, delete_skill],
+        tools=[load_skill, create_skill, update_skill, delete_skill, web_search, crawl_page],
     )
     deps = AgentDeps(
         workspace_id=workspace_id,

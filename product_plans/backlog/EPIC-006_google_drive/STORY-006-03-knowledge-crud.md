@@ -189,3 +189,4 @@ Feature: Knowledge Index CRUD
 ## Token Usage
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| Developer | 41 | 7,527 | 7,568 |

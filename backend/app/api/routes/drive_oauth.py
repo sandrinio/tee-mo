@@ -24,6 +24,8 @@ Import note on get_supabase:
   local reference at import time that is not affected by module-level monkeypatching.
 """
 
+from __future__ import annotations
+
 import logging
 import httpx  # MUST be at module level so tests can monkeypatch httpx.AsyncClient
 import jwt    # needed for jwt.ExpiredSignatureError, jwt.InvalidTokenError in callback

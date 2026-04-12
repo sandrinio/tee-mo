@@ -35,25 +35,6 @@ class IndexFileRequest(BaseModel):
     mime_type: str
 
 
-class KnowledgeIndexRequest(BaseModel):
-    """Alias request body for POST /api/workspaces/{id}/knowledge.
-
-    Kept for backwards compatibility with any callers using the original name.
-    Prefer IndexFileRequest for new code.
-
-    Attributes:
-        drive_file_id: Google Drive file ID.
-        title: Human-readable file title.
-        link: Full Google Drive link.
-        mime_type: MIME type string (must be in ALLOWED_MIME_TYPES).
-    """
-
-    drive_file_id: str
-    title: str
-    link: str
-    mime_type: str
-
-
 class KnowledgeIndexResponse(BaseModel):
     """Response shape for a single knowledge index row.
 

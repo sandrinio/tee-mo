@@ -35,7 +35,7 @@ import app.services.drive_service as _drive_service  # module import for monkeyp
 import app.services.scan_service as _scan_service  # module import for monkeypatching
 from app.api.deps import get_current_user_id
 from app.core.config import get_settings
-from app.core.encryption import decrypt
+import app.core.encryption as _enc  # module import so monkeypatch works
 from app.models.knowledge import IndexFileRequest
 
 logger = logging.getLogger(__name__)
@@ -233,7 +233,7 @@ async def index_file(
 
         # Step 10: Generate AI description with BYOK key (ADR-004/006)
         provider = workspace.get("provider", "anthropic")
-        api_key_plaintext = decrypt(encrypted_api_key)
+        api_key_plaintext = _enc.decrypt(encrypted_api_key)
         ai_description = await _scan_service.generate_ai_description(
             content, provider, api_key_plaintext
         )
@@ -387,7 +387,7 @@ async def get_picker_token(
         raise HTTPException(status_code=400, detail="Google Drive not connected")
 
     # Decrypt the stored refresh token (ADR-002/009 — never log the plaintext)
-    refresh_token = decrypt(encrypted_refresh_token)
+    refresh_token = _enc.decrypt(encrypted_refresh_token)
 
     # Exchange the refresh token for a transient access token.
     # The access token is NOT stored — ADR-009: only the offline refresh token is persisted.

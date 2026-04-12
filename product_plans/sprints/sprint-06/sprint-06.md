@@ -28,10 +28,10 @@ confirmed_at: "2026-04-12"
 
 | Priority | Story | Epic | Label | V-Bounce State | Blocker |
 |----------|-------|------|-------|----------------|---------|
-| 1 | [STORY-004-01: Backend Key Routes + Models + Validator](./STORY-004-01-backend-key-routes.md) | EPIC-004 | L2 | Ready to Bounce | — |
-| 2 | [STORY-004-02: Provider Key Resolvers](./STORY-004-02-provider-resolvers.md) | EPIC-004 | L1 | Ready to Bounce | 004-01 |
-| 3 | [STORY-004-03: Frontend API Wrappers + Hooks](./STORY-004-03-frontend-hooks.md) | EPIC-004 | L2 | Ready to Bounce | 004-01 |
-| 4 | [STORY-004-04: Key Section UI + Manual E2E](./STORY-004-04-key-section-ui.md) | EPIC-004 | L2 | Ready to Bounce | 004-03 |
+| 1 | [STORY-004-01: Backend Key Routes + Models + Validator](./STORY-004-01-backend-key-routes.md) | EPIC-004 | L2 | Done | — |
+| 2 | [STORY-004-02: Provider Key Resolvers](./STORY-004-02-provider-resolvers.md) | EPIC-004 | L1 | Done | 004-01 |
+| 3 | [STORY-004-03: Frontend API Wrappers + Hooks](./STORY-004-03-frontend-hooks.md) | EPIC-004 | L2 | Done | 004-01 |
+| 4 | [STORY-004-04: Key Section UI + Manual E2E](./STORY-004-04-key-section-ui.md) | EPIC-004 | L2 | Done | 004-03 |
 
 ### Context Pack Readiness
 
@@ -154,4 +154,8 @@ V-Bounce State: Ready to Bounce
 
 | Story | Final State | QA Bounces | Arch Bounces | Tests Written | Correction Tax | Notes |
 |-------|-------------|------------|--------------|---------------|----------------|-------|
+| STORY-004-01 | Done | 0 | 0 | — | 0% | 7 tests, clean merge, 94/94 suite pass |
+| STORY-004-02 | Done | 0 | 0 | — | 0% | 5 unit tests, Fast Track, 99/99 suite pass |
+| STORY-004-03 | Done | 0 | 0 | — | 0% | 5 tests, Fast Track, 31/31 frontend + 99/99 backend pass |
+| STORY-004-04 | Done | 0 | 0 | — | 0% | 3 new + 3 updated tests, 34/34 frontend + 99/99 backend pass |
 <!-- EXECUTION_LOG_END -->

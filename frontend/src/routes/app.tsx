@@ -161,15 +161,35 @@ interface TeamCardProps {
  * Displays team ID, bot user ID, and a human-readable install date.
  * Uses Intl.DateTimeFormat for locale-aware date formatting without adding
  * a date-fns/dayjs dependency.
+ *
+ * Clicking the card navigates to the team detail page at `/app/teams/$teamId`
+ * via `useNavigate` (STORY-003-B05). Using programmatic navigation rather than
+ * a `<Link>` wrapper avoids router context requirements in unit tests that
+ * render `AppContent` directly (the existing tests already mock `useNavigate`).
  */
 function TeamCard({ team }: TeamCardProps) {
+  const navigate = useNavigate();
+
   const installedDate = new Intl.DateTimeFormat(undefined, {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(new Date(team.installed_at));
 
+  function handleClick() {
+    navigate({ to: '/app/teams/$teamId', params: { teamId: team.slack_team_id } });
+  }
+
   return (
-    <Card className="mb-3">
+    <Card
+      className="mb-3 cursor-pointer hover:shadow-md transition-shadow"
+      onClick={handleClick}
+      role="button"
+      tabIndex={0}
+      aria-label={`View workspaces for team ${team.slack_team_id}`}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') handleClick();
+      }}
+    >
       <div className="flex flex-col gap-1">
         <div className="font-mono text-sm font-medium text-slate-900">
           {team.slack_team_id}

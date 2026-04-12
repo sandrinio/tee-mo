@@ -15,6 +15,8 @@ import { Route as AppRouteImport } from './routes/app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as AppTeamsTeamIdRouteImport } from './routes/app.teams.$teamId'
+import { Route as AppTeamsTeamIdIndexRouteImport } from './routes/app.teams.$teamId.index'
+import { Route as AppTeamsTeamIdWorkspaceIdRouteImport } from './routes/app.teams.$teamId.$workspaceId'
 
 const RegisterRoute = RegisterRouteImport.update({
   id: '/register',
@@ -46,6 +48,17 @@ const AppTeamsTeamIdRoute = AppTeamsTeamIdRouteImport.update({
   path: '/teams/$teamId',
   getParentRoute: () => AppRoute,
 } as any)
+const AppTeamsTeamIdIndexRoute = AppTeamsTeamIdIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppTeamsTeamIdRoute,
+} as any)
+const AppTeamsTeamIdWorkspaceIdRoute =
+  AppTeamsTeamIdWorkspaceIdRouteImport.update({
+    id: '/$workspaceId',
+    path: '/$workspaceId',
+    getParentRoute: () => AppTeamsTeamIdRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -53,14 +66,17 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/app/': typeof AppIndexRoute
-  '/app/teams/$teamId': typeof AppTeamsTeamIdRoute
+  '/app/teams/$teamId': typeof AppTeamsTeamIdRouteWithChildren
+  '/app/teams/$teamId/$workspaceId': typeof AppTeamsTeamIdWorkspaceIdRoute
+  '/app/teams/$teamId/': typeof AppTeamsTeamIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/app': typeof AppIndexRoute
-  '/app/teams/$teamId': typeof AppTeamsTeamIdRoute
+  '/app/teams/$teamId/$workspaceId': typeof AppTeamsTeamIdWorkspaceIdRoute
+  '/app/teams/$teamId': typeof AppTeamsTeamIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -69,7 +85,9 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/app/': typeof AppIndexRoute
-  '/app/teams/$teamId': typeof AppTeamsTeamIdRoute
+  '/app/teams/$teamId': typeof AppTeamsTeamIdRouteWithChildren
+  '/app/teams/$teamId/$workspaceId': typeof AppTeamsTeamIdWorkspaceIdRoute
+  '/app/teams/$teamId/': typeof AppTeamsTeamIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -80,8 +98,16 @@ export interface FileRouteTypes {
     | '/register'
     | '/app/'
     | '/app/teams/$teamId'
+    | '/app/teams/$teamId/$workspaceId'
+    | '/app/teams/$teamId/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/register' | '/app' | '/app/teams/$teamId'
+  to:
+    | '/'
+    | '/login'
+    | '/register'
+    | '/app'
+    | '/app/teams/$teamId/$workspaceId'
+    | '/app/teams/$teamId'
   id:
     | '__root__'
     | '/'
@@ -90,6 +116,8 @@ export interface FileRouteTypes {
     | '/register'
     | '/app/'
     | '/app/teams/$teamId'
+    | '/app/teams/$teamId/$workspaceId'
+    | '/app/teams/$teamId/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -143,17 +171,45 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppTeamsTeamIdRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/teams/$teamId/': {
+      id: '/app/teams/$teamId/'
+      path: '/'
+      fullPath: '/app/teams/$teamId/'
+      preLoaderRoute: typeof AppTeamsTeamIdIndexRouteImport
+      parentRoute: typeof AppTeamsTeamIdRoute
+    }
+    '/app/teams/$teamId/$workspaceId': {
+      id: '/app/teams/$teamId/$workspaceId'
+      path: '/$workspaceId'
+      fullPath: '/app/teams/$teamId/$workspaceId'
+      preLoaderRoute: typeof AppTeamsTeamIdWorkspaceIdRouteImport
+      parentRoute: typeof AppTeamsTeamIdRoute
+    }
   }
 }
 
+interface AppTeamsTeamIdRouteChildren {
+  AppTeamsTeamIdWorkspaceIdRoute: typeof AppTeamsTeamIdWorkspaceIdRoute
+  AppTeamsTeamIdIndexRoute: typeof AppTeamsTeamIdIndexRoute
+}
+
+const AppTeamsTeamIdRouteChildren: AppTeamsTeamIdRouteChildren = {
+  AppTeamsTeamIdWorkspaceIdRoute: AppTeamsTeamIdWorkspaceIdRoute,
+  AppTeamsTeamIdIndexRoute: AppTeamsTeamIdIndexRoute,
+}
+
+const AppTeamsTeamIdRouteWithChildren = AppTeamsTeamIdRoute._addFileChildren(
+  AppTeamsTeamIdRouteChildren,
+)
+
 interface AppRouteChildren {
   AppIndexRoute: typeof AppIndexRoute
-  AppTeamsTeamIdRoute: typeof AppTeamsTeamIdRoute
+  AppTeamsTeamIdRoute: typeof AppTeamsTeamIdRouteWithChildren
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppIndexRoute: AppIndexRoute,
-  AppTeamsTeamIdRoute: AppTeamsTeamIdRoute,
+  AppTeamsTeamIdRoute: AppTeamsTeamIdRouteWithChildren,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

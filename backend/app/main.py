@@ -29,6 +29,7 @@ from app.api.routes.auth import router as auth_router
 from app.api.routes import keys as keys_module
 from app.api.routes.channels import router as channels_router
 from app.api.routes.drive_oauth import router as drive_oauth_router
+from app.api.routes.knowledge import router as knowledge_router
 from app.api.routes.slack_events import router as slack_events_router
 from app.api.routes.slack_oauth import router as slack_oauth_router
 from app.api.routes.workspaces import router as workspace_router
@@ -56,6 +57,7 @@ app.include_router(auth_router)
 app.include_router(slack_events_router)
 app.include_router(slack_oauth_router)
 app.include_router(drive_oauth_router)
+app.include_router(knowledge_router)
 app.include_router(workspace_router)
 app.include_router(keys_module.router)
 app.include_router(channels_router)

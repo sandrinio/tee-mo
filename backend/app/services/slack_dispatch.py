@@ -49,6 +49,98 @@ import app.services.slack_thread as _thread_module
 
 logger = logging.getLogger(__name__)
 
+# Minimum interval between Slack chat_update calls (seconds).
+# Slack rate-limits chat.update to ~50/min per channel.
+_STREAM_UPDATE_INTERVAL = 1.0
+# Minimum character delta before triggering an update (avoids tiny flickers).
+_STREAM_MIN_CHARS = 80
+
+
+async def _stream_agent_to_slack(
+    agent: object,
+    user_prompt: str,
+    client: AsyncWebClient,
+    channel: str,
+    thread_ts: str,
+    *,
+    deps: object,
+    message_history: list | None = None,
+) -> None:
+    """Run the agent with streaming and progressively update a Slack message.
+
+    Posts an initial "Thinking..." message, then streams tokens from the agent
+    via ``agent.run_stream()``. The Slack message is updated periodically
+    (rate-limited to avoid Slack API throttling).
+
+    Args:
+        agent: Pydantic AI Agent instance.
+        user_prompt: The user's message text.
+        client: Slack AsyncWebClient with bot token.
+        channel: Slack channel ID to post in.
+        thread_ts: Thread timestamp to reply in.
+        deps: AgentDeps instance for the agent.
+        message_history: Optional conversation history for multi-turn context.
+    """
+    import time
+
+    # Post initial placeholder
+    initial = await client.chat_postMessage(
+        channel=channel,
+        text="_Thinking..._",
+        thread_ts=thread_ts,
+    )
+    msg_ts = initial["ts"]
+
+    accumulated = ""
+    last_update_time = time.monotonic()
+    last_update_len = 0
+
+    try:
+        run_kwargs: dict = {"deps": deps}
+        if message_history is not None:
+            run_kwargs["message_history"] = message_history
+
+        async with agent.run_stream(user_prompt, **run_kwargs) as stream:
+            async for chunk in stream.stream_text(delta=True):
+                accumulated += chunk
+                now = time.monotonic()
+                char_delta = len(accumulated) - last_update_len
+                time_delta = now - last_update_time
+
+                if time_delta >= _STREAM_UPDATE_INTERVAL and char_delta >= _STREAM_MIN_CHARS:
+                    try:
+                        await client.chat_update(
+                            channel=channel,
+                            ts=msg_ts,
+                            text=accumulated + " ▎",
+                        )
+                        last_update_time = now
+                        last_update_len = len(accumulated)
+                    except Exception:
+                        pass  # Non-fatal — final update will catch up
+
+            # Final update with complete text (no cursor) — inside async with
+            final_text = accumulated.strip()
+            if not final_text:
+                # Fallback: stream produced no text chunks (tool-only response)
+                result = stream.get_output()
+                final_text = str(result)
+            await client.chat_update(
+                channel=channel,
+                ts=msg_ts,
+                text=final_text,
+            )
+    except Exception:
+        # If streaming fails, fall back to the accumulated text or error
+        if accumulated.strip():
+            await client.chat_update(
+                channel=channel,
+                ts=msg_ts,
+                text=accumulated.strip(),
+            )
+        else:
+            raise  # Re-raise so the caller's error handling kicks in
+
 
 # ---------------------------------------------------------------------------
 # Public top-level dispatcher
@@ -219,14 +311,15 @@ async def _handle_app_mention(event: dict) -> None:
             bot_user_id=bot_user_id,
         )
 
-        # 9. Run agent
-        result = await agent.run(user_prompt, message_history=history, deps=deps)
-
-        # 10. Post reply
-        await client.chat_postMessage(
-            channel=channel,
-            text=str(result.output),
-            thread_ts=thread_ts,
+        # 9. Run agent with streaming → progressive Slack message updates
+        await _stream_agent_to_slack(
+            agent,
+            user_prompt,
+            client,
+            channel,
+            thread_ts,
+            deps=deps,
+            message_history=history,
         )
 
     except ValueError as exc:
@@ -395,14 +488,14 @@ async def _handle_dm(event: dict) -> None:
             supabase=supabase,
         )
 
-        # 6. Run agent — DMs don't use threaded history (no parent thread context)
-        result = await agent.run(user_prompt, deps=deps)
-
-        # 7. Post reply to DM channel
-        await client.chat_postMessage(
-            channel=channel,
-            text=str(result.output),
-            thread_ts=thread_ts,
+        # 6. Run agent with streaming — DMs don't use threaded history
+        await _stream_agent_to_slack(
+            agent,
+            user_prompt,
+            client,
+            channel,
+            thread_ts,
+            deps=deps,
         )
 
     except ValueError as exc:

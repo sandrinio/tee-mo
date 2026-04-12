@@ -2,7 +2,7 @@
 sprint_id: "sprint-05"
 sprint_goal: "Close Release 1 — ship EPIC-003 Slice B workspace CRUD end-to-end."
 dates: "2026-04-12 – 2026-04-13"
-status: "Planning"
+status: "Active"
 delivery: "D-01"
 confirmed_by: ""
 confirmed_at: ""
@@ -19,7 +19,7 @@ confirmed_at: ""
 - [x] No stories have 🔴 High ambiguity (spike first)
 - [x] Dependencies identified and sequencing agreed
 - [x] Risk flags reviewed from Risk Registry
-- [ ] **Human has confirmed this sprint plan**
+- [x] **Human has confirmed this sprint plan** (2026-04-12)
 
 ---
 

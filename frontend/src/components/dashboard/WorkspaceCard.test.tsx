@@ -31,6 +31,22 @@ const { makeDefaultMutateFn, renameMutateFn } = vi.hoisted(() => ({
 // Module mocks
 // ---------------------------------------------------------------------------
 
+// Mock useKey hooks so KeySection renders without needing a real QueryClientProvider.
+// STORY-004-04 added KeySection to WorkspaceCard which calls useKeyQuery internally.
+vi.mock('../../hooks/useKey', () => ({
+  useKeyQuery: vi.fn(() => ({
+    data: { has_key: false, provider: null, key_mask: null, ai_model: null },
+    isLoading: false,
+  })),
+  useSaveKeyMutation: vi.fn(() => ({ mutate: vi.fn(), isPending: false, error: null })),
+  useDeleteKeyMutation: vi.fn(() => ({ mutate: vi.fn(), isPending: false, error: null })),
+}));
+
+vi.mock('../../lib/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../lib/api')>();
+  return { ...actual, validateKey: vi.fn() };
+});
+
 vi.mock('../../hooks/useWorkspaces', () => ({
   useMakeDefaultMutation: (_teamId: string) => ({
     mutate: makeDefaultMutateFn,

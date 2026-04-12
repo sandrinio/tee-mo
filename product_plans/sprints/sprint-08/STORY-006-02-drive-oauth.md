@@ -161,3 +161,5 @@ Feature: Google Drive OAuth
 ## Token Usage
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| Developer | 592 | 715 | 1,307 |
+| QA | 18 | 963 | 981 |

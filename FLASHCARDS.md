@@ -231,3 +231,45 @@ vi.mock('../../main', () => ({ queryClient: { clear: clearMock } }));
 **What happened:** The salvaged `api.ts` wrappers used flat URLs (`/api/workspaces?team_id=`, `POST /api/workspaces`, `PATCH /api/workspaces/{id}/default`) that didn't match the actual backend routes decided in sprint planning (`/api/slack-teams/{teamId}/workspaces`, `POST /api/workspaces/{id}/make-default`). The orphan branch was written before the route prefix was finalized. Hermetic tests (which mock the API module) passed — the mismatch only surfaced during manual QA when live requests hit 404/401.
 **Rule:** When salvaging frontend code from an orphan or stale branch, cross-check every URL string in the salvaged file against the current backend route definitions. Do NOT trust that the salvaged URLs match the final API contract.
 **How to apply:** In the Developer task prompt for salvage stories, include the backend API contract table (endpoint, method, path) and add an explicit instruction: "Verify every URL in the salvaged code matches this table before committing." The Team Lead should grep for URL patterns in the salvaged diff during the test pattern validation step.
+
+---
+
+## Google Drive Integration (S-08)
+
+### [2026-04-13] `drive.file` scope does NOT grant refresh-token access to Picker-selected files
+**Seen in:** STORY-006-06 (E2E verification)
+**What happened:** The OAuth flow used `drive.file` scope (non-sensitive). The Google Picker widget correctly opened and let the user select files. But when the backend tried to read the selected file using the stored refresh token (via `drive_service.get_drive_client`), Google returned 403 `appNotAuthorizedToFile`. The `drive.file` scope grants access only to files the app created or opened — but the Picker selection is tied to the short-lived access token session, not the refresh token. The refresh token never gains access to those files.
+**Rule:** If the backend needs to read arbitrary user-selected files via a stored refresh token, use `drive.readonly` scope (sensitive) instead of `drive.file` (non-sensitive). `drive.file` only works when the same access token that opened the Picker is used for the API call — it does not transfer to refresh-token-derived access tokens.
+**How to apply:** When setting `DRIVE_SCOPES` in `drive_oauth.py`, use `drive.readonly`. If `drive.file` is required for compliance, the file read must happen in the same request that has the Picker's access token — pass it from the frontend and use it server-side for the initial fetch.
+
+---
+
+### [2026-04-13] `from __future__ import annotations` breaks FastAPI runtime type resolution
+**Seen in:** STORY-006-03 (QA bounce — test collection crash on Python 3.9)
+**What happened:** `drive_oauth.py` used `str | None` type hints in FastAPI endpoint signatures. To fix Python 3.9 compat, `from __future__ import annotations` was added. This turns all annotations into strings (PEP 563), but FastAPI inspects annotations at runtime to resolve dependency injection, query params, and request body types. With stringified annotations, FastAPI couldn't resolve `Optional[str]` defaults, causing 500 errors on every request.
+**Rule:** Never use `from __future__ import annotations` in FastAPI route files. Use `from typing import Optional` and `Optional[str]` syntax instead for Python 3.9 compatibility.
+**How to apply:** When a QA or linter flags `str | None` syntax for Python 3.9 compat, replace with `Optional[str]` from typing — do NOT add the `__future__` import. This applies to any file containing `@router.get`, `@router.post`, `@app.get`, etc.
+
+---
+
+### [2026-04-13] Google refresh tokens cannot be used as Bearer credentials for resource APIs
+**Seen in:** STORY-006-02 (Architect bounce — `drive_status` endpoint)
+**What happened:** The `drive_status` endpoint decrypted the stored refresh token and passed it directly as `Authorization: Bearer {refresh_token}` to Google's userinfo endpoint. Google returned 401. Refresh tokens are opaque to resource servers — they can only be exchanged at the token endpoint (`POST https://oauth2.googleapis.com/token` with `grant_type=refresh_token`) for a short-lived access token. The broad `except Exception` silently caught the 401 and returned `connected: false`, making the status endpoint permanently report "not connected" even with a valid refresh token.
+**Rule:** Always exchange a refresh token for an access token before calling any Google resource API (userinfo, Drive, Sheets, etc.). Never use a refresh token as a Bearer credential.
+**How to apply:** Any endpoint that needs to call a Google API with a stored refresh token must first POST to `https://oauth2.googleapis.com/token` with `grant_type=refresh_token`, extract the `access_token` from the response, then use that access token as the Bearer credential.
+
+---
+
+### [2026-04-13] Hermetic mocks hide column-name mismatches — verify against live schema
+**Seen in:** STORY-006-06 (E2E verification — `owner_user_id` vs `user_id`, `provider` vs `ai_provider`)
+**What happened:** The Developer agent used `owner_user_id` in Supabase `.select()` and `.eq()` calls, but the actual `teemo_workspaces` table column is `user_id`. Similarly, `provider` was used instead of `ai_provider`. All hermetic tests passed because the mock Supabase client returns whatever data is configured — it never validates column names against the real schema. The errors only surfaced on the first live request (PostgREST returned `column does not exist (42703)`).
+**Rule:** When a story adds new Supabase queries, the Developer must verify column names against the actual table schema (check the migration SQL or run a live `select("*").limit(0)` probe). Do NOT trust column names from the story spec or AI-generated code without verification.
+**How to apply:** Before committing any new `.select("col1, col2")` or `.eq("col", val)` call, grep the migration files for the actual column names. If unsure, run `supabase.table("teemo_X").select("*").limit(1).execute()` in a Python shell and inspect `result.data[0].keys()`.
+
+---
+
+### [2026-04-13] Frontend worktrees need `npm install` before `vite build`
+**Seen in:** STORY-006-05 (Developer agent — worktree had no node_modules)
+**What happened:** Git worktrees check out a clean copy of the repo but `node_modules/` is gitignored. The Developer agent tried to run `vite build` in the worktree and it failed because no dependencies were installed. `npm install` must be run first.
+**Rule:** When creating a worktree for a frontend story, run `cd .worktrees/STORY-{ID}/frontend && npm install` before any build or test commands.
+**How to apply:** Add to the Team Lead's worktree setup checklist: after `git worktree add` and `cp .env`, run `npm install` in the frontend directory if the story touches frontend code.

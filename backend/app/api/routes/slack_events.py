@@ -4,8 +4,8 @@ Tee-Mo Slack events receiver — hardened with signing-secret verification.
 This module ships POST /api/slack/events with:
   - Slack v0 HMAC-SHA256 signature verification (STORY-005A-02, ADR-021).
   - url_verification challenge round-trip for Slack app setup.
-  - 202 Accepted passthrough for all other event types (EPIC-005 Phase B
-    will dispatch real handlers on top of this skeleton).
+  - 200 OK with asyncio.create_task dispatch for event_callback payloads
+    (STORY-007-05 — routes to slack_dispatch.handle_slack_event).
 
 Security note:
     All requests MUST carry valid X-Slack-Signature and
@@ -21,6 +21,7 @@ Why hand-rolled (not slack_bolt middleware):
     without the full Bolt framework.
 """
 
+import asyncio
 import json
 import logging
 
@@ -29,6 +30,7 @@ from fastapi.responses import PlainTextResponse, Response
 
 from app.core.config import get_settings
 from app.core.slack import verify_slack_signature
+from app.services.slack_dispatch import handle_slack_event
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/slack", tags=["slack"])
@@ -88,8 +90,9 @@ async def slack_events(request: Request) -> Response:
     -------
     200 text/plain
         Challenge string echoed for ``url_verification`` payloads.
-    202 empty
-        Acknowledgement for all other event types.
+    200 empty
+        event_callback payloads: dispatched via asyncio.create_task to
+        handle_slack_event for async processing.
     400
         Body is not valid JSON (after signature passes).
     401
@@ -113,4 +116,8 @@ async def slack_events(request: Request) -> Response:
     if payload.get("type") == "url_verification":
         return PlainTextResponse(payload.get("challenge", ""))
 
-    return Response(status_code=202)
+    if payload.get("type") == "event_callback":
+        asyncio.create_task(handle_slack_event(payload))
+        return Response(status_code=200)
+
+    return Response(status_code=200)

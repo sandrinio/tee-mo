@@ -81,7 +81,11 @@ def test_url_verification_returns_challenge_as_plain_text(client):
 
 
 def test_other_event_types_return_202_accepted(client):
-    """Scenario: Other event types return 202."""
+    """Scenario: event_callback types return 200 (changed from 202 in STORY-007-05).
+
+    STORY-007-05 changed the passthrough from 202 Accepted to 200 OK because
+    event_callback payloads are now dispatched via asyncio.create_task.
+    """
     import json as _json
     body = _json.dumps(
         {"type": "event_callback", "event": {"type": "app_mention", "text": "hi"}}
@@ -97,7 +101,7 @@ def test_other_event_types_return_202_accepted(client):
             "X-Slack-Signature": sig,
         },
     )
-    assert response.status_code == 202
+    assert response.status_code == 200
     assert response.content == b""
 
 

@@ -1,7 +1,7 @@
 ---
 total_input_tokens: 0
 total_output_tokens: 0
-total_tokens_used: 850000
+total_tokens_used: 1118159
 sprint_id: "S-08"
 ---
 
@@ -15,7 +15,7 @@ sprint_id: "S-08"
 - **Tests**: 120+ new tests written (30 drive_service, 8 scan_service, 5 config, 18 agent_factory, 34 drive_oauth, 26 knowledge_routes, 10 frontend hooks).
 - **Top Surprise**: `drive.file` OAuth scope doesn't grant access to pre-existing files selected via Picker — required mid-E2E switch to `drive.readonly`. This is a real Google API behavior that mocked tests cannot catch.
 - **Post-Sprint Fixes**: Slack mrkdwn formatting (agent was outputting Markdown), streaming responses via `run_stream()` + progressive `chat_update`, display name resolution fix.
-- **Cost**: ~850K tokens total across all agent passes (estimated from task notifications).
+- **Cost**: ~1.12M tokens across 17 subagent tasks (~67 min total agent runtime). Does not include Team Lead (main conversation) token usage.
 
 ## 2. Stories Delivered
 

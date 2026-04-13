@@ -265,6 +265,28 @@ export async function renameWorkspace(id: string, name: string): Promise<Workspa
 }
 
 /**
+ * DELETE /api/workspaces/{workspaceId} — permanently deletes a workspace and all
+ * associated data (skills, knowledge files, channel bindings) via ON DELETE CASCADE.
+ *
+ * Owner-only — the backend filters on both workspace id and user_id, returning 404
+ * if the workspace does not exist or the caller is not the owner.
+ *
+ * @param workspaceId - UUID of the workspace to delete.
+ * @returns void (HTTP 204 No Content on success).
+ * @throws Error with backend `detail` message on non-2xx responses.
+ */
+export async function deleteWorkspace(workspaceId: string): Promise<void> {
+  const r = await fetch(`${API_URL}/api/workspaces/${encodeURIComponent(workspaceId)}`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+  if (!r.ok) {
+    const payload = await r.json().catch(() => ({}));
+    throw new Error(payload?.detail ?? `HTTP ${r.status}`);
+  }
+}
+
+/**
  * POST /api/workspaces/{id}/make-default — sets a workspace as the team default.
  *
  * The backend clears `is_default_for_team` on all other workspaces in the

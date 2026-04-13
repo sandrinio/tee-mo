@@ -5,14 +5,14 @@
  *   - Div-based overlay (not native `<dialog>`) for jsdom compatibility.
  *   - Native `<form>` element inside the overlay panel.
  *   - Single `name` input, pre-filled with the current workspace name.
- *   - Inline error display — no external toast library (Design Guide §9.2).
+ *   - Toast error on mutation failure (STORY-008-04 — replaces inline error paragraph).
  *
  * Behavior contract:
  *   - Renders the overlay when `open === true`; returns null when `open === false`.
  *   - Input is pre-filled with `workspace.name` and re-synced when `workspace` changes.
  *   - Submitting a non-empty name calls `useRenameWorkspaceMutation`.
  *   - On mutation success the modal closes via `onClose()`.
- *   - On mutation error the `error.message` is shown inline.
+ *   - On mutation error a toast.error is shown — no inline error paragraph.
  *   - Clicking the backdrop closes the modal without saving.
  *   - "Cancel" button closes the modal without saving.
  *
@@ -22,6 +22,7 @@
  *   - No new `@theme` tokens — uses built-in Tailwind 4 classes.
  */
 import { useState, useEffect } from 'react';
+import { toast } from 'sonner';
 import { useRenameWorkspaceMutation } from '../../hooks/useWorkspaces';
 import type { Workspace } from '../../lib/api';
 
@@ -80,8 +81,10 @@ export function RenameWorkspaceModal({
     try {
       await mutation.mutateAsync({ id: workspace.id, name: trimmed });
       onClose();
-    } catch {
-      // Error surfaces through mutation.error below — no additional handling needed.
+    } catch (err) {
+      // Show error as a toast — no inline error paragraph (STORY-008-04).
+      const message = err instanceof Error ? err.message : 'Failed to rename workspace';
+      toast.error(message);
     }
   }
 
@@ -124,16 +127,6 @@ export function RenameWorkspaceModal({
               className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:border-[#E94560] focus:outline-none focus:ring-1 focus:ring-[#E94560]"
             />
           </div>
-
-          {/* Inline error from mutation */}
-          {mutation.error && (
-            <p
-              role="alert"
-              className="mb-3 text-sm text-rose-700"
-            >
-              {mutation.error.message}
-            </p>
-          )}
 
           {/* Action buttons */}
           <div className="flex justify-end gap-2">

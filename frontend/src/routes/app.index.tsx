@@ -1,5 +1,5 @@
 /**
- * /app (index) — Slack Teams dashboard (STORY-005A-06, refactored in S-05).
+ * /app (index) — Slack Teams dashboard (STORY-005A-06, refactored in S-05, S-09).
  *
  * This is the first screen a user sees after logging in; it shows all Slack
  * workspaces where Tee-Mo is installed for their account, plus an install button
@@ -9,24 +9,29 @@
  * app.tsx can serve as a layout route with <Outlet> for child routes like
  * /app/teams/$teamId.
  *
+ * STORY-008-04 changes:
+ *   - FlashBanner and BANNER_VARIANTS removed — replaced with sonner toasts.
+ *   - useEffect fires the appropriate toast variant once on mount when
+ *     slack_install or drive_connect search params are present.
+ *   - validateSearch extended to also accept drive_connect='ok'.
+ *   - URL params are stripped after toast fires via navigate({ replace: true }).
+ *
  * Design decisions:
  *   - Install button is always an `<a href>` — NOT an onClick handler. The browser
  *     must perform a full-page navigation so the session cookie rides along to the
  *     backend's OAuth initiation endpoint, which then redirects to Slack.
- *   - Flash banners are driven by the `slack_install` search param set by the OAuth
- *     callback. BANNER_VARIANTS is the SINGLE source of banner copy — never spread
- *     strings across the component body.
  *   - All data fetching goes through TanStack Query + listSlackTeams() in lib/api.ts.
  *     No raw fetch() calls in this file.
  *   - validateSearch narrows the `slack_install` param to a union type so useSearch
  *     returns typed data without any runtime overhead.
  */
-import { useState } from 'react';
+import { useEffect } from 'react';
 import { createFileRoute, useSearch, useNavigate } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
+import { toast } from 'sonner';
 
 import { Card } from '../components/ui/Card';
-import { SignOutButton } from '../components/auth/SignOutButton';
+import { Button } from '../components/ui/Button';
 import { listSlackTeams } from '../lib/api';
 import type { SlackTeam } from '../lib/api';
 
@@ -42,48 +47,10 @@ const API_URL = import.meta.env.VITE_API_URL ?? '';
 
 /**
  * Valid values for the `slack_install` search param set by the OAuth callback.
- * Used in validateSearch and as the key type for BANNER_VARIANTS.
+ * Used in validateSearch and as the key type for toast message mapping.
  */
 const ALLOWED_INSTALL_STATES = ['ok', 'cancelled', 'expired', 'error', 'session_lost'] as const;
 type SlackInstallState = (typeof ALLOWED_INSTALL_STATES)[number];
-
-/**
- * Single source of truth for all flash banner copy, role attributes, and
- * Tailwind colour classes. Never spread banner strings into component body.
- *
- * `role` follows ARIA: "status" for informational banners, "alert" for
- * warnings/errors that require user attention.
- */
-const BANNER_VARIANTS: Record<
-  SlackInstallState,
-  { text: string; role: 'status' | 'alert'; className: string }
-> = {
-  ok: {
-    text: 'Tee-Mo installed.',
-    role: 'status',
-    className: 'bg-emerald-50 text-emerald-900 border-emerald-200',
-  },
-  cancelled: {
-    text: 'Install cancelled.',
-    role: 'status',
-    className: 'bg-slate-50 text-slate-700 border-slate-200',
-  },
-  expired: {
-    text: 'Install session expired — please try again.',
-    role: 'alert',
-    className: 'bg-amber-50 text-amber-900 border-amber-200',
-  },
-  error: {
-    text: 'Install failed. Please try again or check the logs.',
-    role: 'alert',
-    className: 'bg-rose-50 text-rose-900 border-rose-200',
-  },
-  session_lost: {
-    text: 'Your session expired during install. Please log in and try again.',
-    role: 'alert',
-    className: 'bg-amber-50 text-amber-900 border-amber-200',
-  },
-};
 
 // ---------------------------------------------------------------------------
 // Route declaration
@@ -91,23 +58,26 @@ const BANNER_VARIANTS: Record<
 
 /**
  * Index route for /app. validateSearch narrows the `slack_install` query param
- * to the SlackInstallState union so useSearch() returns typed data in AppContent.
+ * to the SlackInstallState union and accepts `drive_connect='ok'` for Google
+ * Drive OAuth callback, so useSearch() returns typed data in AppContent.
  *
  * Any value outside the allowed set is coerced to `undefined` at parse time —
- * no runtime exceptions, no unrecognised banner variants.
+ * no runtime exceptions, no unrecognised toast variants.
  */
 export const Route = createFileRoute('/app/')({
   component: AppContent,
   validateSearch: (
     search: Record<string, unknown>,
-  ): { slack_install?: SlackInstallState } => {
+  ): { slack_install?: SlackInstallState; drive_connect?: 'ok' } => {
     const v = search.slack_install;
+    const d = search.drive_connect;
     return {
       slack_install:
         typeof v === 'string' &&
         (ALLOWED_INSTALL_STATES as readonly string[]).includes(v)
           ? (v as SlackInstallState)
           : undefined,
+      drive_connect: d === 'ok' ? 'ok' : undefined,
     };
   },
 });
@@ -115,43 +85,6 @@ export const Route = createFileRoute('/app/')({
 // ---------------------------------------------------------------------------
 // Inner components
 // ---------------------------------------------------------------------------
-
-/** Props for FlashBanner. */
-interface FlashBannerProps {
-  /** Install state key — looked up in BANNER_VARIANTS. */
-  variant: SlackInstallState;
-  /** Callback invoked when the user clicks the dismiss (✕) button. */
-  onDismiss: () => void;
-}
-
-/**
- * FlashBanner — inline notification rendered when the OAuth callback appends
- * a `?slack_install=<state>` param. Reads all copy and styling from
- * BANNER_VARIANTS so strings are never scattered across the component.
- *
- * Uses `aria-label="Flash banner"` so tests can locate it via
- * `getByRole('status'/'alert', { name: /flash banner/i })`.
- */
-function FlashBanner({ variant, onDismiss }: FlashBannerProps) {
-  const { text, role, className } = BANNER_VARIANTS[variant];
-  return (
-    <div
-      role={role}
-      aria-label="Flash banner"
-      className={`mb-4 flex items-center justify-between rounded-md border px-4 py-2 text-sm ${className}`}
-    >
-      <span>{text}</span>
-      <button
-        type="button"
-        aria-label="Dismiss banner"
-        onClick={onDismiss}
-        className="ml-4 text-current opacity-60 hover:opacity-100"
-      >
-        ✕
-      </button>
-    </div>
-  );
-}
 
 /** Props for TeamCard. */
 interface TeamCardProps {
@@ -219,17 +152,23 @@ function TeamCard({ team }: TeamCardProps) {
  * Rendering states:
  *   - isLoading → skeleton card
  *   - error     → inline error with retry button
- *   - teams.length === 0 → empty state with primary install anchor
+ *   - teams.length === 0 → empty state with primary install button
  *   - teams.length > 0  → team list + secondary install anchor
  *
- * Flash banner is shown whenever the `slack_install` search param is set.
- * Dismissing the banner calls navigate({ to: '/app', search: {} }) to strip
- * the param from the URL.
+ * Toast notifications fire once on mount when OAuth callback params are present:
+ *   - slack_install=ok        → toast.success('Tee-Mo installed.')
+ *   - slack_install=cancelled → toast('Install cancelled.')  [informational]
+ *   - slack_install=expired   → toast.error('Install session expired — please try again.')
+ *   - slack_install=error     → toast.error('Install failed. Please try again or check the logs.')
+ *   - slack_install=session_lost → toast.error('Your session expired during install. Please log in and try again.')
+ *   - drive_connect=ok        → toast.success('Google Drive connected')
+ *
+ * After firing, navigate() strips the params from the URL (replace: true so
+ * the back button doesn't re-show the toast).
  */
 export function AppContent() {
   const search = useSearch({ from: '/app/' });
   const navigate = useNavigate();
-  const [dismissed, setDismissed] = useState(false);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['slack-teams'],
@@ -237,13 +176,32 @@ export function AppContent() {
     staleTime: 0,
   });
 
-  const bannerVariant =
-    !dismissed && search.slack_install ? search.slack_install : null;
+  // Fire toast once when OAuth callback params are present, then strip params.
+  useEffect(() => {
+    const { slack_install, drive_connect } = search;
 
-  const handleDismiss = () => {
-    setDismissed(true);
-    navigate({ to: '/app', search: {} });
-  };
+    if (!slack_install && !drive_connect) return;
+
+    if (slack_install === 'ok') {
+      toast.success('Tee-Mo installed.');
+    } else if (slack_install === 'cancelled') {
+      toast('Install cancelled.');
+    } else if (slack_install === 'expired') {
+      toast.error('Install session expired — please try again.');
+    } else if (slack_install === 'error') {
+      toast.error('Install failed. Please try again or check the logs.');
+    } else if (slack_install === 'session_lost') {
+      toast.error('Your session expired during install. Please log in and try again.');
+    }
+
+    if (drive_connect === 'ok') {
+      toast.success('Google Drive connected');
+    }
+
+    // Strip OAuth params from URL so the toast doesn't re-fire on refresh.
+    navigate({ to: '/app', search: {}, replace: true });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty deps — fire once on mount only. search values are stable at mount time.
 
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-8">
@@ -253,13 +211,7 @@ export function AppContent() {
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
             Slack Teams
           </h1>
-          <SignOutButton />
         </div>
-
-        {/* Flash banner — shown when OAuth callback sets slack_install param */}
-        {bannerVariant && (
-          <FlashBanner variant={bannerVariant} onDismiss={handleDismiss} />
-        )}
 
         {/* Loading state */}
         {isLoading && (
@@ -287,7 +239,7 @@ export function AppContent() {
 
         {/* Empty state */}
         {!isLoading && !error && data && data.teams.length === 0 && (
-          <Card className="py-12 text-center">
+          <Card className="py-12 text-center border-dashed">
             <h2 className="text-lg font-semibold text-slate-900">
               No Slack teams yet
             </h2>
@@ -296,9 +248,11 @@ export function AppContent() {
             </p>
             <a
               href={`${API_URL}/api/slack/install`}
-              className="mt-6 inline-block rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+              className="mt-6 inline-block"
             >
-              Install Slack
+              <Button variant="primary">
+                Install Slack
+              </Button>
             </a>
           </Card>
         )}

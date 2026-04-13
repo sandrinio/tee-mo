@@ -2,10 +2,10 @@
 sprint_id: "sprint-10"
 sprint_goal: "Upgrade Drive file extraction to produce structured markdown, cache content for fast reads, add re-index and workspace deletion. Agent answers from tabular data accurately without hitting Drive API on every query."
 dates: "2026-04-13"
-status: "Planning"
+status: "Active"
 delivery: "D-06"
-confirmed_by: ""
-confirmed_at: ""
+confirmed_by: "sandrinio"
+confirmed_at: "2026-04-13"
 ---
 
 # Sprint S-10 Plan
@@ -19,7 +19,7 @@ confirmed_at: ""
 - [x] No stories have 🔴 High ambiguity (spike first)
 - [x] Dependencies identified and sequencing agreed
 - [x] Risk flags reviewed from Risk Registry (inline in Epic §6 — no formal registry file)
-- [ ] **Human has confirmed this sprint plan**
+- [x] **Human has confirmed this sprint plan**
 
 ---
 
@@ -28,11 +28,11 @@ confirmed_at: ""
 
 | Priority | Story | Epic | Label | V-Bounce State | Blocker |
 |----------|-------|------|-------|----------------|---------|
-| 1a | [STORY-006-07: Markdown-Aware Extractors](./STORY-006-07-hybrid-extraction.md) | EPIC-006 | L2 | Ready to Bounce | — |
-| 1b | [STORY-006-09: Delete Workspace](./STORY-006-09-delete-workspace.md) | EPIC-006 | L1 | Ready to Bounce | — |
-| 2a | [STORY-006-08: Multimodal LLM Fallback](./STORY-006-08-multimodal-fallback.md) | EPIC-006 | L2 | Ready to Bounce | 006-07 |
-| 2b | [STORY-006-10: Cached Content](./STORY-006-10-cached-content.md) | EPIC-006 | L2 | Ready to Bounce | 006-07 |
-| 3 | [STORY-006-11: Re-Index Files](./STORY-006-11-reindex.md) | EPIC-006 | L2 | Ready to Bounce | 006-08, 006-10 |
+| 1a | [STORY-006-07: Markdown-Aware Extractors](./STORY-006-07-hybrid-extraction.md) | EPIC-006 | L2 | Done | — |
+| 1b | [STORY-006-09: Delete Workspace](./STORY-006-09-delete-workspace.md) | EPIC-006 | L1 | Done | — |
+| 2a | [STORY-006-08: Multimodal LLM Fallback](./STORY-006-08-multimodal-fallback.md) | EPIC-006 | L2 | Done | 006-07 |
+| 2b | [STORY-006-10: Cached Content](./STORY-006-10-cached-content.md) | EPIC-006 | L2 | Done | 006-07 |
+| 3 | [STORY-006-11: Re-Index Files](./STORY-006-11-reindex.md) | EPIC-006 | L2 | Done | 006-08, 006-10 |
 
 ### Context Pack Readiness
 
@@ -149,4 +149,9 @@ confirmed_at: ""
 
 | Story | Final State | QA Bounces | Arch Bounces | Tests Written | Correction Tax | Notes |
 |-------|-------------|------------|--------------|---------------|----------------|-------|
+| STORY-006-09 | Done | 0 | 0 | — | 0% | Fast Track single-pass. 4 new tests, all 17 passing. Clean merge. |
+| STORY-006-07 | Done | 0 | 0 | — | 0% | TDD Red/Green. 15 new tests (30 total). Team Lead fixed 1 mock pattern. Clean merge. |
+| STORY-006-08 | Done | 0 | 0 | — | 0% | TDD Red/Green. 12 new tests (50 total). AwaitableStr pattern for sync/async compat. Clean merge. |
+| STORY-006-10 | Done | 0 | 0 | — | 0% | TDD Red/Green. 5 new tests. Cache-first read_drive_file. Merge fix for async compat. |
+| STORY-006-11 | Done | 0 | 0 | — | 0% | Single-pass. 5 new tests (102 total). Clean merge. Frontend re-index button with spinner. |
 <!-- EXECUTION_LOG_END -->

@@ -777,3 +777,124 @@ def test_list_workspaces_empty_returns_200_empty_list(app_client: TestClient) ->
     assert resp.status_code == 200, f"Expected 200 for empty workspace list, got {resp.status_code}: {resp.text}"
     body = resp.json()
     assert body == [], f"Expected empty list, got {body}"
+
+
+# ---------------------------------------------------------------------------
+# Tests 14-17 — DELETE /api/workspaces/{id} (STORY-006-09)
+# ---------------------------------------------------------------------------
+
+
+def test_delete_workspace_returns_204_and_row_gone(app_client: TestClient) -> None:
+    """Gherkin: Delete workspace returns 204 and workspace is removed.
+
+    Given an authenticated user who owns a workspace,
+    When the user sends DELETE /api/workspaces/{id},
+    Then the response is HTTP 204 No Content,
+    And the Supabase delete call filtered on both id and user_id.
+
+    The mock delete chain returns [FAKE_WORKSPACE_ROW] (non-empty) to simulate
+    a successful deletion where PostgREST echoes the deleted row(s).
+    """
+    mock_sb = MagicMock()
+
+    def _table(name: str) -> MagicMock:
+        tbl = MagicMock()
+        if name == "teemo_workspaces":
+            del_mock = MagicMock()
+            del_mock.eq.return_value = del_mock
+            del_mock.execute.return_value = _make_execute_result([FAKE_WORKSPACE_ROW])
+            tbl.delete.return_value = del_mock
+        return tbl
+
+    mock_sb.table.side_effect = _table
+
+    with patch("app.api.routes.workspaces.get_supabase", return_value=mock_sb):
+        resp = app_client.delete(f"/api/workspaces/{FAKE_WORKSPACE_ID}")
+
+    assert resp.status_code == 204, (
+        f"Expected 204 No Content, got {resp.status_code}: {resp.text}"
+    )
+
+
+def test_delete_workspace_non_owner_returns_404(app_client: TestClient) -> None:
+    """Gherkin: DELETE from non-owner returns 404 (existence concealment).
+
+    Given an authenticated user who does NOT own the specified workspace,
+    When the user sends DELETE /api/workspaces/{id},
+    Then the response is HTTP 404 Not Found.
+
+    The mock delete chain returns empty data to simulate no rows matched
+    (the user_id filter excluded the row).
+    """
+    mock_sb = MagicMock()
+
+    def _table(name: str) -> MagicMock:
+        tbl = MagicMock()
+        if name == "teemo_workspaces":
+            del_mock = MagicMock()
+            del_mock.eq.return_value = del_mock
+            del_mock.execute.return_value = _make_execute_result([])  # no match
+            tbl.delete.return_value = del_mock
+        return tbl
+
+    mock_sb.table.side_effect = _table
+
+    with patch("app.api.routes.workspaces.get_supabase", return_value=mock_sb):
+        resp = app_client.delete(f"/api/workspaces/{FAKE_WORKSPACE_ID}")
+
+    assert resp.status_code == 404, (
+        f"Expected 404 for non-owner delete, got {resp.status_code}: {resp.text}"
+    )
+
+
+def test_delete_workspace_nonexistent_uuid_returns_404(app_client: TestClient) -> None:
+    """Gherkin: DELETE nonexistent workspace returns 404.
+
+    Given an authenticated user who sends DELETE for a workspace UUID that
+    does not exist at all in the database,
+    When the user sends DELETE /api/workspaces/{random_id},
+    Then the response is HTTP 404 Not Found.
+
+    The mock delete chain returns empty data to simulate the row not existing.
+    """
+    nonexistent_id = str(uuid.uuid4())
+    mock_sb = MagicMock()
+
+    def _table(name: str) -> MagicMock:
+        tbl = MagicMock()
+        if name == "teemo_workspaces":
+            del_mock = MagicMock()
+            del_mock.eq.return_value = del_mock
+            del_mock.execute.return_value = _make_execute_result([])  # not found
+            tbl.delete.return_value = del_mock
+        return tbl
+
+    mock_sb.table.side_effect = _table
+
+    with patch("app.api.routes.workspaces.get_supabase", return_value=mock_sb):
+        resp = app_client.delete(f"/api/workspaces/{nonexistent_id}")
+
+    assert resp.status_code == 404, (
+        f"Expected 404 for nonexistent workspace, got {resp.status_code}: {resp.text}"
+    )
+
+
+def test_delete_workspace_unauthenticated_returns_401() -> None:
+    """Gherkin: DELETE without auth returns 401.
+
+    Given an unauthenticated request (no session cookies),
+    When the request sends DELETE /api/workspaces/{id},
+    Then the response is HTTP 401 Unauthorized.
+
+    This test does NOT override get_current_user_id — the real dependency
+    is invoked, which reads the missing cookie and raises 401.
+    """
+    from app.main import app
+
+    # No dependency override — real get_current_user_id will raise 401
+    with TestClient(app) as unauthenticated_client:
+        resp = unauthenticated_client.delete(f"/api/workspaces/{FAKE_WORKSPACE_ID}")
+
+    assert resp.status_code == 401, (
+        f"Expected 401 Unauthorized for unauthenticated DELETE, got {resp.status_code}: {resp.text}"
+    )

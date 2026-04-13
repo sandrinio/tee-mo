@@ -382,3 +382,47 @@ async def make_workspace_default(
         raise HTTPException(status_code=500, detail="Failed to set default workspace.")
 
     return _to_response(result.data[0])
+
+
+# ---------------------------------------------------------------------------
+# DELETE /api/workspaces/{id}
+# ---------------------------------------------------------------------------
+
+
+@router.delete(
+    "/workspaces/{workspace_id}",
+    status_code=204,
+)
+async def delete_workspace(
+    workspace_id: uuid.UUID,
+    user_id: str = Depends(get_current_user_id),
+) -> None:
+    """Delete a workspace and all associated data.
+
+    PostgreSQL ON DELETE CASCADE removes child rows from:
+    teemo_skills, teemo_knowledge_index, teemo_workspace_channels.
+
+    Authorization is enforced by filtering on both ``id`` AND ``user_id`` —
+    if the workspace does not exist or is owned by another user, the Supabase
+    DELETE returns empty data and we raise HTTP 404. Returning 404 (rather than
+    403) for cross-user access is intentional: it avoids leaking existence
+    information (ADR-024).
+
+    Args:
+        workspace_id: UUID of the workspace to delete.
+        user_id: Injected by ``get_current_user_id``; raises 401 if invalid.
+
+    Raises:
+        HTTPException(401): No or invalid auth token.
+        HTTPException(404): Workspace not found or not owned by the current user.
+    """
+    sb = get_supabase()
+    result = (
+        sb.table("teemo_workspaces")
+        .delete()
+        .eq("id", str(workspace_id))
+        .eq("user_id", user_id)
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Workspace not found.")

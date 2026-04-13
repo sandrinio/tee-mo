@@ -648,6 +648,12 @@ async def build_agent(
 
         file_row = file_result.data[0]
 
+        # STORY-006-10: Cache-first fast-path — return immediately if content is cached.
+        # Avoids Drive API call on every agent invocation; Drive is only hit on cache miss.
+        cached = file_row.get("cached_content")
+        if cached:
+            return cached
+
         # 2. Get workspace's Drive refresh token.
         ws_result = (
             deps.supabase.table("teemo_workspaces")
@@ -669,25 +675,37 @@ async def build_agent(
                 return "Google Drive access has been revoked. Please reconnect Drive from the dashboard."
             return f"Drive access error: {e}"
 
-        content = fetch_file_content(drive_client, drive_file_id, file_row["mime_type"])
+        # Decrypt the BYOK API key so fetch_file_content can trigger multimodal
+        # fallback if the file is a scanned/image-only PDF (STORY-006-08).
+        from app.core.encryption import decrypt as _decrypt_key
+        api_key_plain = _decrypt_key(ws_row["encrypted_api_key"])
+        _result = fetch_file_content(
+            drive_client,
+            drive_file_id,
+            file_row["mime_type"],
+            provider=ws_row["ai_provider"],
+            api_key=api_key_plain,
+        )
+        import inspect
+        content = (await _result) if inspect.isawaitable(_result) else _result
 
-        # 4. Self-healing: if content hash has changed, re-generate the AI
-        #    description and update teemo_knowledge_index (ADR-006).
+        # 4. Self-healing: always upsert cached_content on Drive fetch (backfill or update).
+        #    Only re-generate AI description when the content hash has actually changed (ADR-006).
+        #    Omit DEFAULT NOW() columns from the upsert payload (FLASHCARDS.md rule).
         new_hash = compute_content_hash(content)
+        update_payload: dict = {
+            "workspace_id": deps.workspace_id,
+            "drive_file_id": drive_file_id,
+            "cached_content": content,
+            "content_hash": new_hash,
+        }
         if new_hash != file_row.get("content_hash"):
-            from app.core.encryption import decrypt as _decrypt_key
-            api_key_plain = _decrypt_key(ws_row["encrypted_api_key"])
             new_description = await generate_ai_description(
                 content, ws_row["ai_provider"], api_key_plain
             )
-            # Upsert only the changed fields — omit DEFAULT NOW() columns
-            # (FLASHCARDS.md: Supabase upsert + DEFAULT NOW() rule).
-            deps.supabase.table("teemo_knowledge_index").upsert({
-                "workspace_id": deps.workspace_id,
-                "drive_file_id": drive_file_id,
-                "content_hash": new_hash,
-                "ai_description": new_description,
-            }).execute()
+            update_payload["ai_description"] = new_description
+
+        deps.supabase.table("teemo_knowledge_index").upsert(update_payload).execute()
 
         return content
 

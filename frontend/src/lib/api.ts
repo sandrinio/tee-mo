@@ -265,6 +265,28 @@ export async function renameWorkspace(id: string, name: string): Promise<Workspa
 }
 
 /**
+ * DELETE /api/workspaces/{workspaceId} — permanently deletes a workspace and all
+ * associated data (skills, knowledge files, channel bindings) via ON DELETE CASCADE.
+ *
+ * Owner-only — the backend filters on both workspace id and user_id, returning 404
+ * if the workspace does not exist or the caller is not the owner.
+ *
+ * @param workspaceId - UUID of the workspace to delete.
+ * @returns void (HTTP 204 No Content on success).
+ * @throws Error with backend `detail` message on non-2xx responses.
+ */
+export async function deleteWorkspace(workspaceId: string): Promise<void> {
+  const r = await fetch(`${API_URL}/api/workspaces/${encodeURIComponent(workspaceId)}`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+  if (!r.ok) {
+    const payload = await r.json().catch(() => ({}));
+    throw new Error(payload?.detail ?? `HTTP ${r.status}`);
+  }
+}
+
+/**
  * POST /api/workspaces/{id}/make-default — sets a workspace as the team default.
  *
  * The backend clears `is_default_for_team` on all other workspaces in the
@@ -654,4 +676,38 @@ export async function removeKnowledgeFile(workspaceId: string, knowledgeId: stri
     throw new Error(payload?.detail ?? `HTTP ${r.status}`);
   }
   return r.json();
+}
+
+/**
+ * Response shape returned by POST /api/workspaces/{workspaceId}/knowledge/reindex.
+ * Indicates how many files were successfully re-indexed and how many failed.
+ */
+export interface ReindexResult {
+  /** Number of files successfully re-extracted and updated. */
+  reindexed: number;
+  /** Number of files that failed during re-indexing. */
+  failed: number;
+  /** Per-file error details for each failure. */
+  errors: Array<{ file_id: string; error: string }>;
+}
+
+/**
+ * POST /api/workspaces/{workspaceId}/knowledge/reindex
+ * Re-extracts all indexed files from Google Drive, regenerates AI descriptions,
+ * and updates ``cached_content``, ``content_hash``, ``ai_description``, and
+ * ``last_scanned_at`` for each row.
+ *
+ * This is a long-running operation (seconds to minutes depending on file count).
+ * Requires both a BYOK key and Google Drive to be connected — returns a 400 error
+ * otherwise. Per-file failures do not abort the run; they are collected in ``errors``.
+ *
+ * @param workspaceId - UUID of the workspace whose files to re-index.
+ * @returns ReindexResult with counts and any per-file errors.
+ * @throws Error with backend ``detail`` message on non-2xx (e.g. 400, 401, 404).
+ */
+export function reindexKnowledge(workspaceId: string): Promise<ReindexResult> {
+  return apiPost<Record<string, never>, ReindexResult>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/knowledge/reindex`,
+    {},
+  );
 }

@@ -16,7 +16,7 @@ dependencies = [
     "slack-bolt==1.28.0",
     "google-api-python-client==2.194.0",
     "google-auth==2.49.2",
-    "pypdf",
+    "pymupdf4llm",
     "python-docx",
     "openpyxl",
     "pytest>=8.0.0",

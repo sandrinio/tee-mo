@@ -36,8 +36,6 @@ Slack SDK:
 ADR references: ADR-024 (table schema).
 """
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 
@@ -293,10 +291,23 @@ async def list_channel_bindings(
     workspace_id: str,
     user_id: str = Depends(get_current_user_id),
 ) -> list[dict[str, Any]]:
-    """List all Slack channels bound to a workspace.
+    """List all Slack channels bound to a workspace, enriched with is_member.
 
     Returns an empty list (not 404) when no channels are bound.
     Results are ordered by ``bound_at`` ascending for a stable display order.
+
+    Enrichment (STORY-008-02):
+    - Looks up the workspace's ``slack_team_id`` from ``teemo_workspaces``.
+    - Fetches the encrypted bot token from ``teemo_slack_teams``.
+    - Decrypts the token via ``encryption_module.decrypt``.
+    - Calls ``conversations.info`` per binding to populate ``is_member``
+      and ``channel_name``.
+    - Fallback: on any exception OR ``ok=False``, sets ``is_member=False``
+      and ``channel_name=slack_channel_id`` — enrichment errors are non-fatal.
+
+    ``AsyncWebClient`` is imported at MODULE LEVEL so that test suite can patch
+    it via ``app.api.routes.channels.AsyncWebClient``. Do NOT move it inside
+    this function body (see FLASHCARDS.md, httpx module-level import rule).
 
     Parameters
     ----------
@@ -308,7 +319,8 @@ async def list_channel_bindings(
     Returns
     -------
     list[dict]
-        Ordered list of binding records. May be empty.
+        Ordered list of binding records enriched with ``is_member`` and
+        ``channel_name``. May be empty.
 
     Raises
     ------
@@ -317,10 +329,12 @@ async def list_channel_bindings(
     HTTPException(403)
         Authenticated user does not own the workspace.
     """
-    # Verify workspace ownership — raises 403 for non-owners.
-    _assert_workspace_owner(workspace_id, user_id)
+    # 1. Verify workspace ownership — raises 403 for non-owners.
+    workspace_row = _assert_workspace_owner(workspace_id, user_id)
 
     sb = get_supabase()
+
+    # 2. Fetch all bindings for this workspace.
     result = (
         sb.table("teemo_workspace_channels")
         .select("*")
@@ -328,7 +342,62 @@ async def list_channel_bindings(
         .order("bound_at", desc=False)
         .execute()
     )
-    return result.data or []
+    bindings: list[dict[str, Any]] = result.data or []
+
+    if not bindings:
+        return bindings
+
+    # 3. Resolve the Slack team ID from the workspace row.
+    slack_team_id: str = workspace_row.get("slack_team_id", "")
+
+    # 4. Fetch the encrypted bot token from teemo_slack_teams.
+    team_result = (
+        sb.table("teemo_slack_teams")
+        .select("*")
+        .eq("slack_team_id", slack_team_id)
+        .limit(1)
+        .execute()
+    )
+    if not team_result.data:
+        # No team row means we cannot enrich — return bindings with fallback values.
+        for binding in bindings:
+            binding["is_member"] = False
+            binding["channel_name"] = binding["slack_channel_id"]
+        return bindings
+
+    encrypted_token: str = team_result.data[0]["encrypted_slack_bot_token"]
+    bot_token: str = encryption_module.decrypt(encrypted_token)
+
+    # 5. Create an AsyncWebClient with the decrypted token.
+    #    AsyncWebClient is module-level — tests monkeypatch it at
+    #    app.api.routes.channels.AsyncWebClient.
+    client = AsyncWebClient(token=bot_token)
+
+    # 6. Enrich each binding with is_member and channel_name via conversations.info.
+    enriched: list[dict[str, Any]] = []
+    for binding in bindings:
+        channel_id: str = binding["slack_channel_id"]
+        try:
+            info = await client.conversations_info(channel=channel_id)
+            if info.get("ok"):
+                channel_data = info.get("channel", {})
+                binding["is_member"] = bool(channel_data.get("is_member", False))
+                binding["channel_name"] = channel_data.get("name", channel_id)
+            else:
+                # ok=False but no exception — apply fallback (R13).
+                binding["is_member"] = False
+                binding["channel_name"] = channel_id
+        except Exception:
+            # Any exception (SlackApiError, network error, etc.) — apply fallback (R13).
+            logger.warning(
+                "conversations.info failed for channel %s — falling back to is_member=False",
+                channel_id,
+            )
+            binding["is_member"] = False
+            binding["channel_name"] = channel_id
+        enriched.append(binding)
+
+    return enriched
 
 
 # ---------------------------------------------------------------------------

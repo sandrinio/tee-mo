@@ -35,6 +35,7 @@ import app.agents.agent as _agent_module
 import app.core.db as _db_module
 import app.core.encryption as _enc_module
 import app.services.slack_thread as _thread_module
+from app.services.slack_formatter import markdown_to_mrkdwn
 
 # Re-export names so tests can monkeypatch them at this module's namespace level.
 # Tests do:
@@ -112,7 +113,7 @@ async def _stream_agent_to_slack(
                         await client.chat_update(
                             channel=channel,
                             ts=msg_ts,
-                            text=accumulated + " ▎",
+                            text=markdown_to_mrkdwn(accumulated) + " ▎",
                         )
                         last_update_time = now
                         last_update_len = len(accumulated)
@@ -128,7 +129,7 @@ async def _stream_agent_to_slack(
             await client.chat_update(
                 channel=channel,
                 ts=msg_ts,
-                text=final_text,
+                text=markdown_to_mrkdwn(final_text),
             )
     except Exception:
         # If streaming fails, fall back to the accumulated text or error
@@ -136,7 +137,7 @@ async def _stream_agent_to_slack(
             await client.chat_update(
                 channel=channel,
                 ts=msg_ts,
-                text=accumulated.strip(),
+                text=markdown_to_mrkdwn(accumulated.strip()),
             )
         else:
             raise  # Re-raise so the caller's error handling kicks in

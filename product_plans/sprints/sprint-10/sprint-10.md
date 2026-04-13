@@ -32,7 +32,7 @@ confirmed_at: "2026-04-13"
 | 1b | [STORY-006-09: Delete Workspace](./STORY-006-09-delete-workspace.md) | EPIC-006 | L1 | Done | — |
 | 2a | [STORY-006-08: Multimodal LLM Fallback](./STORY-006-08-multimodal-fallback.md) | EPIC-006 | L2 | Done | 006-07 |
 | 2b | [STORY-006-10: Cached Content](./STORY-006-10-cached-content.md) | EPIC-006 | L2 | Done | 006-07 |
-| 3 | [STORY-006-11: Re-Index Files](./STORY-006-11-reindex.md) | EPIC-006 | L2 | Ready to Bounce | 006-08, 006-10 |
+| 3 | [STORY-006-11: Re-Index Files](./STORY-006-11-reindex.md) | EPIC-006 | L2 | Done | 006-08, 006-10 |
 
 ### Context Pack Readiness
 
@@ -153,4 +153,5 @@ confirmed_at: "2026-04-13"
 | STORY-006-07 | Done | 0 | 0 | — | 0% | TDD Red/Green. 15 new tests (30 total). Team Lead fixed 1 mock pattern. Clean merge. |
 | STORY-006-08 | Done | 0 | 0 | — | 0% | TDD Red/Green. 12 new tests (50 total). AwaitableStr pattern for sync/async compat. Clean merge. |
 | STORY-006-10 | Done | 0 | 0 | — | 0% | TDD Red/Green. 5 new tests. Cache-first read_drive_file. Merge fix for async compat. |
+| STORY-006-11 | Done | 0 | 0 | — | 0% | Single-pass. 5 new tests (102 total). Clean merge. Frontend re-index button with spinner. |
 <!-- EXECUTION_LOG_END -->

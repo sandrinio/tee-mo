@@ -32,14 +32,15 @@
  * 15-file cap (R5): picker button disabled with count badge when files.length >= 15.
  */
 import { useState, useCallback } from 'react';
-import { createFileRoute, Link } from '@tanstack/react-router';
+import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { Card } from '../components/ui/Card';
 import { useWorkspaceQuery } from '../hooks/useWorkspaces';
 import { useKeyQuery } from '../hooks/useKey';
 import { useDriveStatusQuery, useDisconnectDriveMutation } from '../hooks/useDrive';
 import { useKnowledgeQuery, useAddKnowledgeMutation, useRemoveKnowledgeMutation } from '../hooks/useKnowledge';
-import { getPickerToken, type KnowledgeFile } from '../lib/api';
+import { getPickerToken, deleteWorkspace, type KnowledgeFile } from '../lib/api';
 import { SetupStepper } from '../components/workspace/SetupStepper';
 import { ChannelSection } from '../components/workspace/ChannelSection';
 
@@ -485,6 +486,121 @@ function TruncationToast({
 }
 
 // ---------------------------------------------------------------------------
+// DeleteWorkspaceSection
+// ---------------------------------------------------------------------------
+
+/** Props for DeleteWorkspaceSection. */
+interface DeleteWorkspaceSectionProps {
+  workspaceId: string;
+  workspaceName: string | undefined;
+  teamId: string;
+}
+
+/**
+ * DeleteWorkspaceSection — danger zone card with a Delete Workspace button and
+ * a div-based confirmation dialog.
+ *
+ * Design: red/danger button matching the coral brand palette. The confirmation
+ * dialog uses a div overlay (NOT native `<dialog>`) because jsdom does not
+ * support `showModal()` (sprint-context S-10 rule).
+ *
+ * On confirm:
+ *   1. Calls `deleteWorkspace(workspaceId)` via `useMutation`.
+ *   2. Invalidates the `['workspaces', teamId]` query cache so the team page
+ *      reflects the deletion immediately after redirect.
+ *   3. Navigates to `/app/teams/${teamId}` using `useNavigate`.
+ *
+ * On cancel: dialog is dismissed with no side-effects.
+ *
+ * @param workspaceId    - UUID of the workspace to delete.
+ * @param workspaceName  - Human-readable name for the confirmation message.
+ * @param teamId         - Slack team ID for post-delete navigation.
+ */
+function DeleteWorkspaceSection({ workspaceId, workspaceName, teamId }: DeleteWorkspaceSectionProps) {
+  const [showConfirm, setShowConfirm] = useState(false);
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteWorkspace(workspaceId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['workspaces', teamId] });
+      await navigate({ to: '/app/teams/$teamId', params: { teamId } });
+    },
+  });
+
+  return (
+    <Card>
+      <h2 className="text-base font-semibold text-slate-900 mb-3">Danger Zone</h2>
+      <p className="text-sm text-slate-500 mb-4">
+        Permanently delete this workspace and all its knowledge files, channel
+        bindings, and API keys. This action cannot be undone.
+      </p>
+      <button
+        type="button"
+        onClick={() => setShowConfirm(true)}
+        className="rounded-md bg-rose-500 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-600 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        Delete Workspace
+      </button>
+
+      {/* Div-based confirmation dialog overlay (no native <dialog> — jsdom limitation) */}
+      {showConfirm && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-dialog-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+        >
+          <div className="mx-4 w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
+            <h3
+              id="delete-dialog-title"
+              className="text-lg font-semibold text-slate-900 mb-2"
+            >
+              Delete workspace?
+            </h3>
+            <p className="text-sm text-slate-600 mb-6">
+              Are you sure you want to delete{' '}
+              <span className="font-semibold text-slate-900">
+                {workspaceName ?? 'this workspace'}
+              </span>
+              ? All knowledge files, channel bindings, and keys will be permanently removed.
+            </p>
+
+            {deleteMutation.error && (
+              <p className="mb-4 text-xs text-rose-600" role="alert">
+                {deleteMutation.error instanceof Error
+                  ? deleteMutation.error.message
+                  : 'Failed to delete workspace. Please try again.'}
+              </p>
+            )}
+
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowConfirm(false)}
+                disabled={deleteMutation.isPending}
+                className="rounded-md px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => deleteMutation.mutate()}
+                disabled={deleteMutation.isPending}
+                className="rounded-md bg-rose-500 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-600 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // WorkspaceDetailPage
 // ---------------------------------------------------------------------------
 
@@ -607,6 +723,13 @@ function WorkspaceDetailPage() {
 
         {/* Channel binding section (STORY-008-02) */}
         <ChannelSection workspaceId={workspaceId} teamId={teamId} />
+
+        {/* Danger zone — delete workspace (STORY-006-09) */}
+        <DeleteWorkspaceSection
+          workspaceId={workspaceId}
+          workspaceName={workspace?.name}
+          teamId={teamId}
+        />
 
       </div>
     </div>

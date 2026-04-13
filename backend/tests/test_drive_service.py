@@ -1,25 +1,30 @@
 """
-Tests for drive_service.py — STORY-006-01 (Red Phase).
+Tests for drive_service.py — STORY-006-07 (Red Phase) extends STORY-006-01.
 
 Covers all Gherkin scenarios from §2.1:
-  1. get_drive_client — decrypts token, builds Credentials, refreshes, returns Drive client
-  2. fetch_file_content for Google Docs (text/plain export)
-  3. fetch_file_content for Google Sheets (text/csv export)
-  4. fetch_file_content for Google Slides (text/plain export)
-  5. fetch_file_content for PDF (get_media + pypdf extraction)
-  6. fetch_file_content for Word DOCX (get_media + python-docx extraction)
-  7. fetch_file_content for Excel XLSX (get_media + openpyxl extraction)
-  8. Content truncation at 50K chars with trim notice appended
-  9. compute_content_hash returns MD5 hex digest
-  10. Unsupported MIME type raises ValueError (or returns an error string)
+  1.  get_drive_client — decrypts token, builds Credentials, refreshes, returns Drive client
+  2.  fetch_file_content for Google Docs (text/plain export) — unchanged
+  3.  fetch_file_content for Google Sheets — NOW exports as XLSX, routes through _extract_xlsx
+  4.  fetch_file_content for Google Slides — NOW inserts slide boundary markers
+  5.  fetch_file_content for PDF — NOW uses pymupdf4llm.to_markdown (not PdfReader)
+  6.  fetch_file_content for Word DOCX — NOW extracts tables as markdown alongside paragraphs
+  7.  fetch_file_content for Word DOCX without tables (regression) — paragraphs only, no markdown table syntax
+  8.  fetch_file_content for Excel XLSX — NOW outputs ## Sheet: headers + pipe-separated markdown tables
+  9.  Excel XLSX with empty sheet skipped — empty sheet does not appear in output
+  10. Excel XLSX with None cells — None renders as empty between pipes, no "None" string
+  11. Content truncation at 50K chars with trim notice appended — unchanged
+  12. compute_content_hash returns MD5 hex digest — unchanged
+  13. Unsupported MIME type raises ValueError — unchanged
+  14. PDF with headings preserved — markdown heading syntax (#) present in output
 
 Mock strategy:
   - `app.core.encryption.decrypt` is patched to return a deterministic plaintext token.
   - `google.oauth2.credentials.Credentials` is patched at module level.
   - `google.auth.transport.requests.Request` is patched at module level.
   - `googleapiclient.discovery.build` is patched at module level.
-  - `pypdf.PdfReader`, `docx.Document`, `openpyxl.load_workbook` are patched
-    at module level in drive_service to intercept binary extraction calls.
+  - `drive_service.pymupdf4llm` and `drive_service.pymupdf` are monkeypatched (module-level imports).
+  - `drive_service.DocxDocument`, `drive_service.load_workbook` are monkeypatched.
+  - `drive_service.MediaIoBaseDownload` is monkeypatched for binary download paths.
   - No real Google API calls are made.
 """
 
@@ -33,7 +38,7 @@ import pytest
 
 
 # ---------------------------------------------------------------------------
-# Import guard — module does not exist yet (RED phase)
+# Import guard — module may not exist yet (RED phase)
 # ---------------------------------------------------------------------------
 
 drive_service = None
@@ -55,8 +60,18 @@ DRIVE_FILE_ID = "drive-file-id-abc123"
 FAKE_API_KEY = "fake-google-client-id"
 FAKE_SECRET = "fake-google-client-secret"
 
+XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+PDF_MIME = "application/pdf"
+SHEETS_MIME = "application/vnd.google-apps.spreadsheet"
+SLIDES_MIME = "application/vnd.google-apps.presentation"
+DOCS_MIME = "application/vnd.google-apps.document"
 
-def _make_drive_client_mock(export_content: bytes | None = None, media_content: bytes | None = None) -> MagicMock:
+
+def _make_drive_client_mock(
+    export_content: bytes | None = None,
+    media_content: bytes | None = None,
+) -> MagicMock:
     """Build a minimal Drive API client mock supporting files().export() and files().get_media()."""
     media_io_result = MagicMock()
     if media_content is not None:
@@ -66,7 +81,6 @@ def _make_drive_client_mock(export_content: bytes | None = None, media_content: 
     request_export.execute.return_value = export_content or b""
 
     request_media = MagicMock()
-    # get_media returns a MediaIoBaseDownload-compatible request
     request_media.execute.return_value = None  # MediaIoBaseDownload handles it
 
     files_resource = MagicMock()
@@ -74,6 +88,27 @@ def _make_drive_client_mock(export_content: bytes | None = None, media_content: 
     files_resource.get_media.return_value = request_media
 
     drive_client = MagicMock()
+    drive_client.files.return_value = files_resource
+    return drive_client
+
+
+def _make_downloader_mock(monkeypatch) -> MagicMock:
+    """Attach a mock MediaIoBaseDownload to drive_service and return the instance mock."""
+    mock_downloader_instance = MagicMock()
+    mock_downloader_instance.next_chunk.side_effect = [
+        (MagicMock(progress=lambda: 1.0), True)
+    ]
+    mock_downloader_cls = MagicMock(return_value=mock_downloader_instance)
+    monkeypatch.setattr(drive_service, "MediaIoBaseDownload", mock_downloader_cls)
+    return mock_downloader_instance
+
+
+def _make_binary_drive_client() -> MagicMock:
+    """Drive client mock for get_media flows (binary extraction tests)."""
+    drive_client = MagicMock()
+    files_resource = MagicMock()
+    request_media = MagicMock()
+    files_resource.get_media.return_value = request_media
     drive_client.files.return_value = files_resource
     return drive_client
 
@@ -125,7 +160,6 @@ class TestGetDriveClient:
 
         drive_service.get_drive_client(ENCRYPTED_REFRESH_TOKEN)
 
-        # Credentials must be constructed with token=None and refresh_token set
         call_kwargs = mock_creds_cls.call_args.kwargs
         assert call_kwargs.get("token") is None
         assert call_kwargs.get("refresh_token") == DECRYPTED_REFRESH_TOKEN
@@ -181,7 +215,7 @@ class TestGetDriveClient:
 # ---------------------------------------------------------------------------
 
 class TestFetchFileContentGoogleDocs:
-    """Google Docs → export as text/plain."""
+    """Google Docs → export as text/plain (unchanged from STORY-006-01)."""
 
     def test_exports_google_doc_as_text_plain(self):
         """fetch_file_content must call files.export with mimeType='text/plain' for Google Docs."""
@@ -194,7 +228,7 @@ class TestFetchFileContentGoogleDocs:
         result = drive_service.fetch_file_content(
             drive_client,
             DRIVE_FILE_ID,
-            "application/vnd.google-apps.document",
+            DOCS_MIME,
         )
 
         drive_client.files().export.assert_called_once_with(
@@ -205,201 +239,596 @@ class TestFetchFileContentGoogleDocs:
 
 
 # ---------------------------------------------------------------------------
-# Scenario 3: fetch_file_content — Google Sheets (application/vnd.google-apps.spreadsheet)
+# Scenario 3 (updated): Google Sheets → export as XLSX (not CSV), via _extract_xlsx
 # ---------------------------------------------------------------------------
 
 class TestFetchFileContentGoogleSheets:
-    """Google Sheets → export as text/csv."""
+    """Google Sheets → export as XLSX MIME type, routed through _extract_xlsx."""
 
-    def test_exports_google_sheet_as_csv(self):
-        """fetch_file_content must call files.export with mimeType='text/csv' for Sheets."""
+    def test_exports_google_sheet_as_xlsx_not_csv(self, monkeypatch):
+        """fetch_file_content must call files.export with XLSX mimeType (not CSV) for Sheets."""
         if drive_service is None:
             pytest.skip("drive_service not yet implemented (RED phase)")
 
-        expected_csv = "col1,col2\nval1,val2\n"
-        drive_client = _make_drive_client_mock(export_content=expected_csv.encode())
+        # Build a mock workbook with one sheet and one data row.
+        # _extract_xlsx calls load_workbook and ws.iter_rows(values_only=True).
+        mock_ws = MagicMock()
+        mock_ws.iter_rows.return_value = [
+            ("header1", "header2"),
+            ("val1", "val2"),
+        ]
+        mock_wb = MagicMock()
+        mock_wb.sheetnames = ["Sheet1"]
+        mock_wb.__getitem__ = MagicMock(return_value=mock_ws)
+        mock_load_workbook = MagicMock(return_value=mock_wb)
+        monkeypatch.setattr(drive_service, "load_workbook", mock_load_workbook)
+
+        fake_xlsx_bytes = b"PK\x03\x04fake-xlsx-content"
+        drive_client = _make_drive_client_mock(export_content=fake_xlsx_bytes)
 
         result = drive_service.fetch_file_content(
             drive_client,
             DRIVE_FILE_ID,
-            "application/vnd.google-apps.spreadsheet",
+            SHEETS_MIME,
         )
 
+        # Must export with XLSX mime, NOT text/csv
         drive_client.files().export.assert_called_once_with(
             fileId=DRIVE_FILE_ID,
-            mimeType="text/csv",
+            mimeType=XLSX_MIME,
         )
-        assert expected_csv in result
+        # load_workbook must have been called, indicating _extract_xlsx was used
+        mock_load_workbook.assert_called_once()
+
+    def test_google_sheets_output_contains_markdown_table(self, monkeypatch):
+        """Google Sheets result must contain pipe-separated markdown table from _extract_xlsx."""
+        if drive_service is None:
+            pytest.skip("drive_service not yet implemented (RED phase)")
+
+        mock_ws = MagicMock()
+        mock_ws.iter_rows.return_value = [
+            ("Name", "Revenue"),
+            ("Alice", "1000"),
+            ("Bob", "2000"),
+        ]
+        mock_wb = MagicMock()
+        mock_wb.sheetnames = ["Sales"]
+        mock_wb.__getitem__ = MagicMock(return_value=mock_ws)
+        monkeypatch.setattr(drive_service, "load_workbook", MagicMock(return_value=mock_wb))
+
+        drive_client = _make_drive_client_mock(export_content=b"fake-xlsx")
+
+        result = drive_service.fetch_file_content(
+            drive_client,
+            DRIVE_FILE_ID,
+            SHEETS_MIME,
+        )
+
+        # Output must contain pipe-separated markdown table
+        assert "|" in result
+        assert "Name" in result
+        assert "Revenue" in result
+
+    def test_google_sheets_output_contains_sheet_header(self, monkeypatch):
+        """Google Sheets result must contain ## Sheet: header for each sheet."""
+        if drive_service is None:
+            pytest.skip("drive_service not yet implemented (RED phase)")
+
+        mock_ws1 = MagicMock()
+        mock_ws1.iter_rows.return_value = [("A", "B"), ("1", "2")]
+        mock_ws2 = MagicMock()
+        mock_ws2.iter_rows.return_value = [("X", "Y"), ("3", "4")]
+
+        def _getitem(_self, name):
+            return {"Q1": mock_ws1, "Q2": mock_ws2}[name]
+
+        mock_wb = MagicMock()
+        mock_wb.sheetnames = ["Q1", "Q2"]
+        mock_wb.__getitem__ = _getitem
+        monkeypatch.setattr(drive_service, "load_workbook", MagicMock(return_value=mock_wb))
+
+        drive_client = _make_drive_client_mock(export_content=b"fake-xlsx")
+
+        result = drive_service.fetch_file_content(
+            drive_client,
+            DRIVE_FILE_ID,
+            SHEETS_MIME,
+        )
+
+        assert "## Sheet: Q1" in result
+        assert "## Sheet: Q2" in result
 
 
 # ---------------------------------------------------------------------------
-# Scenario 4: fetch_file_content — Google Slides (application/vnd.google-apps.presentation)
+# Scenario 4 (updated): Google Slides → slide boundary markers
 # ---------------------------------------------------------------------------
 
 class TestFetchFileContentGoogleSlides:
-    """Google Slides → export as text/plain."""
+    """Google Slides → export as text/plain, then insert slide boundary markers."""
 
     def test_exports_google_slides_as_text_plain(self):
         """fetch_file_content must call files.export with mimeType='text/plain' for Slides."""
         if drive_service is None:
             pytest.skip("drive_service not yet implemented (RED phase)")
 
-        expected_text = "Slide 1: Introduction\nSlide 2: Details"
-        drive_client = _make_drive_client_mock(export_content=expected_text.encode())
+        # Form-feed (\x0c) separates slides in the Drive text/plain export
+        slide_text = "Intro slide\x0cSecond slide\x0cThird slide"
+        drive_client = _make_drive_client_mock(export_content=slide_text.encode())
 
         result = drive_service.fetch_file_content(
             drive_client,
             DRIVE_FILE_ID,
-            "application/vnd.google-apps.presentation",
+            SLIDES_MIME,
         )
 
         drive_client.files().export.assert_called_once_with(
             fileId=DRIVE_FILE_ID,
             mimeType="text/plain",
         )
-        assert expected_text in result
+        assert result is not None
+
+    def test_google_slides_inserts_slide_boundary_markers(self):
+        """fetch_file_content must insert '--- Slide N ---' markers between slides."""
+        if drive_service is None:
+            pytest.skip("drive_service not yet implemented (RED phase)")
+
+        # Drive text/plain export uses form-feed (\x0c) between slides
+        slide_text = "Title: Welcome\x0cContent: Agenda\x0cContent: Summary"
+        drive_client = _make_drive_client_mock(export_content=slide_text.encode())
+
+        result = drive_service.fetch_file_content(
+            drive_client,
+            DRIVE_FILE_ID,
+            SLIDES_MIME,
+        )
+
+        assert "--- Slide 1 ---" in result
+        assert "--- Slide 2 ---" in result
+        assert "--- Slide 3 ---" in result
+
+    def test_google_slides_content_preserved_between_markers(self):
+        """Slide content (text) must be preserved alongside the boundary markers."""
+        if drive_service is None:
+            pytest.skip("drive_service not yet implemented (RED phase)")
+
+        slide_text = "Introduction\x0cDetails here\x0cConclusion"
+        drive_client = _make_drive_client_mock(export_content=slide_text.encode())
+
+        result = drive_service.fetch_file_content(
+            drive_client,
+            DRIVE_FILE_ID,
+            SLIDES_MIME,
+        )
+
+        assert "Introduction" in result
+        assert "Details here" in result
+        assert "Conclusion" in result
 
 
 # ---------------------------------------------------------------------------
-# Scenario 5: fetch_file_content — PDF (application/pdf)
+# Scenario 5 (updated): PDF — pymupdf4llm.to_markdown (not PdfReader)
 # ---------------------------------------------------------------------------
 
 class TestFetchFileContentPDF:
-    """PDF → get_media + pypdf text extraction."""
+    """PDF → get_media + pymupdf4llm markdown extraction."""
 
-    def test_fetches_pdf_via_get_media_and_extracts_text(self, monkeypatch):
-        """fetch_file_content must use files.get_media() + pypdf for PDFs."""
+    def test_fetches_pdf_via_get_media_and_extracts_markdown(self, monkeypatch):
+        """fetch_file_content must use pymupdf + pymupdf4llm for PDFs, not PdfReader."""
         if drive_service is None:
             pytest.skip("drive_service not yet implemented (RED phase)")
 
-        extracted_text = "PDF page one content"
+        markdown_output = "# Heading\n\nSome PDF paragraph text."
 
-        # Mock PdfReader to return extracted text
-        mock_page = MagicMock()
-        mock_page.extract_text.return_value = extracted_text
-        mock_reader_instance = MagicMock()
-        mock_reader_instance.pages = [mock_page]
-        mock_pdf_reader_cls = MagicMock(return_value=mock_reader_instance)
+        # Mock pymupdf module — drive_service will call pymupdf.open(stream=..., filetype="pdf")
+        mock_pymupdf_doc = MagicMock()
+        mock_pymupdf_module = MagicMock()
+        mock_pymupdf_module.open.return_value = mock_pymupdf_doc
 
-        monkeypatch.setattr(drive_service, "PdfReader", mock_pdf_reader_cls)
+        # Mock pymupdf4llm module — drive_service will call pymupdf4llm.to_markdown(doc)
+        mock_pymupdf4llm_module = MagicMock()
+        mock_pymupdf4llm_module.to_markdown.return_value = markdown_output
 
-        # Drive client returns bytes via MediaIoBaseDownload flow
-        drive_client = MagicMock()
-        files_resource = MagicMock()
-        request_media = MagicMock()
-        files_resource.get_media.return_value = request_media
-        drive_client.files.return_value = files_resource
+        monkeypatch.setattr(drive_service, "pymupdf", mock_pymupdf_module)
+        monkeypatch.setattr(drive_service, "pymupdf4llm", mock_pymupdf4llm_module)
 
-        # Mock MediaIoBaseDownload
-        mock_downloader_instance = MagicMock()
-        mock_downloader_instance.next_chunk.side_effect = [
-            (MagicMock(progress=lambda: 1.0), True)
-        ]
-        mock_downloader_cls = MagicMock(return_value=mock_downloader_instance)
-        monkeypatch.setattr(drive_service, "MediaIoBaseDownload", mock_downloader_cls)
+        _make_downloader_mock(monkeypatch)
+        drive_client = _make_binary_drive_client()
 
         result = drive_service.fetch_file_content(
             drive_client,
             DRIVE_FILE_ID,
-            "application/pdf",
+            PDF_MIME,
         )
 
-        files_resource.get_media.assert_called_once_with(fileId=DRIVE_FILE_ID)
-        assert extracted_text in result
+        # Must use get_media, not export
+        drive_client.files().get_media.assert_called_once_with(fileId=DRIVE_FILE_ID)
+        # Must call pymupdf4llm.to_markdown
+        mock_pymupdf4llm_module.to_markdown.assert_called_once_with(mock_pymupdf_doc)
+        assert markdown_output in result
+
+    def test_pdf_markdown_contains_pipe_table(self, monkeypatch):
+        """PDF with tables: output contains pipe-separated markdown table rows."""
+        if drive_service is None:
+            pytest.skip("drive_service not yet implemented (RED phase)")
+
+        # Simulate pymupdf4llm returning a markdown table
+        table_markdown = (
+            "| Col1 | Col2 | Col3 |\n"
+            "| --- | --- | --- |\n"
+            "| A | B | C |\n"
+            "| D | E | F |\n"
+        )
+
+        mock_pymupdf_doc = MagicMock()
+        mock_pymupdf_module = MagicMock()
+        mock_pymupdf_module.open.return_value = mock_pymupdf_doc
+
+        mock_pymupdf4llm_module = MagicMock()
+        mock_pymupdf4llm_module.to_markdown.return_value = table_markdown
+
+        monkeypatch.setattr(drive_service, "pymupdf", mock_pymupdf_module)
+        monkeypatch.setattr(drive_service, "pymupdf4llm", mock_pymupdf4llm_module)
+
+        _make_downloader_mock(monkeypatch)
+        drive_client = _make_binary_drive_client()
+
+        result = drive_service.fetch_file_content(
+            drive_client,
+            DRIVE_FILE_ID,
+            PDF_MIME,
+        )
+
+        assert "|" in result
+        assert "Col1" in result
+        assert "Col2" in result
+        assert "Col3" in result
+
+    def test_pdf_markdown_contains_heading_syntax(self, monkeypatch):
+        """PDF with headings: output contains markdown heading syntax (# ...)."""
+        if drive_service is None:
+            pytest.skip("drive_service not yet implemented (RED phase)")
+
+        heading_markdown = "# Main Title\n\nBody paragraph text here."
+
+        mock_pymupdf_doc = MagicMock()
+        mock_pymupdf_module = MagicMock()
+        mock_pymupdf_module.open.return_value = mock_pymupdf_doc
+
+        mock_pymupdf4llm_module = MagicMock()
+        mock_pymupdf4llm_module.to_markdown.return_value = heading_markdown
+
+        monkeypatch.setattr(drive_service, "pymupdf", mock_pymupdf_module)
+        monkeypatch.setattr(drive_service, "pymupdf4llm", mock_pymupdf4llm_module)
+
+        _make_downloader_mock(monkeypatch)
+        drive_client = _make_binary_drive_client()
+
+        result = drive_service.fetch_file_content(
+            drive_client,
+            DRIVE_FILE_ID,
+            PDF_MIME,
+        )
+
+        # Must contain markdown heading syntax
+        assert "# " in result
+        assert "Main Title" in result
 
 
 # ---------------------------------------------------------------------------
-# Scenario 6: fetch_file_content — Word DOCX
+# Scenario 6 (updated): Word DOCX — tables extracted as markdown alongside paragraphs
 # ---------------------------------------------------------------------------
 
 class TestFetchFileContentDocx:
-    """Word DOCX → get_media + python-docx extraction."""
+    """Word DOCX → get_media + python-docx extraction with table support."""
 
-    def test_fetches_docx_via_get_media_and_extracts_text(self, monkeypatch):
-        """fetch_file_content must use files.get_media() + python-docx for DOCX files."""
+    def _make_docx_element_mock(self, tag_suffix: str) -> MagicMock:
+        """Create a mock XML element with a tag ending in the given suffix (e.g. 'p' or 'tbl')."""
+        elem = MagicMock()
+        elem.tag = f"{{http://schemas.openxmlformats.org/wordprocessingml/2006/main}}{tag_suffix}"
+        return elem
+
+    def test_fetches_docx_with_tables_and_extracts_markdown(self, monkeypatch):
+        """fetch_file_content must extract paragraphs AND tables from DOCX, tables as markdown."""
         if drive_service is None:
             pytest.skip("drive_service not yet implemented (RED phase)")
 
-        extracted_text = "Word document paragraph one"
+        para_text = "This is a paragraph"
 
+        # Build mock paragraph element
+        para_elem = self._make_docx_element_mock("p")
         mock_para = MagicMock()
-        mock_para.text = extracted_text
-        mock_doc_instance = MagicMock()
-        mock_doc_instance.paragraphs = [mock_para]
-        mock_document_cls = MagicMock(return_value=mock_doc_instance)
+        mock_para.text = para_text
+        mock_para._element = para_elem
 
+        # Build mock table element
+        tbl_elem = self._make_docx_element_mock("tbl")
+
+        # Build mock table with rows and cells
+        mock_cell_1 = MagicMock()
+        mock_cell_1.text = "Header A"
+        mock_cell_2 = MagicMock()
+        mock_cell_2.text = "Header B"
+        mock_cell_3 = MagicMock()
+        mock_cell_3.text = "Val 1"
+        mock_cell_4 = MagicMock()
+        mock_cell_4.text = "Val 2"
+
+        mock_row_1 = MagicMock()
+        mock_row_1.cells = [mock_cell_1, mock_cell_2]
+        mock_row_2 = MagicMock()
+        mock_row_2.cells = [mock_cell_3, mock_cell_4]
+
+        mock_table = MagicMock()
+        mock_table.rows = [mock_row_1, mock_row_2]
+        mock_table._element = tbl_elem
+
+        # Build mock document
+        mock_doc = MagicMock()
+        mock_doc.paragraphs = [mock_para]
+        mock_doc.tables = [mock_table]
+
+        # Body iterates paragraph element then table element
+        mock_doc.element.body.__iter__ = MagicMock(return_value=iter([para_elem, tbl_elem]))
+
+        mock_document_cls = MagicMock(return_value=mock_doc)
         monkeypatch.setattr(drive_service, "DocxDocument", mock_document_cls)
-
-        drive_client = MagicMock()
-        files_resource = MagicMock()
-        request_media = MagicMock()
-        files_resource.get_media.return_value = request_media
-        drive_client.files.return_value = files_resource
-
-        mock_downloader_instance = MagicMock()
-        mock_downloader_instance.next_chunk.side_effect = [
-            (MagicMock(progress=lambda: 1.0), True)
-        ]
-        mock_downloader_cls = MagicMock(return_value=mock_downloader_instance)
-        monkeypatch.setattr(drive_service, "MediaIoBaseDownload", mock_downloader_cls)
+        _make_downloader_mock(monkeypatch)
+        drive_client = _make_binary_drive_client()
 
         result = drive_service.fetch_file_content(
             drive_client,
             DRIVE_FILE_ID,
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            DOCX_MIME,
         )
 
-        files_resource.get_media.assert_called_once_with(fileId=DRIVE_FILE_ID)
-        assert extracted_text in result
+        drive_client.files().get_media.assert_called_once_with(fileId=DRIVE_FILE_ID)
+        # Paragraph text must be present
+        assert para_text in result
+        # Table headers and values must be present
+        assert "Header A" in result
+        assert "Header B" in result
+        assert "Val 1" in result
+        assert "Val 2" in result
+
+    def test_docx_table_rendered_as_markdown_table(self, monkeypatch):
+        """DOCX table must appear as pipe-separated markdown with separator row."""
+        if drive_service is None:
+            pytest.skip("drive_service not yet implemented (RED phase)")
+
+        tbl_elem = self._make_docx_element_mock("tbl")
+
+        mock_cell_h1 = MagicMock(); mock_cell_h1.text = "Name"
+        mock_cell_h2 = MagicMock(); mock_cell_h2.text = "Score"
+        mock_cell_d1 = MagicMock(); mock_cell_d1.text = "Alice"
+        mock_cell_d2 = MagicMock(); mock_cell_d2.text = "95"
+
+        mock_row_header = MagicMock()
+        mock_row_header.cells = [mock_cell_h1, mock_cell_h2]
+        mock_row_data = MagicMock()
+        mock_row_data.cells = [mock_cell_d1, mock_cell_d2]
+
+        mock_table = MagicMock()
+        mock_table.rows = [mock_row_header, mock_row_data]
+        mock_table._element = tbl_elem
+
+        mock_doc = MagicMock()
+        mock_doc.paragraphs = []
+        mock_doc.tables = [mock_table]
+        mock_doc.element.body.__iter__ = MagicMock(return_value=iter([tbl_elem]))
+
+        monkeypatch.setattr(drive_service, "DocxDocument", MagicMock(return_value=mock_doc))
+        _make_downloader_mock(monkeypatch)
+        drive_client = _make_binary_drive_client()
+
+        result = drive_service.fetch_file_content(
+            drive_client,
+            DRIVE_FILE_ID,
+            DOCX_MIME,
+        )
+
+        # Must contain pipe characters for markdown table
+        assert "|" in result
+        assert "Name" in result
+        assert "Score" in result
+        assert "Alice" in result
+        assert "95" in result
+        # Must have separator row with dashes
+        assert "---" in result
+
+    def test_docx_without_tables_returns_paragraphs_only(self, monkeypatch):
+        """Regression: DOCX with only paragraphs (no tables) must return plain text, no markdown table syntax."""
+        if drive_service is None:
+            pytest.skip("drive_service not yet implemented (RED phase)")
+
+        para_text_1 = "First paragraph content"
+        para_text_2 = "Second paragraph content"
+
+        para_elem_1 = self._make_docx_element_mock("p")
+        para_elem_2 = self._make_docx_element_mock("p")
+
+        mock_para_1 = MagicMock()
+        mock_para_1.text = para_text_1
+        mock_para_1._element = para_elem_1
+
+        mock_para_2 = MagicMock()
+        mock_para_2.text = para_text_2
+        mock_para_2._element = para_elem_2
+
+        mock_doc = MagicMock()
+        mock_doc.paragraphs = [mock_para_1, mock_para_2]
+        mock_doc.tables = []
+        mock_doc.element.body.__iter__ = MagicMock(return_value=iter([para_elem_1, para_elem_2]))
+
+        monkeypatch.setattr(drive_service, "DocxDocument", MagicMock(return_value=mock_doc))
+        _make_downloader_mock(monkeypatch)
+        drive_client = _make_binary_drive_client()
+
+        result = drive_service.fetch_file_content(
+            drive_client,
+            DRIVE_FILE_ID,
+            DOCX_MIME,
+        )
+
+        assert para_text_1 in result
+        assert para_text_2 in result
+        # No markdown table syntax should appear when there are no tables
+        assert "|" not in result
 
 
 # ---------------------------------------------------------------------------
-# Scenario 7: fetch_file_content — Excel XLSX
+# Scenario 7 (updated): Excel XLSX — markdown tables with ## Sheet: headers
 # ---------------------------------------------------------------------------
 
 class TestFetchFileContentXlsx:
-    """Excel XLSX → get_media + openpyxl extraction."""
+    """Excel XLSX → markdown tables with ## Sheet: headers per sheet."""
 
-    def test_fetches_xlsx_via_get_media_and_extracts_text(self, monkeypatch):
-        """fetch_file_content must use files.get_media() + openpyxl for XLSX files."""
+    def _make_workbook_mock(self, sheets: dict) -> MagicMock:
+        """Build a mock openpyxl workbook.
+
+        Args:
+            sheets: dict mapping sheet_name -> list of row tuples (values_only=True style).
+        """
+        sheet_mocks = {}
+        for name, rows in sheets.items():
+            ws = MagicMock()
+            ws.iter_rows.return_value = rows
+            sheet_mocks[name] = ws
+
+        mock_wb = MagicMock()
+        mock_wb.sheetnames = list(sheets.keys())
+        mock_wb.__getitem__ = MagicMock(side_effect=lambda n: sheet_mocks[n])
+        return mock_wb
+
+    def test_xlsx_outputs_sheet_name_headers(self, monkeypatch):
+        """_extract_xlsx output must include '## Sheet: {name}' for each non-empty sheet."""
         if drive_service is None:
             pytest.skip("drive_service not yet implemented (RED phase)")
 
-        cell_value = "spreadsheet cell value"
-
-        mock_cell = MagicMock()
-        mock_cell.value = cell_value
-        mock_row = [mock_cell]
-        mock_sheet = MagicMock()
-        mock_sheet.iter_rows.return_value = [mock_row]
-        mock_wb_instance = MagicMock()
-        mock_wb_instance.sheetnames = ["Sheet1"]
-        mock_wb_instance.__getitem__ = MagicMock(return_value=mock_sheet)
-        mock_load_workbook_cls = MagicMock(return_value=mock_wb_instance)
-
-        monkeypatch.setattr(drive_service, "load_workbook", mock_load_workbook_cls)
-
-        drive_client = MagicMock()
-        files_resource = MagicMock()
-        request_media = MagicMock()
-        files_resource.get_media.return_value = request_media
-        drive_client.files.return_value = files_resource
-
-        mock_downloader_instance = MagicMock()
-        mock_downloader_instance.next_chunk.side_effect = [
-            (MagicMock(progress=lambda: 1.0), True)
-        ]
-        mock_downloader_cls = MagicMock(return_value=mock_downloader_instance)
-        monkeypatch.setattr(drive_service, "MediaIoBaseDownload", mock_downloader_cls)
+        mock_wb = self._make_workbook_mock({
+            "Q1": [("Revenue", "Profit"), ("100", "20"), ("200", "50")],
+            "Q2": [("Revenue", "Profit"), ("300", "70")],
+        })
+        monkeypatch.setattr(drive_service, "load_workbook", MagicMock(return_value=mock_wb))
+        _make_downloader_mock(monkeypatch)
+        drive_client = _make_binary_drive_client()
 
         result = drive_service.fetch_file_content(
             drive_client,
             DRIVE_FILE_ID,
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            XLSX_MIME,
         )
 
-        files_resource.get_media.assert_called_once_with(fileId=DRIVE_FILE_ID)
-        assert cell_value in result
+        assert "## Sheet: Q1" in result
+        assert "## Sheet: Q2" in result
+
+    def test_xlsx_outputs_pipe_separated_markdown_table(self, monkeypatch):
+        """_extract_xlsx must produce pipe-separated markdown tables with a separator row."""
+        if drive_service is None:
+            pytest.skip("drive_service not yet implemented (RED phase)")
+
+        mock_wb = self._make_workbook_mock({
+            "Data": [
+                ("Name", "Value"),
+                ("Alpha", "1"),
+                ("Beta", "2"),
+            ],
+        })
+        monkeypatch.setattr(drive_service, "load_workbook", MagicMock(return_value=mock_wb))
+        _make_downloader_mock(monkeypatch)
+        drive_client = _make_binary_drive_client()
+
+        result = drive_service.fetch_file_content(
+            drive_client,
+            DRIVE_FILE_ID,
+            XLSX_MIME,
+        )
+
+        assert "|" in result
+        assert "Name" in result
+        assert "Value" in result
+        assert "Alpha" in result
+        # Separator row must be present (--- tokens)
+        assert "---" in result
+
+    def test_xlsx_empty_sheet_skipped(self, monkeypatch):
+        """Empty sheets (no rows) must not appear in the output."""
+        if drive_service is None:
+            pytest.skip("drive_service not yet implemented (RED phase)")
+
+        mock_wb = self._make_workbook_mock({
+            "Data": [("Col1", "Col2"), ("row1a", "row1b")],
+            "Empty": [],  # no rows
+        })
+        monkeypatch.setattr(drive_service, "load_workbook", MagicMock(return_value=mock_wb))
+        _make_downloader_mock(monkeypatch)
+        drive_client = _make_binary_drive_client()
+
+        result = drive_service.fetch_file_content(
+            drive_client,
+            DRIVE_FILE_ID,
+            XLSX_MIME,
+        )
+
+        assert "## Sheet: Data" in result
+        # Empty sheet header must NOT appear
+        assert "## Sheet: Empty" not in result
+        assert "Empty" not in result
+
+    def test_xlsx_none_cells_render_as_empty_not_none_string(self, monkeypatch):
+        """None cells must appear as empty between pipe separators, not as the string 'None'."""
+        if drive_service is None:
+            pytest.skip("drive_service not yet implemented (RED phase)")
+
+        mock_wb = self._make_workbook_mock({
+            "Sheet1": [
+                ("A", "B", "C"),
+                ("val1", None, "val3"),
+                (None, "val2", None),
+            ],
+        })
+        monkeypatch.setattr(drive_service, "load_workbook", MagicMock(return_value=mock_wb))
+        _make_downloader_mock(monkeypatch)
+        drive_client = _make_binary_drive_client()
+
+        result = drive_service.fetch_file_content(
+            drive_client,
+            DRIVE_FILE_ID,
+            XLSX_MIME,
+        )
+
+        # "None" string must not appear anywhere
+        assert "None" not in result
+        # Must still contain the actual values
+        assert "val1" in result
+        assert "val2" in result
+        assert "val3" in result
+
+    def test_xlsx_multi_sheet_all_sheets_appear(self, monkeypatch):
+        """All non-empty sheets must appear in the output with their data."""
+        if drive_service is None:
+            pytest.skip("drive_service not yet implemented (RED phase)")
+
+        mock_wb = self._make_workbook_mock({
+            "January": [("Item", "Sales"), ("Widget", "500")],
+            "February": [("Item", "Sales"), ("Gadget", "300")],
+            "March": [("Item", "Sales"), ("Doohickey", "700")],
+        })
+        monkeypatch.setattr(drive_service, "load_workbook", MagicMock(return_value=mock_wb))
+        _make_downloader_mock(monkeypatch)
+        drive_client = _make_binary_drive_client()
+
+        result = drive_service.fetch_file_content(
+            drive_client,
+            DRIVE_FILE_ID,
+            XLSX_MIME,
+        )
+
+        assert "## Sheet: January" in result
+        assert "## Sheet: February" in result
+        assert "## Sheet: March" in result
+        assert "Widget" in result
+        assert "Gadget" in result
+        assert "Doohickey" in result
 
 
 # ---------------------------------------------------------------------------
@@ -421,10 +850,9 @@ class TestContentTruncation:
         result = drive_service.fetch_file_content(
             drive_client,
             DRIVE_FILE_ID,
-            "application/vnd.google-apps.document",
+            DOCS_MIME,
         )
 
-        # Result must be capped + have a trim notice
         assert len(result) <= 50_000 + 200  # allow some slack for the notice
         assert result[:50_000] == "A" * 50_000
         assert "truncated" in result.lower() or "[" in result
@@ -440,12 +868,40 @@ class TestContentTruncation:
         result = drive_service.fetch_file_content(
             drive_client,
             DRIVE_FILE_ID,
-            "application/vnd.google-apps.document",
+            DOCS_MIME,
         )
 
         assert short_content in result
-        # No truncation notice for short content
         assert "truncated" not in result.lower()
+
+    def test_truncation_with_notice_matches_spec_text(self, monkeypatch):
+        """Truncation notice must contain the spec text '[Content truncated at 50000 characters]'."""
+        if drive_service is None:
+            pytest.skip("drive_service not yet implemented (RED phase)")
+
+        # Use a binary path to ensure markdown content can also be truncated.
+        # Mock pymupdf4llm to return > 50K chars of markdown
+        long_markdown = "# Heading\n\n" + "A" * 60_000
+
+        mock_pymupdf_doc = MagicMock()
+        mock_pymupdf_module = MagicMock()
+        mock_pymupdf_module.open.return_value = mock_pymupdf_doc
+
+        mock_pymupdf4llm_module = MagicMock()
+        mock_pymupdf4llm_module.to_markdown.return_value = long_markdown
+
+        monkeypatch.setattr(drive_service, "pymupdf", mock_pymupdf_module)
+        monkeypatch.setattr(drive_service, "pymupdf4llm", mock_pymupdf4llm_module)
+        _make_downloader_mock(monkeypatch)
+        drive_client = _make_binary_drive_client()
+
+        result = drive_service.fetch_file_content(
+            drive_client,
+            DRIVE_FILE_ID,
+            PDF_MIME,
+        )
+
+        assert "[Content truncated at 50000 characters]" in result
 
 
 # ---------------------------------------------------------------------------
@@ -519,7 +975,6 @@ class TestUnsupportedMimeType:
                 DRIVE_FILE_ID,
                 "application/x-unknown-format",
             )
-            # If it doesn't raise, it must return a meaningful error indicator
             assert "unsupported" in result.lower() or "unknown" in result.lower() or "error" in result.lower()
         except (ValueError, NotImplementedError):
             pass  # Either approach is acceptable

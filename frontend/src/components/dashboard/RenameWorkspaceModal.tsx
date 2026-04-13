@@ -5,24 +5,30 @@
  *   - Div-based overlay (not native `<dialog>`) for jsdom compatibility.
  *   - Native `<form>` element inside the overlay panel.
  *   - Single `name` input, pre-filled with the current workspace name.
- *   - Inline error display — no external toast library (Design Guide §9.2).
+ *   - Toast error on mutation failure (STORY-008-04 — replaces inline error paragraph).
  *
  * Behavior contract:
  *   - Renders the overlay when `open === true`; returns null when `open === false`.
  *   - Input is pre-filled with `workspace.name` and re-synced when `workspace` changes.
  *   - Submitting a non-empty name calls `useRenameWorkspaceMutation`.
  *   - On mutation success the modal closes via `onClose()`.
- *   - On mutation error the `error.message` is shown inline.
+ *   - On mutation error a toast.error is shown — no inline error paragraph.
  *   - Clicking the backdrop closes the modal without saving.
  *   - "Cancel" button closes the modal without saving.
  *
+ * STORY-008-03 changes:
+ *   - Replaced hardcoded hex with `brand-500` design token (R8).
+ *   - Replaced ad-hoc `<button>` elements with `<Button>` component (R9).
+ *
  * Design Guide compliance:
- *   - Coral brand accent `#E94560` for submit button.
+ *   - Brand accent via `brand-500` Tailwind class.
  *   - Max font weight: `font-semibold` (600). Never `font-bold` (700).
  *   - No new `@theme` tokens — uses built-in Tailwind 4 classes.
  */
 import { useState, useEffect } from 'react';
+import { toast } from 'sonner';
 import { useRenameWorkspaceMutation } from '../../hooks/useWorkspaces';
+import { Button } from '../ui/Button';
 import type { Workspace } from '../../lib/api';
 
 /** Props accepted by RenameWorkspaceModal. */
@@ -80,8 +86,10 @@ export function RenameWorkspaceModal({
     try {
       await mutation.mutateAsync({ id: workspace.id, name: trimmed });
       onClose();
-    } catch {
-      // Error surfaces through mutation.error below — no additional handling needed.
+    } catch (err) {
+      // Show error as a toast — no inline error paragraph (STORY-008-04).
+      const message = err instanceof Error ? err.message : 'Failed to rename workspace';
+      toast.error(message);
     }
   }
 
@@ -121,37 +129,29 @@ export function RenameWorkspaceModal({
               onChange={(e) => setName(e.target.value)}
               required
               autoFocus
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:border-[#E94560] focus:outline-none focus:ring-1 focus:ring-[#E94560]"
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
             />
           </div>
 
-          {/* Inline error from mutation */}
-          {mutation.error && (
-            <p
-              role="alert"
-              className="mb-3 text-sm text-rose-700"
-            >
-              {mutation.error.message}
-            </p>
-          )}
-
-          {/* Action buttons */}
+          {/* Action buttons — R9: use Button component */}
           <div className="flex justify-end gap-2">
-            <button
+            <Button
               type="button"
+              variant="secondary"
+              size="sm"
               onClick={handleClose}
               disabled={mutation.isPending}
-              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
             >
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
+              variant="primary"
+              size="sm"
               disabled={mutation.isPending || !name.trim()}
-              className="rounded-md bg-[#E94560] px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
             >
               {mutation.isPending ? 'Saving…' : 'Save'}
-            </button>
+            </Button>
           </div>
         </form>
       </div>

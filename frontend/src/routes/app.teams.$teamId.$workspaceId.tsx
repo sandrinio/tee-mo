@@ -14,7 +14,7 @@
  *   3. KnowledgeList  — table of indexed files with Remove action
  *
  * Design system (ADR-022):
- *   - Coral brand: text-rose-500, bg-[#E94560]
+ *   - Coral brand: text-rose-500, bg-brand-500
  *   - Slate neutrals for backgrounds and text
  *   - Inter font (inherited from app.css)
  *   - Max font weight: font-semibold (600) — never font-bold
@@ -40,6 +40,8 @@ import { useKeyQuery } from '../hooks/useKey';
 import { useDriveStatusQuery, useDisconnectDriveMutation } from '../hooks/useDrive';
 import { useKnowledgeQuery, useAddKnowledgeMutation, useRemoveKnowledgeMutation } from '../hooks/useKnowledge';
 import { getPickerToken, type KnowledgeFile } from '../lib/api';
+import { SetupStepper } from '../components/workspace/SetupStepper';
+import { ChannelSection } from '../components/workspace/ChannelSection';
 
 // ---------------------------------------------------------------------------
 // Route declaration
@@ -171,7 +173,7 @@ function DriveSection({ workspaceId }: DriveSectionProps) {
           {/* Full-page redirect: browser must carry session cookie to OAuth endpoint */}
           <a
             href={`/api/workspaces/${encodeURIComponent(workspaceId)}/drive/connect`}
-            className="rounded-md bg-[#E94560] px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90"
+            className="rounded-md bg-brand-500 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-600"
           >
             Connect Google Drive
           </a>
@@ -309,7 +311,7 @@ function PickerSection({
                   ? `${MAX_FILES} file limit reached`
                   : undefined
             }
-            className="rounded-md bg-[#E94560] px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="rounded-md bg-brand-500 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {indexing ? 'Indexing…' : 'Add File'}
           </button>
@@ -498,6 +500,7 @@ function WorkspaceDetailPage() {
   const { teamId, workspaceId } = Route.useParams();
   const [truncationWarning, setTruncationWarning] = useState<string | null>(null);
   const [isIndexing, setIsIndexing] = useState(false);
+  const [wizardSkipped, setWizardSkipped] = useState(false);
 
   // Data queries
   const { data: workspace } = useWorkspaceQuery(workspaceId);
@@ -513,6 +516,13 @@ function WorkspaceDetailPage() {
   const hasKey = keyData?.has_key === true;
 
   /**
+   * Whether all three setup prerequisites are met.
+   * When false, show the guided SetupStepper instead of the normal detail view.
+   * Step 4 (Channels) is NOT part of this check per STORY-008-01 R5.
+   */
+  const isSetupComplete = driveConnected && hasKey && files.length > 0;
+
+  /**
    * Handles the result of a successful file indexing operation.
    * Shows a truncation warning banner if the response includes a warning field.
    */
@@ -521,6 +531,17 @@ function WorkspaceDetailPage() {
       setTruncationWarning(file.warning);
     }
   }, []);
+
+  // Show guided setup mode when setup is incomplete and user hasn't skipped
+  if (!isSetupComplete && !wizardSkipped) {
+    return (
+      <SetupStepper
+        workspaceId={workspaceId}
+        teamId={teamId}
+        onSkip={() => setWizardSkipped(true)}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-8">
@@ -583,6 +604,9 @@ function WorkspaceDetailPage() {
           files={files}
           isLoading={knowledgeLoading}
         />
+
+        {/* Channel binding section (STORY-008-02) */}
+        <ChannelSection workspaceId={workspaceId} teamId={teamId} />
 
       </div>
     </div>

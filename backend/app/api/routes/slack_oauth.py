@@ -173,6 +173,7 @@ async def slack_oauth_callback(
         return RedirectResponse("/app?slack_install=error", status_code=302)
 
     team_id = payload.get("team", {}).get("id")
+    team_name = payload.get("team", {}).get("name", "")
     bot_user_id = payload.get("bot_user_id")
     bot_token = payload.get("access_token")
     if not team_id or not bot_user_id or not bot_token:
@@ -200,14 +201,15 @@ async def slack_oauth_callback(
     # DEFAULT NOW() value from the first insert is preserved on re-install
     # (spec Req 8: installed_at must be the original install timestamp).
     encrypted = encrypt(bot_token)
-    sb.table("teemo_slack_teams").upsert(
-        {
-            "slack_team_id": team_id,
-            "owner_user_id": user_id,
-            "slack_bot_user_id": bot_user_id,
-            "encrypted_slack_bot_token": encrypted,
-        }
-    ).execute()
+    upsert_data: dict = {
+        "slack_team_id": team_id,
+        "owner_user_id": user_id,
+        "slack_bot_user_id": bot_user_id,
+        "encrypted_slack_bot_token": encrypted,
+    }
+    if team_name:
+        upsert_data["slack_team_name"] = team_name
+    sb.table("teemo_slack_teams").upsert(upsert_data).execute()
 
     return RedirectResponse("/app?slack_install=ok", status_code=302)
 
@@ -237,7 +239,7 @@ async def list_slack_teams(user_id: str = Depends(get_current_user_id)) -> dict:
     sb = get_supabase()
     result = (
         sb.table("teemo_slack_teams")
-        .select("slack_team_id, slack_bot_user_id, installed_at")
+        .select("slack_team_id, slack_team_name, slack_bot_user_id, installed_at")
         .eq("owner_user_id", user_id)
         .order("installed_at", desc=True)
         .execute()

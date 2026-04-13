@@ -10,17 +10,27 @@
  *   - Renders the overlay when `open === true`; returns null when `open === false`.
  *   - Submitting a non-empty name calls the create mutation.
  *   - On mutation success the modal closes via `onClose()`.
- *   - On mutation error the `error.message` from the API is shown inline.
+ *   - If `onCreated` is provided it is called with the new workspace record so
+ *     the parent can navigate to guided setup (STORY-008-03 R6).
+ *   - On mutation error a toast.error is shown (STORY-008-04 — replaces inline error).
  *   - Clicking the backdrop closes the modal without creating a workspace.
  *   - "Cancel" button closes the modal without creating a workspace.
  *
+ * STORY-008-03 changes:
+ *   - Added `onCreated` optional callback for post-creation navigation (R6).
+ *   - Replaced hardcoded hex with `brand-500` design token (R8).
+ *   - Replaced ad-hoc `<button>` elements with `<Button>` component (R9).
+ *
  * Design Guide compliance:
- *   - Coral brand accent `#E94560` for the submit button.
+ *   - Brand accent via `brand-500` Tailwind class.
  *   - Max font weight: `font-semibold` (600). Never `font-bold` (700).
  *   - No new `@theme` tokens — uses built-in Tailwind 4 classes.
  */
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { useCreateWorkspaceMutation } from '../../hooks/useWorkspaces';
+import { Button } from '../ui/Button';
+import type { Workspace } from '../../lib/api';
 
 /** Props accepted by CreateWorkspaceModal. */
 export interface CreateWorkspaceModalProps {
@@ -30,6 +40,11 @@ export interface CreateWorkspaceModalProps {
   open: boolean;
   /** Callback invoked when the modal should close (success or cancel). */
   onClose: () => void;
+  /**
+   * Optional callback invoked with the newly created workspace record on success.
+   * Use this to navigate to the guided setup page after creation (R6).
+   */
+  onCreated?: (workspace: Workspace) => void;
 }
 
 /**
@@ -42,6 +57,7 @@ export interface CreateWorkspaceModalProps {
  *   teamId={teamId}
  *   open={open}
  *   onClose={() => setOpen(false)}
+ *   onCreated={(ws) => navigate({ to: '/app/teams/$teamId/$workspaceId', params: { teamId, workspaceId: ws.id } })}
  * />
  * ```
  */
@@ -49,6 +65,7 @@ export function CreateWorkspaceModal({
   teamId,
   open,
   onClose,
+  onCreated,
 }: CreateWorkspaceModalProps) {
   const [name, setName] = useState('');
 
@@ -68,11 +85,17 @@ export function CreateWorkspaceModal({
     if (!trimmed) return;
 
     try {
-      await mutation.mutateAsync(trimmed);
+      const newWorkspace = await mutation.mutateAsync(trimmed);
       setName('');
+      // Notify parent before closing so it can act on the new workspace (R6).
+      if (onCreated) {
+        onCreated(newWorkspace);
+      }
       onClose();
-    } catch {
-      // Error surfaces through mutation.error below — no additional handling needed.
+    } catch (err) {
+      // Show error as a toast — no inline error paragraph (STORY-008-04).
+      const message = err instanceof Error ? err.message : 'Failed to create workspace';
+      toast.error(message);
     }
   }
 
@@ -113,37 +136,29 @@ export function CreateWorkspaceModal({
               placeholder="e.g. My AI Workspace"
               required
               autoFocus
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:border-[#E94560] focus:outline-none focus:ring-1 focus:ring-[#E94560]"
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
             />
           </div>
 
-          {/* Inline error from mutation */}
-          {mutation.error && (
-            <p
-              role="alert"
-              className="mb-3 text-sm text-rose-700"
-            >
-              {mutation.error.message}
-            </p>
-          )}
-
-          {/* Action buttons */}
+          {/* Action buttons — R9: use Button component */}
           <div className="flex justify-end gap-2">
-            <button
+            <Button
               type="button"
+              variant="secondary"
+              size="sm"
               onClick={handleClose}
               disabled={mutation.isPending}
-              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
             >
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
+              variant="primary"
+              size="sm"
               disabled={mutation.isPending || !name.trim()}
-              className="rounded-md bg-[#E94560] px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
             >
               {mutation.isPending ? 'Creating…' : 'Create'}
-            </button>
+            </Button>
           </div>
         </form>
       </div>

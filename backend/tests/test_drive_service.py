@@ -1,5 +1,6 @@
 """
 Tests for drive_service.py — STORY-006-07 (Red Phase) extends STORY-006-01.
+Extended in STORY-006-08 with TestMultimodalFallback.
 
 Covers all Gherkin scenarios from §2.1:
   1.  get_drive_client — decrypts token, builds Credentials, refreshes, returns Drive client
@@ -17,6 +18,15 @@ Covers all Gherkin scenarios from §2.1:
   13. Unsupported MIME type raises ValueError — unchanged
   14. PDF with headings preserved — markdown heading syntax (#) present in output
 
+  STORY-006-08 additions (TestMultimodalFallback):
+  15. Scanned PDF (<100 chars) + provider="google" + <20MB → extract_content_multimodal called
+  16. Scanned PDF (<100 chars) + provider="openai" → fallback called
+  17. Scanned PDF (<100 chars) + provider="anthropic" → fallback NOT called, scanned warning emitted
+  18. Scanned PDF (<100 chars) + >20MB → fallback NOT called, oversized warning emitted
+  19. Normal PDF (>100 chars) + provider/api_key → fallback NOT called, no warning
+  20. No provider/api_key (None) + scanned PDF → fallback NOT called (backwards compatible)
+  21. Multimodal output > 50K chars → truncation applies
+
 Mock strategy:
   - `app.core.encryption.decrypt` is patched to return a deterministic plaintext token.
   - `google.oauth2.credentials.Credentials` is patched at module level.
@@ -32,7 +42,7 @@ from __future__ import annotations
 
 import hashlib
 import io
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -978,3 +988,281 @@ class TestUnsupportedMimeType:
             assert "unsupported" in result.lower() or "unknown" in result.lower() or "error" in result.lower()
         except (ValueError, NotImplementedError):
             pass  # Either approach is acceptable
+
+
+# ---------------------------------------------------------------------------
+# STORY-006-08: Multimodal fallback for scanned (image-based) PDFs
+# ---------------------------------------------------------------------------
+
+# Constants mirroring drive_service implementation (used to verify warning text)
+_SCANNED_PDF_WARNING = (
+    "\n\n[Warning: This file appears to be a scanned document. Text extraction is "
+    "limited for this provider. Consider using Google or OpenAI as your AI provider "
+    "for better scanned document support.]"
+)
+_OVERSIZED_PDF_WARNING = (
+    "\n\n[Warning: This scanned document is too large for AI-assisted extraction. "
+    "Text shown is best-effort.]"
+)
+_MULTIMODAL_FALLBACK_THRESHOLD = 100
+_MULTIMODAL_SIZE_LIMIT = 20_000_000  # 20MB
+
+# Fake multimodal output returned by the mocked extract_content_multimodal
+_MULTIMODAL_OUTPUT = "Full text extracted from scanned PDF via multimodal model."
+
+# Small raw PDF bytes (under 20MB) used for most fallback tests.
+# The actual bytes content does not matter — only the length is checked.
+_SMALL_PDF_BYTES = b"%PDF-1.4 fake scanned pdf content"
+
+
+def _make_scanned_pdf_mocks(monkeypatch, raw_bytes: bytes = _SMALL_PDF_BYTES) -> None:
+    """Set up pymupdf/pymupdf4llm mocks so that to_markdown returns <100 chars (scanned PDF).
+
+    Patches drive_service.pymupdf and drive_service.pymupdf4llm so that
+    to_markdown returns a very short string (simulating OCR failure on a
+    scanned/image-only PDF).  Also patches MediaIoBaseDownload so that the
+    internal _download_media helper returns `raw_bytes`.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+        raw_bytes:   Bytes to return from the downloader mock.  Default is a
+                     small synthetic PDF well under the 20 MB size limit.
+    """
+    if drive_service is None:
+        return
+
+    # Mock pymupdf — drive_service calls pymupdf.open(stream=..., filetype="pdf")
+    mock_pymupdf_doc = MagicMock()
+    mock_pymupdf_module = MagicMock()
+    mock_pymupdf_module.open.return_value = mock_pymupdf_doc
+    monkeypatch.setattr(drive_service, "pymupdf", mock_pymupdf_module)
+
+    # Mock pymupdf4llm — to_markdown returns short text (<100 chars) to simulate scanned PDF
+    mock_pymupdf4llm_module = MagicMock()
+    mock_pymupdf4llm_module.to_markdown.return_value = "img"  # well under 100 chars
+    monkeypatch.setattr(drive_service, "pymupdf4llm", mock_pymupdf4llm_module)
+
+    # Mock MediaIoBaseDownload so _download_media returns `raw_bytes`
+    def _fake_downloader(buffer, _request):
+        """Write raw_bytes into the BytesIO buffer and signal done on first chunk."""
+        buffer.write(raw_bytes)
+        instance = MagicMock()
+        instance.next_chunk.return_value = (MagicMock(), True)
+        return instance
+
+    monkeypatch.setattr(drive_service, "MediaIoBaseDownload", _fake_downloader)
+
+
+def _make_normal_pdf_mocks(monkeypatch, raw_bytes: bytes = _SMALL_PDF_BYTES) -> None:
+    """Set up mocks so pymupdf4llm returns >100 chars (normal, text-based PDF).
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+        raw_bytes:   Bytes to return from the downloader mock.
+    """
+    if drive_service is None:
+        return
+
+    mock_pymupdf_doc = MagicMock()
+    mock_pymupdf_module = MagicMock()
+    mock_pymupdf_module.open.return_value = mock_pymupdf_doc
+    monkeypatch.setattr(drive_service, "pymupdf", mock_pymupdf_module)
+
+    long_text = "A" * 200  # above the 100-char threshold
+    mock_pymupdf4llm_module = MagicMock()
+    mock_pymupdf4llm_module.to_markdown.return_value = long_text
+    monkeypatch.setattr(drive_service, "pymupdf4llm", mock_pymupdf4llm_module)
+
+    def _fake_downloader(buffer, _request):
+        buffer.write(raw_bytes)
+        instance = MagicMock()
+        instance.next_chunk.return_value = (MagicMock(), True)
+        return instance
+
+    monkeypatch.setattr(drive_service, "MediaIoBaseDownload", _fake_downloader)
+
+
+class TestMultimodalFallback:
+    """STORY-006-08: Multimodal fallback for scanned (image-based) PDFs.
+
+    fetch_file_content is now async and accepts optional keyword-only
+    ``provider`` and ``api_key`` arguments.  When pymupdf4llm returns fewer
+    than 100 characters (scanned PDF indicator) AND a supported provider
+    (google, openai) is supplied with the file under 20 MB, the function must
+    delegate to ``extract_content_multimodal`` from scan_service.
+
+    Anthropic does not support native multimodal PDF input — a warning is
+    appended instead.  Files over 20 MB also receive an oversized warning
+    rather than attempting the fallback.
+    """
+
+    @pytest.mark.asyncio
+    async def test_scanned_pdf_google_provider_calls_multimodal(self, monkeypatch):
+        """Scanned PDF (<100 chars) + provider='google' + <20MB → extract_content_multimodal called."""
+        if drive_service is None:
+            pytest.skip("drive_service not yet implemented (RED phase)")
+
+        _make_scanned_pdf_mocks(monkeypatch, raw_bytes=_SMALL_PDF_BYTES)
+        drive_client = _make_binary_drive_client()
+
+        # The lazy import inside fetch_file_content is:
+        #   from app.services.scan_service import extract_content_multimodal
+        # We mock at the module path the implementation imports from.
+        mock_multimodal = AsyncMock(return_value=_MULTIMODAL_OUTPUT)
+        with patch("app.services.scan_service.extract_content_multimodal", mock_multimodal):
+            result = await drive_service.fetch_file_content(
+                drive_client,
+                DRIVE_FILE_ID,
+                PDF_MIME,
+                provider="google",
+                api_key="google-api-key",
+            )
+
+        mock_multimodal.assert_called_once()
+        assert _MULTIMODAL_OUTPUT in result
+
+    @pytest.mark.asyncio
+    async def test_scanned_pdf_openai_provider_calls_multimodal(self, monkeypatch):
+        """Scanned PDF (<100 chars) + provider='openai' → extract_content_multimodal called."""
+        if drive_service is None:
+            pytest.skip("drive_service not yet implemented (RED phase)")
+
+        _make_scanned_pdf_mocks(monkeypatch)
+        drive_client = _make_binary_drive_client()
+
+        mock_multimodal = AsyncMock(return_value=_MULTIMODAL_OUTPUT)
+        with patch("app.services.scan_service.extract_content_multimodal", mock_multimodal):
+            result = await drive_service.fetch_file_content(
+                drive_client,
+                DRIVE_FILE_ID,
+                PDF_MIME,
+                provider="openai",
+                api_key="openai-api-key",
+            )
+
+        mock_multimodal.assert_called_once()
+        assert _MULTIMODAL_OUTPUT in result
+
+    @pytest.mark.asyncio
+    async def test_scanned_pdf_anthropic_provider_no_fallback_warning_emitted(self, monkeypatch):
+        """Scanned PDF + provider='anthropic' → fallback NOT called; warning text includes 'scanned document'."""
+        if drive_service is None:
+            pytest.skip("drive_service not yet implemented (RED phase)")
+
+        _make_scanned_pdf_mocks(monkeypatch)
+        drive_client = _make_binary_drive_client()
+
+        mock_multimodal = AsyncMock(return_value=_MULTIMODAL_OUTPUT)
+        with patch("app.services.scan_service.extract_content_multimodal", mock_multimodal):
+            result = await drive_service.fetch_file_content(
+                drive_client,
+                DRIVE_FILE_ID,
+                PDF_MIME,
+                provider="anthropic",
+                api_key="anthropic-api-key",
+            )
+
+        # Fallback must NOT be called for Anthropic
+        mock_multimodal.assert_not_called()
+        # Warning text must mention "scanned document"
+        assert "scanned document" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_scanned_pdf_oversized_no_fallback_warning_emitted(self, monkeypatch):
+        """Scanned PDF >20MB + any supported provider → fallback NOT called; 'too large' warning appended."""
+        if drive_service is None:
+            pytest.skip("drive_service not yet implemented (RED phase)")
+
+        # Produce raw bytes larger than 20MB so the size gate fires
+        oversized_bytes = b"X" * (_MULTIMODAL_SIZE_LIMIT + 1)
+        _make_scanned_pdf_mocks(monkeypatch, raw_bytes=oversized_bytes)
+        drive_client = _make_binary_drive_client()
+
+        mock_multimodal = AsyncMock(return_value=_MULTIMODAL_OUTPUT)
+        with patch("app.services.scan_service.extract_content_multimodal", mock_multimodal):
+            result = await drive_service.fetch_file_content(
+                drive_client,
+                DRIVE_FILE_ID,
+                PDF_MIME,
+                provider="google",
+                api_key="google-api-key",
+            )
+
+        # Fallback must NOT be called for oversized files
+        mock_multimodal.assert_not_called()
+        # Warning must mention "too large"
+        assert "too large" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_normal_pdf_with_provider_no_fallback_no_warning(self, monkeypatch):
+        """Normal PDF (>100 chars) with provider/api_key → fallback NOT called; no warning appended."""
+        if drive_service is None:
+            pytest.skip("drive_service not yet implemented (RED phase)")
+
+        _make_normal_pdf_mocks(monkeypatch)
+        drive_client = _make_binary_drive_client()
+
+        mock_multimodal = AsyncMock(return_value=_MULTIMODAL_OUTPUT)
+        with patch("app.services.scan_service.extract_content_multimodal", mock_multimodal):
+            result = await drive_service.fetch_file_content(
+                drive_client,
+                DRIVE_FILE_ID,
+                PDF_MIME,
+                provider="google",
+                api_key="google-api-key",
+            )
+
+        # Fallback must NOT be called — text extraction succeeded
+        mock_multimodal.assert_not_called()
+        # No warning text should appear in a normal extraction
+        assert "scanned document" not in result.lower()
+        assert "too large" not in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_no_provider_scanned_pdf_backwards_compatible(self, monkeypatch):
+        """Scanned PDF + no provider/api_key → fallback NOT called; backwards compatible."""
+        if drive_service is None:
+            pytest.skip("drive_service not yet implemented (RED phase)")
+
+        _make_scanned_pdf_mocks(monkeypatch)
+        drive_client = _make_binary_drive_client()
+
+        mock_multimodal = AsyncMock(return_value=_MULTIMODAL_OUTPUT)
+        with patch("app.services.scan_service.extract_content_multimodal", mock_multimodal):
+            # Call without provider or api_key — must still return a result (no crash)
+            result = await drive_service.fetch_file_content(
+                drive_client,
+                DRIVE_FILE_ID,
+                PDF_MIME,
+            )
+
+        # Fallback must NOT be called when provider is absent
+        mock_multimodal.assert_not_called()
+        # Result must be a string (no exception raised)
+        assert isinstance(result, str)
+
+    @pytest.mark.asyncio
+    async def test_multimodal_output_over_50k_chars_is_truncated(self, monkeypatch):
+        """Multimodal output >50K chars must be truncated to 50K with a trim notice."""
+        if drive_service is None:
+            pytest.skip("drive_service not yet implemented (RED phase)")
+
+        _make_scanned_pdf_mocks(monkeypatch)
+        drive_client = _make_binary_drive_client()
+
+        # Multimodal model returns more than 50K chars
+        huge_output = "M" * 60_000
+        mock_multimodal = AsyncMock(return_value=huge_output)
+        with patch("app.services.scan_service.extract_content_multimodal", mock_multimodal):
+            result = await drive_service.fetch_file_content(
+                drive_client,
+                DRIVE_FILE_ID,
+                PDF_MIME,
+                provider="google",
+                api_key="google-api-key",
+            )
+
+        # Must be truncated — result cannot exceed 50K + trim notice length
+        assert len(result) <= 50_000 + 200
+        # Truncation notice must be appended
+        assert "[Content truncated at 50000 characters]" in result

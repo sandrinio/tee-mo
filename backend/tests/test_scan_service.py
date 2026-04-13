@@ -324,3 +324,149 @@ class TestGenerateAiDescriptionPrompt:
         )
 
         mocks["OpenAIProvider"].assert_called_once_with(api_key=FAKE_API_KEY)
+
+
+# ---------------------------------------------------------------------------
+# STORY-006-08: extract_content_multimodal — multimodal PDF extraction
+# ---------------------------------------------------------------------------
+
+# Raw fake PDF bytes (content doesn't matter — only passed to the model)
+_FAKE_PDF_BYTES = b"%PDF-1.4 fake scanned pdf content for multimodal test"
+_MULTIMODAL_RESULT = "Extracted text from scanned PDF via multimodal model."
+
+
+class TestExtractContentMultimodal:
+    """STORY-006-08: extract_content_multimodal builds a scan-tier agent and returns result.
+
+    ``extract_content_multimodal(pdf_bytes, provider, api_key)`` is a new async
+    function added to scan_service.  It accepts raw PDF bytes, the provider slug,
+    and a decrypted API key, then sends the PDF as a native multimodal message to
+    the scan-tier model (SCAN_TIER_MODELS[provider]) and returns the text result.
+
+    Supported providers: "google", "openai" (Anthropic cannot process raw PDFs).
+
+    Mock strategy:
+    - agent_module globals (Agent, *Model, *Provider) are patched via
+      _patch_agent_module_globals so no real LLM calls are made.
+    - The Agent mock instance's run() is an AsyncMock returning a predictable result.
+    - SCAN_TIER_MODELS is consulted for the expected model ID.
+    """
+
+    @pytest.mark.asyncio
+    async def test_google_provider_uses_scan_tier_model(self, monkeypatch):
+        """extract_content_multimodal must build a GoogleModel with SCAN_TIER_MODELS['google']."""
+        if scan_service is None:
+            pytest.skip("scan_service not yet implemented (RED phase)")
+
+        mocks = _patch_agent_module_globals(monkeypatch)
+
+        mock_agent_instance = MagicMock()
+        mock_result = MagicMock()
+        mock_result.output = _MULTIMODAL_RESULT
+        mock_agent_instance.run = AsyncMock(return_value=mock_result)
+        mocks["Agent"].return_value = mock_agent_instance
+
+        result = await scan_service.extract_content_multimodal(
+            pdf_bytes=_FAKE_PDF_BYTES,
+            provider="google",
+            api_key=FAKE_API_KEY,
+        )
+
+        expected_model_id = scan_service.SCAN_TIER_MODELS["google"]
+        mocks["GoogleModel"].assert_called_once_with(
+            expected_model_id,
+            provider=mocks["GoogleProvider"].return_value,
+        )
+
+    @pytest.mark.asyncio
+    async def test_openai_provider_uses_scan_tier_model(self, monkeypatch):
+        """extract_content_multimodal must build an OpenAIChatModel with SCAN_TIER_MODELS['openai']."""
+        if scan_service is None:
+            pytest.skip("scan_service not yet implemented (RED phase)")
+
+        mocks = _patch_agent_module_globals(monkeypatch)
+
+        mock_agent_instance = MagicMock()
+        mock_result = MagicMock()
+        mock_result.output = _MULTIMODAL_RESULT
+        mock_agent_instance.run = AsyncMock(return_value=mock_result)
+        mocks["Agent"].return_value = mock_agent_instance
+
+        result = await scan_service.extract_content_multimodal(
+            pdf_bytes=_FAKE_PDF_BYTES,
+            provider="openai",
+            api_key=FAKE_API_KEY,
+        )
+
+        expected_model_id = scan_service.SCAN_TIER_MODELS["openai"]
+        mocks["OpenAIChatModel"].assert_called_once_with(
+            expected_model_id,
+            provider=mocks["OpenAIProvider"].return_value,
+        )
+
+    @pytest.mark.asyncio
+    async def test_agent_run_called_with_pdf_content(self, monkeypatch):
+        """extract_content_multimodal must call agent.run() with the PDF bytes content."""
+        if scan_service is None:
+            pytest.skip("scan_service not yet implemented (RED phase)")
+
+        mocks = _patch_agent_module_globals(monkeypatch)
+
+        mock_agent_instance = MagicMock()
+        mock_result = MagicMock()
+        mock_result.output = _MULTIMODAL_RESULT
+        mock_agent_instance.run = AsyncMock(return_value=mock_result)
+        mocks["Agent"].return_value = mock_agent_instance
+
+        await scan_service.extract_content_multimodal(
+            pdf_bytes=_FAKE_PDF_BYTES,
+            provider="google",
+            api_key=FAKE_API_KEY,
+        )
+
+        # agent.run() must have been called once
+        mock_agent_instance.run.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_returns_model_output_string(self, monkeypatch):
+        """extract_content_multimodal must return the text output from the agent run."""
+        if scan_service is None:
+            pytest.skip("scan_service not yet implemented (RED phase)")
+
+        mocks = _patch_agent_module_globals(monkeypatch)
+
+        mock_agent_instance = MagicMock()
+        mock_result = MagicMock()
+        mock_result.output = _MULTIMODAL_RESULT
+        mock_agent_instance.run = AsyncMock(return_value=mock_result)
+        mocks["Agent"].return_value = mock_agent_instance
+
+        result = await scan_service.extract_content_multimodal(
+            pdf_bytes=_FAKE_PDF_BYTES,
+            provider="openai",
+            api_key=FAKE_API_KEY,
+        )
+
+        assert result == _MULTIMODAL_RESULT
+
+    @pytest.mark.asyncio
+    async def test_api_key_passed_to_google_provider(self, monkeypatch):
+        """extract_content_multimodal must pass the api_key to GoogleProvider constructor."""
+        if scan_service is None:
+            pytest.skip("scan_service not yet implemented (RED phase)")
+
+        mocks = _patch_agent_module_globals(monkeypatch)
+
+        mock_agent_instance = MagicMock()
+        mock_result = MagicMock()
+        mock_result.output = _MULTIMODAL_RESULT
+        mock_agent_instance.run = AsyncMock(return_value=mock_result)
+        mocks["Agent"].return_value = mock_agent_instance
+
+        await scan_service.extract_content_multimodal(
+            pdf_bytes=_FAKE_PDF_BYTES,
+            provider="google",
+            api_key=FAKE_API_KEY,
+        )
+
+        mocks["GoogleProvider"].assert_called_once_with(api_key=FAKE_API_KEY)

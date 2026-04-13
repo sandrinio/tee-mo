@@ -329,9 +329,12 @@ def _build_system_prompt(
             f"- [{d['id']}] \"{d['title']}\" — {d.get('ai_description') or 'No description available.'}"
             for d in documents
         )
-        prompt += f"\n\n## Available Documents\n{doc_lines}"
         prompt += (
-            "\n\nPrefer wiki pages (`read_wiki_page`) for answering questions when available. "
+            f"\n\n## Available Documents ({len(documents)} total)\n"
+            "When users ask what documents are available, list these documents by title and description. "
+            "Use `read_document(document_id)` to read the full content of any document.\n\n"
+            + doc_lines
+            + "\n\nPrefer wiki pages (`read_wiki_page`) for answering questions when available. "
             "Use `read_document` when you need exact quotes, specific data points, or the wiki "
             "doesn't cover the topic yet. Only create documents when the user explicitly asks you to."
         )

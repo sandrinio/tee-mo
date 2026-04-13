@@ -677,3 +677,37 @@ export async function removeKnowledgeFile(workspaceId: string, knowledgeId: stri
   }
   return r.json();
 }
+
+/**
+ * Response shape returned by POST /api/workspaces/{workspaceId}/knowledge/reindex.
+ * Indicates how many files were successfully re-indexed and how many failed.
+ */
+export interface ReindexResult {
+  /** Number of files successfully re-extracted and updated. */
+  reindexed: number;
+  /** Number of files that failed during re-indexing. */
+  failed: number;
+  /** Per-file error details for each failure. */
+  errors: Array<{ file_id: string; error: string }>;
+}
+
+/**
+ * POST /api/workspaces/{workspaceId}/knowledge/reindex
+ * Re-extracts all indexed files from Google Drive, regenerates AI descriptions,
+ * and updates ``cached_content``, ``content_hash``, ``ai_description``, and
+ * ``last_scanned_at`` for each row.
+ *
+ * This is a long-running operation (seconds to minutes depending on file count).
+ * Requires both a BYOK key and Google Drive to be connected — returns a 400 error
+ * otherwise. Per-file failures do not abort the run; they are collected in ``errors``.
+ *
+ * @param workspaceId - UUID of the workspace whose files to re-index.
+ * @returns ReindexResult with counts and any per-file errors.
+ * @throws Error with backend ``detail`` message on non-2xx (e.g. 400, 401, 404).
+ */
+export function reindexKnowledge(workspaceId: string): Promise<ReindexResult> {
+  return apiPost<Record<string, never>, ReindexResult>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/knowledge/reindex`,
+    {},
+  );
+}

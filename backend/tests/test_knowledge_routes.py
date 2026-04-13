@@ -1488,3 +1488,273 @@ class TestIndexFileStoresCachedContent:
             f"INSERT payload 'cached_content' must equal the fetched file content. "
             f"Expected: {FAKE_FILE_CONTENT!r}. Got: {payload['cached_content']!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# STORY-006-11: Re-index endpoint tests
+# ---------------------------------------------------------------------------
+
+
+def _make_reindex_supabase_mock(
+    workspace_row: dict[str, Any] | None = None,
+    knowledge_rows: list[dict[str, Any]] | None = None,
+) -> MagicMock:
+    """Build a Supabase mock suitable for reindex endpoint tests.
+
+    The reindex endpoint performs:
+      1. teemo_workspaces ownership check (.select().eq().eq().limit().execute())
+      2. teemo_knowledge_index list all files (.select('*').eq().execute())
+      3. For each file: teemo_knowledge_index .update().eq().execute()
+
+    Args:
+        workspace_row: Workspace row to return. Defaults to a connected, keyed workspace.
+        knowledge_rows: Files to return from the list query. Defaults to empty list.
+
+    Returns:
+        MagicMock Supabase client.
+    """
+    if workspace_row is None:
+        workspace_row = _make_workspace_row()
+    if knowledge_rows is None:
+        knowledge_rows = []
+
+    # --- workspace table mock ---
+    ownership_result = MagicMock()
+    ownership_result.data = [workspace_row]
+
+    limit_mock = MagicMock()
+    limit_mock.execute.return_value = ownership_result
+
+    inner_eq_mock = MagicMock()
+    inner_eq_mock.limit.return_value = limit_mock
+    inner_eq_mock.execute.return_value = ownership_result
+    inner_eq_mock.eq.return_value = inner_eq_mock
+
+    outer_eq_mock = MagicMock()
+    outer_eq_mock.eq.return_value = inner_eq_mock
+    outer_eq_mock.limit.return_value = limit_mock
+    outer_eq_mock.execute.return_value = ownership_result
+
+    ws_select_mock = MagicMock()
+    ws_select_mock.eq.return_value = outer_eq_mock
+
+    ws_table_mock = MagicMock()
+    ws_table_mock.select.return_value = ws_select_mock
+
+    # --- knowledge index table mock ---
+    # List query: .select('*').eq().execute()
+    list_result = MagicMock()
+    list_result.data = knowledge_rows
+
+    ki_inner_eq = MagicMock()
+    ki_inner_eq.execute.return_value = list_result
+
+    ki_select_mock = MagicMock()
+    ki_select_mock.eq.return_value = ki_inner_eq
+
+    # Update chain: .update().eq().execute()
+    update_execute_mock = MagicMock()
+    update_execute_mock.execute.return_value = MagicMock(data=[])
+
+    update_eq_mock = MagicMock()
+    update_eq_mock.eq.return_value = update_execute_mock
+    update_eq_mock.execute.return_value = MagicMock(data=[])
+
+    update_mock = MagicMock()
+    update_mock.eq.return_value = update_eq_mock
+
+    ki_table_mock = MagicMock()
+    ki_table_mock.select.return_value = ki_select_mock
+    ki_table_mock.update.return_value = update_mock
+
+    def _dispatch(table_name: str) -> MagicMock:
+        if table_name == "teemo_workspaces":
+            return ws_table_mock
+        if table_name == "teemo_knowledge_index":
+            return ki_table_mock
+        return MagicMock()
+
+    mock_sb = MagicMock()
+    mock_sb.table.side_effect = _dispatch
+    return mock_sb
+
+
+class TestReindexKnowledge:
+    """STORY-006-11: POST /api/workspaces/{id}/knowledge/reindex tests.
+
+    Five tests covering the five Gherkin scenarios:
+      1. Happy path — returns 200 with correct reindexed/failed/errors counts
+      2. No BYOK key — returns 400
+      3. No Drive connected — returns 400
+      4. Non-owner — returns 404
+      5. Empty workspace — returns reindexed=0, failed=0, errors=[]
+    """
+
+    def test_reindex_returns_200_with_correct_counts(
+        self,
+        test_client: TestClient,
+        override_current_user: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """POST /knowledge/reindex with 2 files must return 200, reindexed=2, failed=0.
+
+        Verifies that the endpoint iterates all indexed files, re-fetches content,
+        regenerates AI descriptions, and updates rows. The response must include
+        ``reindexed``, ``failed``, and ``errors`` fields.
+        """
+        files = [
+            _make_knowledge_row(knowledge_id="kid-r-1", drive_file_id="drive-r-1"),
+            _make_knowledge_row(knowledge_id="kid-r-2", drive_file_id="drive-r-2"),
+        ]
+        mock_sb = _make_reindex_supabase_mock(knowledge_rows=files)
+        monkeypatch.setattr("app.core.db.get_supabase", lambda: mock_sb)
+        _patch_drive_services(monkeypatch)
+        _patch_scan_service(monkeypatch)
+        _patch_encryption(monkeypatch)
+
+        response = test_client.post(
+            f"/api/workspaces/{FAKE_WORKSPACE_ID}/knowledge/reindex"
+        )
+
+        assert response.status_code == 200, (
+            f"Expected 200, got {response.status_code}: {response.text}"
+        )
+        data = response.json()
+        assert "reindexed" in data, f"Response missing 'reindexed': {data}"
+        assert "failed" in data, f"Response missing 'failed': {data}"
+        assert "errors" in data, f"Response missing 'errors': {data}"
+        assert data["reindexed"] == 2, f"Expected reindexed=2, got: {data}"
+        assert data["failed"] == 0, f"Expected failed=0, got: {data}"
+        assert data["errors"] == [], f"Expected empty errors, got: {data}"
+
+    def test_reindex_no_byok_key_returns_400(
+        self,
+        test_client: TestClient,
+        override_current_user: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """POST /knowledge/reindex without BYOK key must return 400.
+
+        Gate condition: no encrypted_api_key in workspace row triggers early 400.
+        """
+        workspace_row = _make_workspace_row(has_api_key=False)
+        mock_sb = _make_reindex_supabase_mock(workspace_row=workspace_row)
+        monkeypatch.setattr("app.core.db.get_supabase", lambda: mock_sb)
+
+        response = test_client.post(
+            f"/api/workspaces/{FAKE_WORKSPACE_ID}/knowledge/reindex"
+        )
+
+        assert response.status_code == 400, (
+            f"Expected 400 (BYOK required), got {response.status_code}: {response.text}"
+        )
+        assert (
+            "byok" in response.text.lower()
+            or "key" in response.text.lower()
+        ), f"Expected BYOK-related error in body: {response.text}"
+
+    def test_reindex_no_drive_returns_400(
+        self,
+        test_client: TestClient,
+        override_current_user: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """POST /knowledge/reindex without Drive connected must return 400.
+
+        Gate condition: no encrypted_google_refresh_token in workspace row triggers 400.
+        """
+        workspace_row = _make_workspace_row(has_refresh_token=False)
+        mock_sb = _make_reindex_supabase_mock(workspace_row=workspace_row)
+        monkeypatch.setattr("app.core.db.get_supabase", lambda: mock_sb)
+
+        response = test_client.post(
+            f"/api/workspaces/{FAKE_WORKSPACE_ID}/knowledge/reindex"
+        )
+
+        assert response.status_code == 400, (
+            f"Expected 400 (Drive not connected), got {response.status_code}: {response.text}"
+        )
+        assert (
+            "drive" in response.text.lower()
+            or "connected" in response.text.lower()
+        ), f"Expected Drive-related error in body: {response.text}"
+
+    def test_reindex_non_owner_returns_404(
+        self,
+        test_client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """POST /knowledge/reindex by non-owner must return 404 (IDOR protection).
+
+        The _assert_workspace_owner helper returns 404 (not 403) to avoid
+        revealing whether a workspace exists for another user.
+        The test authenticates as a different user from the workspace owner.
+        """
+        from app.api.deps import get_current_user_id
+        from fastapi import Request
+
+        async def _other_user(request: Request) -> str:
+            return "other-user-uuid-not-owner"
+
+        app.dependency_overrides[get_current_user_id] = _other_user
+
+        # Workspace row belongs to FAKE_USER_ID, but caller is "other-user-uuid-not-owner"
+        ownership_result = MagicMock()
+        ownership_result.data = []  # no row found — ownership check fails → 404
+
+        limit_mock = MagicMock()
+        limit_mock.execute.return_value = ownership_result
+
+        inner_eq = MagicMock()
+        inner_eq.limit.return_value = limit_mock
+        inner_eq.execute.return_value = ownership_result
+
+        outer_eq = MagicMock()
+        outer_eq.eq.return_value = inner_eq
+        outer_eq.limit.return_value = limit_mock
+
+        select_mock = MagicMock()
+        select_mock.eq.return_value = outer_eq
+
+        ws_table_mock = MagicMock()
+        ws_table_mock.select.return_value = select_mock
+
+        mock_sb = MagicMock()
+        mock_sb.table.return_value = ws_table_mock
+        monkeypatch.setattr("app.core.db.get_supabase", lambda: mock_sb)
+
+        response = test_client.post(
+            f"/api/workspaces/{FAKE_WORKSPACE_ID}/knowledge/reindex"
+        )
+
+        assert response.status_code == 404, (
+            f"Expected 404 (non-owner), got {response.status_code}: {response.text}"
+        )
+
+    def test_reindex_empty_workspace_returns_zeros(
+        self,
+        test_client: TestClient,
+        override_current_user: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """POST /knowledge/reindex with no indexed files returns reindexed=0, failed=0, errors=[].
+
+        An empty workspace should complete successfully with zero counts and no errors.
+        """
+        mock_sb = _make_reindex_supabase_mock(knowledge_rows=[])
+        monkeypatch.setattr("app.core.db.get_supabase", lambda: mock_sb)
+        _patch_drive_services(monkeypatch)
+        _patch_scan_service(monkeypatch)
+        _patch_encryption(monkeypatch)
+
+        response = test_client.post(
+            f"/api/workspaces/{FAKE_WORKSPACE_ID}/knowledge/reindex"
+        )
+
+        assert response.status_code == 200, (
+            f"Expected 200 (empty workspace), got {response.status_code}: {response.text}"
+        )
+        data = response.json()
+        assert data == {"reindexed": 0, "failed": 0, "errors": []}, (
+            f"Expected zero counts for empty workspace, got: {data}"
+        )

@@ -21,6 +21,7 @@ import {
   listKnowledgeFiles,
   indexKnowledgeFile,
   removeKnowledgeFile,
+  reindexKnowledge,
   type IndexFileRequest,
 } from '../lib/api';
 
@@ -88,6 +89,36 @@ export function useRemoveKnowledgeMutation(workspaceId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (knowledgeId: string) => removeKnowledgeFile(workspaceId, knowledgeId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['knowledge', workspaceId] });
+    },
+  });
+}
+
+/**
+ * Re-indexes all knowledge files for a workspace.
+ *
+ * Calls POST /api/workspaces/{workspaceId}/knowledge/reindex which re-fetches
+ * every indexed file from Google Drive, recomputes its content hash, regenerates
+ * its AI description, and updates ``cached_content`` / ``last_scanned_at``.
+ *
+ * This is a potentially long-running operation (depends on file count and AI latency).
+ * Show `isPending` state to the user while waiting.
+ *
+ * On success:
+ *   - Invalidates `['knowledge', workspaceId]` so the file list refreshes with
+ *     updated AI descriptions and timestamps.
+ *
+ * Requires both a BYOK key and Google Drive to be connected — the mutation will
+ * error (400) if either precondition is missing.
+ *
+ * @param workspaceId - UUID of the workspace whose files to re-index.
+ * @returns TanStack Mutation object. Call `.mutate()` (no arguments).
+ */
+export function useReindexKnowledgeMutation(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => reindexKnowledge(workspaceId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['knowledge', workspaceId] });
     },

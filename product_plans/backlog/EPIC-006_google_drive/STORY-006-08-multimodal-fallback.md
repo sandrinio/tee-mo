@@ -301,3 +301,4 @@ Go with **Option A** — the indexing route calls `fetch_file_content` without t
 
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| Developer | 33 | 1,435 | 1,468 |

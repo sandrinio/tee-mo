@@ -242,3 +242,5 @@ Wait — this changes the self-healing behavior. Currently, `read_drive_file` fe
 
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| Developer | 60 | 4,184 | 4,244 |
+| Developer | 16 | 868 | 884 |

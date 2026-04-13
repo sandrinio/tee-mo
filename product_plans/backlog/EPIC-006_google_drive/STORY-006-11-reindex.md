@@ -281,3 +281,4 @@ Add a "Re-index All Files" button in the knowledge section:
 
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| Developer | 38 | 2,429 | 2,467 |

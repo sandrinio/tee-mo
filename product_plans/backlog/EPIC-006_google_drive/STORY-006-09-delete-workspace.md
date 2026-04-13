@@ -189,3 +189,4 @@ Add a "Delete Workspace" button (red, bottom of page or in a danger zone section
 
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| Developer | 34 | 2,721 | 2,755 |

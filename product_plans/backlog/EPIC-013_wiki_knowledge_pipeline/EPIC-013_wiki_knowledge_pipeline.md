@@ -2,11 +2,11 @@
 epic_id: "EPIC-013"
 status: "Draft"
 ambiguity: "🟢 Low"
-context_source: "Charter §2.3, §5.3 / Roadmap §3 ADR-005, ADR-006 / User Input (Karpathy LLM Wiki pattern)"
+context_source: "Charter §2.3, §5.3 / Roadmap §3 ADR-005, ADR-006 / EPIC-015 §4.5 (two-layer architecture) / User Input (Karpathy LLM Wiki pattern)"
 release: "Post-hackathon (v2)"
 owner: "Solo dev"
 priority: "P2 - Medium"
-tags: ["backend", "agent", "knowledge-base", "wiki", "google-drive"]
+tags: ["backend", "agent", "knowledge-base", "wiki", "karpathy"]
 target_date: "TBD"
 ---
 
@@ -19,19 +19,19 @@ target_date: "TBD"
 Today, when the agent answers a question it reads **full Drive files on-demand every time** — the same 20-page policy doc gets re-processed token-for-token on every query. There is no cross-document synthesis: if two files contradict each other or cover related concepts, the agent discovers this ad-hoc during each conversation. Knowledge doesn't compound — the system is stateless between queries.
 
 ### 1.2 The Solution
-Implement a **Karpathy-style LLM Wiki pipeline** that processes Google Drive files at ingest time into a persistent, interconnected wiki of pre-compiled markdown pages. When a user adds a Drive file, the scan-tier model reads it once and produces:
-- A **source summary** page (condensed version of the file)
-- **Concept pages** (themes, processes, policies extracted from the file)
+Implement a **Karpathy-style LLM Wiki pipeline** that processes source documents at ingest time into a persistent, interconnected wiki of pre-compiled markdown pages. When a document enters `teemo_documents` (via Drive, upload, or agent creation — see EPIC-015), the scan-tier model reads it once and produces:
+- A **source summary** page (condensed version of the document)
+- **Concept pages** (themes, processes, policies extracted from the document)
 - **Entity pages** (people, teams, services, tools mentioned)
 - **Cross-references** between all pages (new and existing)
 - An **auto-generated index** (slug + TLDR per page for fast agent routing)
 
-At query time, the agent reads the lightweight wiki index, picks the relevant pages, and only falls back to raw Drive files when deeper detail is needed. Knowledge **compounds** — each new file enriches the entire wiki.
+At query time, the agent reads the lightweight wiki index from its system prompt, picks the relevant pages via `read_wiki_page(slug)`, and synthesizes answers from pre-compiled knowledge. **The agent never reads raw source documents directly** (ADR-027). Knowledge **compounds** — each new document enriches the entire wiki.
 
 ### 1.3 Success Metrics (North Star)
-- Agent answers queries **without reading full Drive files** in >80% of cases (reads wiki pages instead)
-- Adding a new Drive file **creates/updates 5-15 wiki pages** automatically
-- Wiki index fits in the system prompt context window (slug + TLDR per page, <4K tokens for 15 source files)
+- Agent answers queries **without reading source documents** — reads wiki pages via `read_wiki_page(slug)`
+- Adding a new document **creates/updates 5-15 wiki pages** automatically
+- Wiki index fits in the system prompt context window (slug + TLDR per page, <4K tokens for 15 source documents)
 - Cross-document questions ("how does X relate to Y?") answered accurately using pre-built cross-references
 - Periodic **lint operation** detects contradictions and stale claims across the wiki
 
@@ -43,14 +43,13 @@ At query time, the agent reads the lightweight wiki index, picks the relevant pa
 ### IN-SCOPE (Build This)
 - [ ] `teemo_wiki_pages` table — stores wiki pages per workspace (slug, title, type, content, tldr, source refs, related slugs, confidence)
 - [ ] `teemo_wiki_log` table — append-only audit trail of all wiki operations (ingest, query, lint)
-- [ ] **Ingest pipeline** (`wiki_service.py`) — processes a Drive file into wiki pages: source summary, concepts, entities, cross-references, index rebuild
-- [ ] **Destructive re-ingest** — when a source file changes, DELETE all wiki pages sourced from that file and re-run the full ingest (no partial update)
-- [ ] **10-minute cron job** — background task that checks all `teemo_knowledge_index` files for content-hash changes via Google Drive API, triggers re-ingest for changed files
-- [ ] **`read_wiki_page(slug)`** agent tool — retrieves a pre-compiled wiki page by slug
-- [ ] **Wiki index injection** in agent system prompt — replaces raw file descriptions with wiki page TLDRs for routing (ADR-027: wiki is primary knowledge path, Drive read is fallback)
-- [ ] **`read_drive_file` fallback** — retained as a tool for when the agent needs raw source detail beyond what wiki pages provide
+- [ ] **Ingest pipeline** (`wiki_service.py`) — processes a document from `teemo_documents` into wiki pages: source summary, concepts, entities, cross-references, index rebuild. Triggered by `sync_status = 'pending'`.
+- [ ] **Destructive re-ingest** — when a source document changes (EPIC-015 Drive sync cron sets `sync_status='pending'`), DELETE all wiki pages sourced from that document and re-run the full ingest (no partial update)
+- [ ] **Wiki ingest cron** — background task that scans `teemo_documents` for `sync_status = 'pending'`, runs ingest, transitions to `processing` → `synced` (or `error`)
+- [ ] **`read_wiki_page(slug)`** agent tool — retrieves a pre-compiled wiki page by slug. This is the agent's **only** path to read knowledge.
+- [ ] **Wiki index injection** in agent system prompt — replaces EPIC-015's transitional `## Available Documents` section with wiki page TLDRs for routing (ADR-027: wiki is the knowledge path, no raw document reads)
 - [ ] **Lint operation** — scans wiki for contradictions, orphans, stale claims, missing concepts (manual agent tool for v1, cron later)
-- [ ] **Ingest hook** on file index — when a file is added to `teemo_knowledge_index`, automatically trigger async wiki ingest
+- [ ] **Ingest hook** on document creation — when a document is added to `teemo_documents` with `sync_status='pending'`, automatically trigger async wiki ingest
 - [ ] Page types: `source-summary`, `concept`, `entity`, `synthesis`
 - [ ] YAML-like frontmatter per page (type, sources, related, confidence, created/updated dates)
 - [ ] Agent may create `synthesis` pages during queries (tool available, not forced — agent decides)
@@ -59,82 +58,106 @@ At query time, the agent reads the lightweight wiki index, picks the relevant pa
 - Vector database or embeddings — this is structured markdown, not RAG
 - Frontend wiki explorer/viewer — agent-only interface for v1 (dashboard UI deferred)
 - Real-time collaborative editing of wiki pages by humans
-- `raw/` folder on disk — Drive files ARE the raw layer (already external and immutable)
+- Raw document storage — `teemo_documents` (EPIC-015) is the source layer; wiki doesn't own raw content
 - Automatic lint on every query — too expensive; manual only for v1
-- Wiki pages for thread conversations — wiki covers Drive knowledge only
-- Wiki page cap — 15 source files naturally bounds to ~150 pages; no artificial cap needed
+- Wiki pages for thread conversations — wiki covers document knowledge only
+- Wiki page cap — 15 source documents naturally bounds to ~150 pages; no artificial cap needed
+- **Drive sync cron** — that's EPIC-015 (document-layer concern). This epic only owns the wiki ingest cron.
+- **Document creation/upload** — that's EPIC-015 + EPIC-014. This epic only reads from `teemo_documents`.
 
 ---
 
 ## 3. Context
 
 ### 3.1 User Personas
-- **Workspace Admin**: Sets up Drive files, expects the bot to "know" the content without re-reading files every time
+- **Workspace Admin**: Adds documents (Drive, upload, or asks agent to create), expects the bot to "know" the content
 - **Slack User**: Asks cross-document questions ("does our refund policy conflict with the SLA?"), expects synthesized answers
-- **Agent (Tee-Mo)**: Needs fast, pre-compiled knowledge to answer without burning tokens on full file reads
+- **Agent (Tee-Mo)**: Needs fast, pre-compiled knowledge to answer without burning tokens on full document reads
 
 ### 3.2 User Journey (Happy Path)
 ```mermaid
 flowchart LR
-    A[Admin adds Drive file via Picker] --> B[Backend reads file + triggers wiki ingest]
-    B --> C[Scan-tier LLM produces wiki pages]
-    C --> D[Pages stored in teemo_wiki_pages]
-    D --> E[Wiki index rebuilt with TLDRs]
-    E --> F[User @mentions bot in Slack]
-    F --> G[Agent reads wiki index from system prompt]
-    G --> H[Agent calls read_wiki_page for relevant pages]
-    H --> I[Agent synthesizes answer from pre-compiled knowledge]
+    A["EPIC-015: Document enters teemo_documents\n(Drive / upload / agent-created)"] --> B["sync_status = 'pending'"]
+    B --> C[Wiki ingest cron picks up pending doc]
+    C --> D[Scan-tier LLM produces wiki pages]
+    D --> E[Pages stored in teemo_wiki_pages]
+    E --> F["sync_status = 'synced'"]
+    F --> G[Wiki index rebuilt with TLDRs]
+    G --> H[User @mentions bot in Slack]
+    H --> I[Agent reads wiki index from system prompt]
+    I --> J[Agent calls read_wiki_page for relevant pages]
+    J --> K[Agent synthesizes answer from pre-compiled knowledge]
 ```
 
 ### 3.3 Constraints
 | Type | Constraint |
 |------|------------|
-| **Cost** | Ingest uses scan-tier model (Haiku/4o-mini/Flash) — same BYOK key, cheapest model. Must not be expensive per file. |
+| **Cost** | Ingest uses scan-tier model (Haiku/4o-mini/Flash) — same BYOK key, cheapest model. Must not be expensive per document. |
 | **Token Budget** | Wiki index (all slugs + TLDRs) must fit in <4K tokens to leave room for conversation in system prompt. |
-| **Latency** | Ingest is async (background task after file add). Query-time wiki reads must be fast (DB reads, not LLM calls). File usable immediately via `read_drive_file` fallback while wiki builds. |
-| **Scale** | 15 source files max per workspace (existing cap). Wiki pages uncapped but expected ~75-150 per workspace at max files. |
+| **Latency** | Ingest is async (background task after document creation). |
+| **Scale** | 15 source documents max per workspace (existing cap from EPIC-015). Wiki pages uncapped but expected ~75-150 per workspace at max documents. |
 | **BYOK** | All LLM calls during ingest use the workspace's own API key. Zero host cost. |
 | **Table Prefix** | All new tables must use `teemo_` prefix (shared Supabase instance). |
+| **No raw reads** | Agent reads wiki pages only. No `read_document` or `read_drive_file` tool. ADR-027. |
 
 ---
 
 ## 4. Technical Context
 > Target Audience: AI Agents - READ THIS before decomposing.
 
-### 4.1 Affected Areas
+### 4.1 Architecture — Two-Layer Design (see EPIC-015 §4.5)
+
+```
+                  EPIC-015 (source document layer)        EPIC-013 (this epic — knowledge layer)
+┌──────────────────────────────────┐       ┌──────────────────────────────────┐
+│  Sources:                        │       │  Agent reads:                    │
+│  • Google Drive (cron sync)      │       │  • Wiki index (system prompt)    │
+│  • Local upload (EPIC-014)       │──────>│  • read_wiki_page(slug)          │
+│  • Agent create_document tool    │ ingest│  • Lint tool                     │
+│                                  │       │                                  │
+│  teemo_documents                 │       │  teemo_wiki_pages                │
+│  (sync_status: pending)          │       │  (TLDRs, concepts, entities)     │
+└──────────────────────────────────┘       └──────────────────────────────────┘
+```
+
+**Handoff:** This epic reads from `teemo_documents` where `sync_status = 'pending'`. After processing, it sets `sync_status = 'synced'` (or `'error'`). It never writes to `teemo_documents` except for `sync_status` updates.
+
+### 4.2 Affected Areas
 | Area | Files/Modules | Change Type |
 |------|---------------|-------------|
-| Database | `database/migrations/009_teemo_wiki_pages.sql` | New table |
-| Database | `database/migrations/010_teemo_wiki_log.sql` | New table |
+| Database | `database/migrations/0XX_teemo_wiki_pages.sql` | New table |
+| Database | `database/migrations/0XX_teemo_wiki_log.sql` | New table |
 | Service | `backend/app/services/wiki_service.py` | New — ingest pipeline, lint, index builder |
-| Agent | `backend/app/agents/agent.py` | Modify — add `read_wiki_page` tool, inject wiki index into system prompt (`_build_system_prompt`) |
+| Agent | `backend/app/agents/agent.py` | Modify — add `read_wiki_page` tool, replace transitional `## Available Documents` (EPIC-015) with wiki index TLDRs in system prompt |
 | Agent | `backend/app/agents/agent.py:build_agent()` | Modify — fetch wiki index at agent construction, pass to `_build_system_prompt` |
 | Config | `backend/app/core/config.py` | Possibly add wiki-related settings (e.g., max pages per workspace) |
 | Health | `backend/app/main.py` | Add `teemo_wiki_pages` + `teemo_wiki_log` to `TEEMO_TABLES` health check |
-| Cron | `backend/app/services/wiki_cron.py` | New — 10-minute background task that checks Drive files for content-hash changes and triggers re-ingest |
-| Startup | `backend/app/main.py` | Register cron task on FastAPI `lifespan` startup (asyncio background task or APScheduler) |
+| Cron | `backend/app/services/wiki_ingest_cron.py` | New — background task scanning `teemo_documents` for `sync_status='pending'`, running ingest |
+| Startup | `backend/app/main.py` | Register wiki ingest cron on FastAPI `lifespan` startup |
 
-### 4.2 Dependencies
+### 4.3 Dependencies
 | Type | Dependency | Status |
 |------|------------|--------|
-| **Requires** | EPIC-006: Google Drive Integration | Draft — wiki ingest needs `read_drive_file` content extraction and `teemo_knowledge_index` rows |
+| **Requires** | EPIC-015: Documents Table Redesign | Draft — provides `teemo_documents` with `sync_status` column, `content` for ingest, `document_service.py` |
 | **Requires** | EPIC-007: AI Agent + Slack Event Loop | Done (S-07) — wiki tools are agent tools, system prompt modification |
 | **Requires** | EPIC-004: BYOK Key Management | Done (S-06) — ingest uses scan-tier model via workspace BYOK key |
-| **Enhances** | EPIC-006: teemo_knowledge_index | Existing — wiki ingest triggers when files are indexed/re-scanned |
 | **Unlocks** | Future: Dashboard wiki explorer | Deferred — frontend view of wiki pages |
 
-### 4.3 Integration Points
+### 4.4 Integration Points
 | System | Purpose | Docs |
 |--------|---------|------|
-| Google Drive API | Source content for wiki ingest (via existing `read_drive_file` extraction logic) | Existing in EPIC-006 |
+| `teemo_documents` (EPIC-015) | Source content for wiki ingest. Read `content` column. Update `sync_status`. | EPIC-015 §4.4 |
 | Pydantic AI Agent | `read_wiki_page` tool + wiki index in system prompt | `backend/app/agents/agent.py` |
 | Scan-tier LLM | Wiki page generation during ingest (Haiku/4o-mini/Flash per ADR-004) | `_build_pydantic_ai_model()` in `agent.py` |
 
-### 4.4 Data Changes
+### 4.5 Data Changes
 | Entity | Change | Fields |
 |--------|--------|--------|
-| `teemo_wiki_pages` | NEW | `id` UUID PK, `workspace_id` FK, `slug` VARCHAR(200) UNIQUE per workspace, `title` VARCHAR(512), `page_type` VARCHAR(32) CHECK IN ('source-summary','concept','entity','synthesis'), `content` TEXT, `tldr` VARCHAR(500), `source_file_ids` TEXT[], `related_slugs` TEXT[], `confidence` VARCHAR(16) CHECK IN ('high','medium','low'), `created_at` TIMESTAMPTZ, `updated_at` TIMESTAMPTZ |
+| `teemo_wiki_pages` | NEW | `id` UUID PK, `workspace_id` FK, `slug` VARCHAR(200) UNIQUE per workspace, `title` VARCHAR(512), `page_type` VARCHAR(32) CHECK IN ('source-summary','concept','entity','synthesis'), `content` TEXT, `tldr` VARCHAR(500), `source_document_ids` UUID[] (references `teemo_documents.id`), `related_slugs` TEXT[], `confidence` VARCHAR(16) CHECK IN ('high','medium','low'), `created_at` TIMESTAMPTZ, `updated_at` TIMESTAMPTZ |
 | `teemo_wiki_log` | NEW | `id` UUID PK, `workspace_id` FK, `operation` VARCHAR(32) CHECK IN ('ingest','query','lint','update'), `details` JSONB, `created_at` TIMESTAMPTZ |
+| `teemo_documents` | MODIFY (sync_status only) | Wiki ingest cron updates `sync_status` from `'pending'` → `'processing'` → `'synced'` (or `'error'`) |
+
+**Note:** `source_document_ids` changed from `TEXT[]` (old `drive_file_id` strings) to `UUID[]` (new `teemo_documents.id` references) — aligned with EPIC-015's universal UUID identity.
 
 ---
 
@@ -144,9 +167,9 @@ flowchart LR
 ### Affected Areas (for codebase research)
 - [ ] Database migrations in `database/migrations/` — follow existing pattern (sequential numbering, `teemo_` prefix)
 - [ ] Agent factory in `backend/app/agents/agent.py` — tool registration, system prompt builder, `AgentDeps`
-- [ ] Service layer in `backend/app/services/` — follow existing `skill_service.py` pattern for wiki CRUD
+- [ ] Service layer in `backend/app/services/` — follow existing `skill_service.py` and `document_service.py` (EPIC-015) patterns
 - [ ] Health check in `backend/app/main.py` — `TEEMO_TABLES` list
-- [ ] Knowledge index integration — hook wiki ingest to `teemo_knowledge_index` writes
+- [ ] `teemo_documents` table (EPIC-015) — `sync_status` column, `content` column, workspace isolation
 
 ### Key Constraints for Story Sizing
 - Each story should touch 1-3 files and have one clear goal
@@ -154,11 +177,11 @@ flowchart LR
 - Stories must be independently verifiable
 
 ### Suggested Sequencing Hints
-1. **Schema first** — `teemo_wiki_pages` + `teemo_wiki_log` tables (no code depends on them yet, so safe to land early)
-2. **Wiki service core** — `wiki_service.py` with ingest pipeline (reads Drive file content, calls scan-tier LLM, writes wiki pages) + destructive re-ingest (delete old pages for a file, create new)
-3. **Agent integration** — `read_wiki_page` tool + wiki index injection into system prompt
-4. **Ingest hook** — trigger async wiki ingest when a file is added to `teemo_knowledge_index`
-5. **Cron job** — 10-minute background task checking Drive files for content-hash changes, triggering destructive re-ingest for changed files
+1. **Schema first** — `teemo_wiki_pages` + `teemo_wiki_log` tables (no code depends on them yet, safe to land early)
+2. **Wiki service core** — `wiki_service.py` with ingest pipeline (reads document `content` from `teemo_documents`, calls scan-tier LLM, writes wiki pages) + destructive re-ingest (delete old pages for a document, create new)
+3. **Agent integration** — `read_wiki_page` tool + wiki index injection into system prompt (replaces EPIC-015's transitional `## Available Documents`)
+4. **Wiki ingest cron** — background task scanning `teemo_documents` for `sync_status='pending'`, running ingest, updating status
+5. **Ingest hook** — trigger async wiki ingest immediately when a document is created/updated (don't wait for cron tick)
 6. **Lint operation** — scan wiki for contradictions, orphans, staleness (manual agent tool for v1)
 
 ---
@@ -166,15 +189,13 @@ flowchart LR
 ## 6. Risks & Edge Cases
 | Risk | Likelihood | Mitigation |
 |------|------------|------------|
-| **Ingest token cost is high** — processing 15 files through LLM to generate wiki pages could be expensive for users | Medium | Use scan-tier (cheapest) model. Cap wiki pages per source file (~15 max). Show estimated token cost before ingest. |
-| **Wiki pages drift from source** — Drive file changes but wiki isn't updated | Low | **Decided:** 10-minute cron checks all files for content-hash changes. Changed files get destructive re-ingest (delete old pages, create new). |
-| **Wiki index exceeds system prompt budget** — too many pages, TLDRs too long | Low | Enforce TLDR max length (500 chars). With 15 source files × ~10 pages = 150 pages × ~50 tokens each = ~7.5K tokens. May need to summarize the index itself if >4K. |
+| **Ingest token cost is high** — processing 15 documents through LLM to generate wiki pages could be expensive for users | Medium | Use scan-tier (cheapest) model. Cap wiki pages per source document (~15 max). Show estimated token cost before ingest. |
+| **Wiki pages drift from source** — document changes but wiki isn't updated | Low | EPIC-015's Drive sync cron resets `sync_status='pending'` on change. Wiki ingest cron picks it up. Two crons, clean handoff. |
+| **Wiki index exceeds system prompt budget** — too many pages, TLDRs too long | Low | Enforce TLDR max length (500 chars). With 15 source documents × ~10 pages = 150 pages × ~50 tokens each = ~7.5K tokens. May need to summarize the index itself if >4K. |
 | **Cross-reference quality degrades** — LLM creates spurious or missed cross-refs | Medium | Lint operation flags orphan pages and pages with no incoming refs. Human can review lint report. |
-| **Ingest latency blocks UX** — user adds file, has to wait for wiki to build | Low | Run ingest as background task. File is usable immediately via `read_drive_file` fallback. Wiki enhances over time. |
-| **Concurrent ingest race conditions** — two files ingested simultaneously update the same concept page | Low | Per-workspace advisory lock during ingest. Or sequential ingest queue. |
-| **Cron Drive API quota** — 10-min cron checking 15 files × N workspaces could hit Google API rate limits | Low | Use lightweight `files.get(fields=md5Checksum)` — 1 API call per file, no content download. Google Drive API allows 12,000 queries/100s. |
-| **Cron runs during ingest** — cron detects a hash change while a previous ingest is still running | Low | Skip files with an active ingest lock. Log and retry on next cron tick. |
-| **Destructive re-ingest loses cross-refs** — deleting all pages from a changed file removes cross-references that other files' pages point to | Medium | Re-ingest rebuilds all cross-references for the file's new pages. Orphaned `related_slugs` on OTHER pages are cleaned up during the re-ingest cross-ref pass. |
+| **Concurrent ingest race conditions** — two documents ingested simultaneously update the same concept page | Low | Per-workspace advisory lock during ingest. Or sequential ingest queue. |
+| **Destructive re-ingest loses cross-refs** — deleting all pages from a changed document removes cross-references that other documents' pages point to | Medium | Re-ingest rebuilds all cross-references for the document's new pages. Orphaned `related_slugs` on OTHER pages are cleaned up during the re-ingest cross-ref pass. |
+| **EPIC-015 not landed yet** | Medium | This epic requires `teemo_documents` with `sync_status`. Cannot start until EPIC-015 schema story is complete. |
 
 ---
 
@@ -184,65 +205,75 @@ flowchart LR
 ```gherkin
 Feature: Wiki Knowledge Pipeline
 
-  Scenario: Ingest a Drive file into wiki pages
-    Given a workspace with a BYOK key and a Google Drive file indexed in teemo_knowledge_index
-    When the wiki ingest pipeline runs for that file
+  Scenario: Ingest a document into wiki pages
+    Given a workspace with a BYOK key and a document in teemo_documents with sync_status "pending"
+    When the wiki ingest pipeline runs for that document
     Then a source-summary page is created in teemo_wiki_pages
-    And concept pages are created for key themes in the file
+    And concept pages are created for key themes in the document
     And entity pages are created for named items (people, services, tools)
     And all new pages have cross-references (related_slugs) linking to existing pages
     And the wiki index is rebuilt with updated TLDRs
+    And sync_status is updated to "synced" on teemo_documents
     And a log entry is appended to teemo_wiki_log
 
-  Scenario: Agent uses wiki instead of raw files
-    Given a workspace with wiki pages built from 3 Drive files
+  Scenario: Ingest works for all document sources
+    Given a workspace with documents from Drive, upload, and agent sources
+    When wiki ingest runs for each pending document
+    Then wiki pages are generated identically regardless of source
+    And all three documents' pages are cross-referenced with each other
+
+  Scenario: Agent uses wiki to answer questions
+    Given a workspace with wiki pages built from 3 documents
     When a user @mentions the bot with a question answerable from wiki pages
     Then the agent reads the wiki index from its system prompt
     And the agent calls read_wiki_page for the relevant page(s)
-    And the agent answers without calling read_drive_file
+    And the agent answers from pre-compiled wiki knowledge
     And the response cites wiki page sources
 
-  Scenario: Agent falls back to raw file when wiki is insufficient
+  Scenario: Wiki index replaces transitional document list
     Given a workspace with wiki pages
-    When the user asks for a specific detail not captured in wiki pages
-    Then the agent calls read_drive_file to get the full source content
-    And the agent answers using the raw file content
+    When the agent's system prompt is built
+    Then the ## Available Documents section (EPIC-015 transitional) is replaced by wiki page TLDRs
+    And the agent routes queries via slug + TLDR, not raw document descriptions
 
   Scenario: Wiki lint detects issues
     Given a workspace wiki with 50+ pages
     When the lint operation runs
     Then it reports any contradictions between pages
     And it lists orphan pages (no incoming cross-references)
-    And it flags pages whose source files have changed since last ingest
+    And it flags pages whose source documents have changed since last ingest
     And the lint results are logged in teemo_wiki_log
 
-  Scenario: Cron detects file change and triggers destructive re-ingest
-    Given a workspace with wiki pages built from a Drive file
-    And the Drive file content has changed (different md5Checksum from stored content_hash)
-    When the 10-minute cron job runs
-    Then it detects the hash mismatch
-    And it deletes ALL wiki pages where source_file_ids includes that drive_file_id
-    And it re-runs the full ingest pipeline for the changed file
+  Scenario: Wiki ingest cron processes pending documents
+    Given a workspace with 2 documents where sync_status is "pending"
+    When the wiki ingest cron runs
+    Then both documents are ingested into wiki pages
+    And sync_status is updated to "synced" for both
+    And the wiki index is rebuilt
+
+  Scenario: Destructive re-ingest on document change
+    Given a workspace with wiki pages built from a document
+    And EPIC-015's Drive sync cron has updated the document content and set sync_status to "pending"
+    When the wiki ingest cron runs
+    Then it deletes ALL wiki pages where source_document_ids includes that document
+    And it re-runs the full ingest pipeline for the changed document
     And new wiki pages are created with updated content
-    And cross-references to/from other files' pages are rebuilt
+    And cross-references to/from other documents' pages are rebuilt
     And the wiki index is rebuilt with updated TLDRs
-    And teemo_knowledge_index.content_hash is updated to the new hash
-    And a log entry is appended to teemo_wiki_log with operation "ingest" and details noting re-ingest
 
-  Scenario: Cron skips unchanged files
-    Given a workspace with 5 indexed Drive files
-    When the 10-minute cron job runs
-    And all 5 files have the same md5Checksum as stored content_hash
-    Then no wiki pages are modified
-    And no LLM calls are made
-    And no log entry is created
-
-  Scenario: File removed from knowledge index
-    Given a workspace with wiki pages built from a Drive file
-    When the file is removed from teemo_knowledge_index
-    Then all wiki pages where source_file_ids includes that drive_file_id are deleted
+  Scenario: Document removed — wiki pages cleaned up
+    Given a workspace with wiki pages built from a document
+    When the document is deleted from teemo_documents
+    Then all wiki pages where source_document_ids includes that document are deleted
     And the wiki index is rebuilt
     And orphaned cross-references on remaining pages are cleaned up
+
+  Scenario: Ingest error handling
+    Given a document with sync_status "pending"
+    When wiki ingest fails (e.g., LLM error, content too short)
+    Then sync_status is set to "error"
+    And a log entry is appended to teemo_wiki_log with error details
+    And the document is skipped on the next cron tick (not retried infinitely)
 ```
 
 ---
@@ -250,13 +281,16 @@ Feature: Wiki Knowledge Pipeline
 ## 8. Open Questions
 | Question | Options | Impact | Owner | Status |
 |----------|---------|--------|-------|--------|
-| **Ingest timing** — should wiki build be synchronous or async? | ~~A: Sync~~ **B: Async background task** | File usable immediately via fallback. Wiki builds in background. | Solo dev | **Decided** 2026-04-12 |
-| **Wiki page cap** — should we limit total wiki pages per workspace? | **A: Uncapped** — 15 source files naturally bounds to ~150 pages. | No artificial limit needed. | Solo dev | **Decided** 2026-04-12 |
+| **Ingest timing** — should wiki build be synchronous or async? | ~~A: Sync~~ **B: Async background task** | Document usable via transitional prompt while wiki builds. | Solo dev | **Decided** 2026-04-12 |
+| **Wiki page cap** — should we limit total wiki pages per workspace? | **A: Uncapped** — 15 source documents naturally bounds to ~150 pages. | No artificial limit needed. | Solo dev | **Decided** 2026-04-12 |
 | **Lint trigger** — how/when does lint run? | **A: Manual agent tool for v1**. Cron lint deferred to v2. | Start simple, add automation later. | Solo dev | **Decided** 2026-04-12 |
 | **Synthesis pages** — should agent auto-create during queries? | **C: Agent decides** — tool available but not forced. | Most flexible. Agent uses judgment. | Solo dev | **Decided** 2026-04-12 |
-| **ADR needed?** — does this override ADR-005? | **A: New ADR-027** — wiki is primary knowledge path, Drive read is fallback. | Wiki is the default; `read_drive_file` only for deep-dive raw detail. | Solo dev | **Decided** 2026-04-12 |
-| **Re-ingest strategy** — how to handle source file changes? | **Destructive re-ingest**: delete all wiki pages from changed file, re-run full ingest from scratch. No partial update. | Simpler, no merge logic, guarantees consistency. | Solo dev | **Decided** 2026-04-12 |
-| **Change detection** — how to detect Drive file changes? | **10-minute cron job**: checks `files.get(fields=md5Checksum)` for all indexed files across all workspaces. Triggers re-ingest on hash mismatch. | Near-real-time freshness without webhooks. Lightweight API calls. | Solo dev | **Decided** 2026-04-12 |
+| **ADR needed?** — does this override ADR-005? | **A: New ADR-027** — wiki is the primary knowledge path. `read_document` (EPIC-015) retained as fallback for exact quotes, specific data, and pending-ingest docs. | Wiki is primary, raw doc read is fallback. | Solo dev | **Decided** 2026-04-12 (refined 2026-04-13) |
+| **Re-ingest strategy** — how to handle source document changes? | **Destructive re-ingest**: delete all wiki pages from changed document, re-run full ingest from scratch. No partial update. | Simpler, no merge logic, guarantees consistency. | Solo dev | **Decided** 2026-04-12 |
+| **Source document layer** — who owns `teemo_documents` and Drive sync? | **EPIC-015 owns it.** This epic only reads `content` and updates `sync_status`. | Clean separation: EPIC-015 = write path, EPIC-013 = read path. | Solo dev | **Decided** 2026-04-13 |
+| **Prompt tuning quality bar** — when is ingest quality "good enough"? | **AI judges.** Conversation-tier model evaluates wiki pages against source document. Scores: accuracy, coverage, TLDR usefulness, cross-ref relevance. Must pass for all 8 RAG_TESTING files. | Removes subjective human judgment from the tuning loop. Repeatable. | Solo dev | **Decided** 2026-04-13 |
+| **Tiny document threshold** — skip ingest for very short docs? | **Skip for docs <100 chars.** Set `sync_status='synced'` immediately. No LLM call. Agent reads via `read_document` fallback. | A 50-char doc doesn't need concept/entity decomposition. | Solo dev | **Decided** 2026-04-13 |
+| **Concurrent ingest** — two docs pending simultaneously | **Sequential queue in cron.** Process one doc at a time per workspace. No advisory locks. | Cron already iterates sequentially. Simplest approach. | Solo dev | **Decided** 2026-04-13 |
 
 ---
 
@@ -264,14 +298,17 @@ Feature: Wiki Knowledge Pipeline
 > Auto-populated as Epic is decomposed.
 
 **Stories (Status Tracking):**
-> Stories will be created during sprint planning when this epic enters active development.
-- [ ] (pending decomposition)
+- [ ] STORY-013-01-wiki-tables-read-tool (L2) → Active (Sprint S-11)
+- [ ] STORY-013-02-wiki-ingest-pipeline (L3) → Active (Sprint S-11) — includes AI judge tuning loop
+- [ ] STORY-013-03-wiki-ingest-cron (L2) → Active (Sprint S-11)
+- [ ] STORY-013-04-wiki-lint (L2) → Active (Sprint S-11)
 
 **References:**
 - Charter: [Tee-Mo Charter](../../strategy/tee_mo_charter.md) §2.3 (Targeted Knowledge), §5.3 (Knowledge Pipeline)
 - Roadmap: [Tee-Mo Roadmap](../../strategy/tee_mo_roadmap.md) §3 ADR-005, ADR-006
 - Inspiration: [Karpathy LLM Wiki Gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)
-- Depends on: EPIC-006 (Google Drive), EPIC-007 (AI Agent), EPIC-004 (BYOK)
+- Architecture: EPIC-015 §4.5 (two-layer design — source document layer + knowledge layer)
+- Depends on: EPIC-015 (Documents Table Redesign — provides `teemo_documents` with `sync_status`), EPIC-007 (AI Agent, Done), EPIC-004 (BYOK, Done)
 
 ---
 
@@ -281,3 +318,5 @@ Feature: Wiki Knowledge Pipeline
 |------|--------|-----|
 | 2026-04-12 | Epic created. Inspired by Karpathy's LLM Wiki pattern — structured wiki pipeline for Google Drive knowledge files. Scope: ingest pipeline, wiki DB tables, agent tools, lint. Post-hackathon priority (P2). | Claude (doc-manager) |
 | 2026-04-12 | All open questions decided. Key decisions: async ingest, uncapped pages, manual lint for v1, agent-decides synthesis, ADR-027 (wiki primary), destructive re-ingest on file change, 10-minute cron for change detection. Ambiguity lowered to 🟢 Low. Added cron-related risks and acceptance criteria. | Claude (doc-manager) |
+| 2026-04-13 | **Two-layer architecture alignment with EPIC-015.** All references to `teemo_knowledge_index` replaced with `teemo_documents` (EPIC-015). Clarified cron ownership: Drive sync cron = EPIC-015, wiki ingest cron = EPIC-013. Wiki ingest now triggered by `sync_status='pending'` on `teemo_documents` (not by content-hash polling). Source-agnostic: ingest works identically for Drive, upload, and agent-created documents. `source_file_ids` renamed to `source_document_ids` (UUID[] not TEXT[]). Added architecture diagram from EPIC-015 §4.5. New open question decided (source document layer ownership). Updated all acceptance criteria and scope boundaries. | Claude (doc-manager) |
+| 2026-04-13 | **Pre-sprint refinement.** ADR-027 refined: wiki is primary read path, `read_document` (EPIC-015) is fallback. 3 new open questions decided: AI judges prompt tuning quality (conversation-tier model evaluates against source), skip ingest for docs <100 chars, sequential cron queue. Test data: `new_app/RAG_TESTING/` (8 files: PDFs, DOCX, XLSX). | Claude (doc-manager) |

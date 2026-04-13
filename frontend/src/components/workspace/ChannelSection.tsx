@@ -237,16 +237,23 @@ export function ChannelSection({ workspaceId, teamId }: ChannelSectionProps) {
           ) : (
             <ul>
               {allChannels.map((channel) => {
-                const isBound = boundIds.has(channel.id);
+                const isBoundHere = boundIds.has(channel.id);
+                const isBoundElsewhere =
+                  !isBoundHere &&
+                  !!channel.bound_workspace_id &&
+                  channel.bound_workspace_id !== workspaceId;
+                const isUnavailable = isBoundHere || isBoundElsewhere;
                 return (
                   <li key={channel.id}>
-                    {isBound ? (
+                    {isUnavailable ? (
                       <div
                         className="w-full text-left py-1 px-2 text-sm rounded flex items-center gap-2 opacity-50 cursor-not-allowed"
                       >
                         <span className="h-2 w-2 rounded-full bg-rose-400 shrink-0" />
                         <span className="text-slate-400">#{channel.name}</span>
-                        <span className="text-xs text-slate-400 ml-auto">bound</span>
+                        <span className="text-xs text-slate-400 ml-auto">
+                          {isBoundElsewhere ? 'other workspace' : 'bound'}
+                        </span>
                       </div>
                     ) : (
                       <button

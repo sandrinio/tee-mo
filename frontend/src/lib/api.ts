@@ -541,6 +541,8 @@ export interface SlackChannel {
   name: string;
   /** Whether the channel is private (true) or public (false). */
   is_private: boolean;
+  /** Workspace ID this channel is bound to, or null/undefined if unbound. */
+  bound_workspace_id?: string | null;
 }
 
 /**

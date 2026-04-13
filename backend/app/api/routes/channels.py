@@ -200,12 +200,11 @@ async def bind_channel(
 
     sb = get_supabase()
 
-    # 2. Check for existing binding (duplicate guard — avoids relying on PK violation).
+    # 2. Check for existing binding in ANY workspace (PK is slack_channel_id).
     existing = (
         sb.table("teemo_workspace_channels")
         .select("*")
         .eq("slack_channel_id", body.slack_channel_id)
-        .eq("workspace_id", workspace_id)
         .limit(1)
         .execute()
     )
@@ -461,4 +460,25 @@ async def list_slack_team_channels(
     if not response.get("ok"):
         raise HTTPException(status_code=500, detail="Slack API call failed.")
 
-    return response.get("channels", [])
+    channels = response.get("channels", [])
+
+    # 4. Annotate each channel with its bound workspace (if any).
+    #    Fetching all bindings for these channel IDs lets the frontend show
+    #    channels taken by other workspaces as unavailable.
+    sb = get_supabase()
+    channel_ids = [ch["id"] for ch in channels]
+    if channel_ids:
+        bindings = (
+            sb.table("teemo_workspace_channels")
+            .select("slack_channel_id, workspace_id")
+            .in_("slack_channel_id", channel_ids)
+            .execute()
+        )
+        bound_map = {
+            row["slack_channel_id"]: row["workspace_id"]
+            for row in (bindings.data or [])
+        }
+        for ch in channels:
+            ch["bound_workspace_id"] = bound_map.get(ch["id"])
+
+    return channels

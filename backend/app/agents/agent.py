@@ -679,13 +679,15 @@ async def build_agent(
         # fallback if the file is a scanned/image-only PDF (STORY-006-08).
         from app.core.encryption import decrypt as _decrypt_key
         api_key_plain = _decrypt_key(ws_row["encrypted_api_key"])
-        content = await fetch_file_content(
+        _result = fetch_file_content(
             drive_client,
             drive_file_id,
             file_row["mime_type"],
             provider=ws_row["ai_provider"],
             api_key=api_key_plain,
         )
+        import inspect
+        content = (await _result) if inspect.isawaitable(_result) else _result
 
         # 4. Self-healing: always upsert cached_content on Drive fetch (backfill or update).
         #    Only re-generate AI description when the content hash has actually changed (ADR-006).

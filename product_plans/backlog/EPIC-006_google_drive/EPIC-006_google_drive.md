@@ -47,7 +47,14 @@ Full Google Drive integration: OAuth connect, file picker, knowledge index with 
 - [ ] `read_drive_file(drive_file_id)` agent tool — fetches full file content via Drive API with MIME routing, self-heals stale `ai_description` on hash change
 - [ ] File descriptions injected into agent system prompt as `## Available Files` section
 - [ ] Scan-tier model helper: `_build_scan_tier_model(provider, api_key)` returning the cheapest model per provider
-- [ ] MIME-type routing: Google Docs→`files.export(text/plain)`, Sheets→`files.export(text/csv)`, Slides→`files.export(text/plain)`, PDF→`pypdf`, Word→`python-docx`, Excel→`openpyxl`
+- [ ] MIME-type routing: Google Docs→`files.export(text/plain)`, Sheets→`files.export(text/csv)`, Slides→`files.export(text/plain)`, PDF→`pymupdf4llm`, Word→`python-docx` (paragraphs + tables), Excel→`openpyxl` (markdown tables)
+- [ ] **Hybrid content extraction (Option C):** improve extractors to output structured markdown, with multimodal LLM fallback for scanned/image-heavy PDFs
+  - PDF: replace `pypdf` with `pymupdf4llm` — renders PDF to markdown preserving tables, headings, lists, and layout
+  - Word (.docx): extract tables alongside paragraphs, format tables as markdown
+  - Excel (.xlsx): output markdown tables with column headers and sheet names
+  - Google Sheets: switch from CSV export to XLSX export (captures all sheets), process via openpyxl → markdown tables
+  - Google Slides: export with slide boundary markers (`--- Slide N ---`)
+  - Multimodal LLM fallback: if primary extractor returns <100 chars for a PDF (likely scanned/image-based), send raw bytes to a multimodal scan-tier model (Gemini Flash / GPT-4o-mini) for content extraction
 - [ ] Frontend: Google Picker integration on workspace detail page
 - [ ] Frontend: Drive connection status + connect/disconnect buttons
 - [ ] Frontend: Knowledge file list with title, description, "Remove" action
@@ -108,8 +115,8 @@ flowchart LR
 | Config | `backend/app/core/config.py` | Modify — add `google_api_client_id`, `google_api_secret`, `google_picker_api_key`, `google_oauth_redirect_uri` |
 | Routes | `backend/app/api/routes/drive_oauth.py` | New — Google OAuth initiate + callback |
 | Routes | `backend/app/api/routes/knowledge.py` | New — knowledge index CRUD (list, add, remove) + picker-token + drive-status |
-| Service | `backend/app/services/drive_service.py` | New — Drive API wrapper: fetch file content by MIME type, refresh token → access token exchange, content hash |
-| Service | `backend/app/services/scan_service.py` | New — scan-tier model builder + AI description generator |
+| Service | `backend/app/services/drive_service.py` | New → **Modify** — Drive API wrapper: fetch file content by MIME type, refresh token → access token exchange, content hash. **Phase 2:** Replace pypdf with pymupdf4llm, improve docx/xlsx/sheets extractors to output markdown, add multimodal fallback |
+| Service | `backend/app/services/scan_service.py` | New → **Modify** — scan-tier model builder + AI description generator. **Phase 2:** Add `extract_content_multimodal()` for scanned PDF fallback |
 | Agent | `backend/app/agents/agent.py` | Modify — add `read_drive_file` tool, inject `## Available Files` into system prompt, add knowledge_files param to `_build_system_prompt` |
 | Models | `backend/app/models/knowledge.py` | New — Pydantic request/response schemas for knowledge index |
 | App | `backend/app/main.py` | Modify — mount `drive_oauth_router` + `knowledge_router` |
@@ -141,14 +148,15 @@ flowchart LR
 | `teemo_workspaces` | MODIFY (existing column) | `encrypted_google_refresh_token` — populated by Drive OAuth callback |
 | `teemo_knowledge_index` | USE (existing table) | All fields populated by knowledge index routes |
 
-### 4.5 Libraries Required (already in pyproject.toml)
-| Library | Purpose |
-|---------|---------|
-| `google-api-python-client 2.194.0` | Drive API calls (`files.get`, `files.export`) |
-| `google-auth 2.49.2` | `Credentials` + `Request` for refresh→access token exchange |
-| `pypdf` | PDF text extraction |
-| `python-docx` | Word (.docx) text extraction |
-| `openpyxl` | Excel (.xlsx) text extraction |
+### 4.5 Libraries Required
+| Library | Purpose | Status |
+|---------|---------|--------|
+| `google-api-python-client 2.194.0` | Drive API calls (`files.get`, `files.export`) | In pyproject.toml |
+| `google-auth 2.49.2` | `Credentials` + `Request` for refresh→access token exchange | In pyproject.toml |
+| `pymupdf4llm` | PDF→markdown with table detection, layout preservation, heading extraction | **New — replaces `pypdf`** |
+| `python-docx` | Word (.docx) text + table extraction | In pyproject.toml |
+| `openpyxl` | Excel (.xlsx) → markdown table extraction | In pyproject.toml |
+| ~~`pypdf`~~ | ~~PDF text extraction~~ | **Removed — replaced by `pymupdf4llm`** |
 
 ---
 
@@ -174,6 +182,7 @@ flowchart LR
 4. **Agent integration** — `read_drive_file` tool + system prompt `## Available Files` section
 5. **Frontend** — workspace detail page with Drive connect + Picker + file list
 6. **E2E verification** — manual test of full pipeline
+7. **Hybrid content extraction** — replace extractors with markdown-aware versions, add multimodal LLM fallback for scanned PDFs. Depends on stories 01 (drive_service exists) and can run after the pipeline is live.
 
 ---
 
@@ -187,6 +196,9 @@ flowchart LR
 | **Google Picker API key exposed** — API key is used client-side | Low | Key is restricted to HTTP referrers + Picker API only. Cannot access other Google services. |
 | **MIME type mismatch** — file type changes after indexing | Low | `read_drive_file` re-checks MIME at fetch time. If unsupported, returns error. |
 | **15-file cap race condition** — two concurrent adds exceed cap | Low | DB trigger is the hard gate (BEFORE INSERT). Backend check is defense in depth. |
+| **Scanned PDFs return empty text** — `pymupdf4llm` can't extract text from image-only PDFs | Medium | Multimodal LLM fallback: if extracted text <100 chars, send raw PDF bytes to Gemini Flash or GPT-4o-mini for content extraction. Burns scan-tier BYOK tokens but only triggers on scanned docs. |
+| **`pymupdf4llm` output quality varies** — complex multi-column layouts may produce messy markdown | Low | Accept imperfect extraction for V1. The agent can still reason over slightly messy markdown. pymupdf4llm is significantly better than pypdf for tables and structure. |
+| **Multimodal model doesn't support PDF input** — Anthropic Claude doesn't accept PDF bytes natively | Medium | Only Gemini and OpenAI support multimodal PDF input. If provider is Anthropic, skip multimodal fallback and return best-effort text extraction with a warning appended. |
 
 ---
 
@@ -236,6 +248,50 @@ Feature: Google Drive Integration
     When they select it via Picker
     Then the backend returns 400 with "Unsupported file type"
     And no row is created in teemo_knowledge_index
+
+  # --- Hybrid Content Extraction (Phase 2) ---
+
+  Scenario: PDF with tables extracted as markdown
+    Given a PDF file containing a table with 3 columns and 5 rows
+    When the backend extracts content via read_drive_file
+    Then the extracted text contains a markdown table with column headers
+    And cell values are preserved accurately
+    And the agent can reason about the tabular data
+
+  Scenario: Excel file extracted as markdown tables
+    Given an XLSX file with 2 sheets, each containing a table
+    When the backend extracts content
+    Then each sheet is rendered as a named markdown section ("## Sheet: SheetName")
+    And each table has a markdown header row
+    And cell values are tab/pipe-separated within the table
+
+  Scenario: Word document with tables
+    Given a DOCX file with paragraphs and a 4-column table
+    When the backend extracts content
+    Then paragraphs are preserved as plain text
+    And the table is rendered as a markdown table with headers
+
+  Scenario: Scanned PDF falls back to multimodal LLM
+    Given a scanned PDF (image-only, no extractable text)
+    And the workspace's BYOK provider is "google" or "openai"
+    When the backend extracts content
+    Then pymupdf4llm returns <100 characters
+    And the system sends raw PDF bytes to the multimodal scan-tier model
+    And the model extracts readable text from the scanned images
+    And the extracted content is returned to the agent
+
+  Scenario: Scanned PDF with Anthropic provider (no multimodal PDF support)
+    Given a scanned PDF and the workspace's BYOK provider is "anthropic"
+    When the backend extracts content
+    Then pymupdf4llm returns <100 characters
+    And multimodal fallback is skipped
+    And the response includes a warning: "This file appears to be a scanned document. Text extraction is limited for this provider."
+
+  Scenario: Google Sheets extracted as markdown table
+    Given a Google Sheets file with column headers in row 1
+    When the backend exports via Drive API as CSV
+    Then the CSV is converted to a markdown table with pipe separators
+    And the first row becomes the header row
 ```
 
 ---
@@ -245,6 +301,11 @@ Feature: Google Drive Integration
 |----------|---------|--------|-------|--------|
 | Google Cloud Console configured? | User must complete setup guide steps 1-5 | Blocks OAuth flow testing | Solo dev | **In Progress** — CLIENT_ID/SECRET done, origins/redirect/APIs pending |
 | Content truncation limit for large files? | A: 50K chars. B: 100K chars. C: Dynamic based on model context window. | Affects answer quality on large docs | Solo dev | **Decided — 50K chars** with trim notice |
+| Hybrid extraction approach? | A: Better libs only. B: Multimodal LLM only. **C: Hybrid** (better libs primary + multimodal fallback for scanned PDFs). | Affects extraction quality for tables, PDFs, structured data | Solo dev | **Decided — Option C** |
+| Google Sheets multi-sheet export? | A: CSV (first sheet only). **B: XLSX** (all sheets via openpyxl). | CSV silently drops sheets 2+. | Solo dev | **Decided — B (XLSX)** |
+| Mixed PDF fallback threshold? | A: Per-page check. B: Lower threshold. **C: Accept gap for V1** (100-char whole-doc). | Hybrid PDFs (text + scanned pages) may miss scanned pages. | Solo dev | **Decided — C (accept gap, revisit later)** |
+| Anthropic scanned PDF handling? | A: Cross-provider fallback. **B: Warn only** — return best-effort text + warning. | No cross-provider key usage. User's BYOK key only, always. | Solo dev | **Decided — B (warn only)** |
+| Oversized scanned PDF (>20MB)? | A: Reject. **B: Return best-effort** pymupdf4llm text + warning. | Multimodal APIs cap at ~20MB. | Solo dev | **Decided — B (best-effort + warning)** |
 
 ---
 
@@ -257,6 +318,11 @@ Feature: Google Drive Integration
 - [ ] [STORY-006-04-agent-drive-tool](./STORY-006-04-agent-drive-tool.md) (L2) — Backlog — Agent `read_drive_file` tool + system prompt file catalog
 - [ ] [STORY-006-05-frontend-drive](./STORY-006-05-frontend-drive.md) (L3) — Backlog — Workspace detail page + Drive connect + Picker + file list
 - [ ] [STORY-006-06-e2e-verification](./STORY-006-06-e2e-verification.md) (L1) — Backlog — Manual E2E verification of full pipeline
+- [ ] [STORY-006-07-hybrid-extraction](./STORY-006-07-hybrid-extraction.md) (L2) — Draft — Markdown-aware extractors: pymupdf4llm for PDFs, markdown tables for xlsx/docx/sheets, slide markers
+- [ ] [STORY-006-08-multimodal-fallback](./STORY-006-08-multimodal-fallback.md) (L2) — Draft — Multimodal LLM fallback for scanned PDFs (Google/OpenAI), Anthropic warning, size guard
+- [ ] [STORY-006-09-delete-workspace](./STORY-006-09-delete-workspace.md) (L1) — Draft — DELETE /api/workspaces/{id} endpoint + frontend button, CASCADE removes all child data
+- [ ] [STORY-006-10-cached-content](./STORY-006-10-cached-content.md) (L2) — Draft — Add cached_content column, populate at index time, read_drive_file serves from cache
+- [ ] [STORY-006-11-reindex](./STORY-006-11-reindex.md) (L2) — Draft — POST /api/workspaces/{id}/knowledge/reindex endpoint + frontend button, re-extracts all files with improved extractors
 
 **References:**
 - Charter: [Tee-Mo Charter](../../strategy/tee_mo_charter.md) §3.4, §5.1, §5.2, §5.3, §6, §10
@@ -271,3 +337,7 @@ Feature: Google Drive Integration
 | Date | Change | By |
 |------|--------|-----|
 | 2026-04-12 | Epic created with full technical context from codebase research. 6 stories identified. All open questions decided. Ambiguity 🟢 Low. | Claude (doc-manager) |
+| 2026-04-13 | Added hybrid extraction scope (Option C). Added 3 new risks, 6 new acceptance criteria. Updated §4.1, §4.5, §5, §8. Stories 01-06 already delivered in S-08; new work targets S-10. | Claude (doc-manager) |
+| 2026-04-13 | Decomposed hybrid extraction into two stories: STORY-006-07 (markdown-aware extractors — pymupdf4llm, docx tables, xlsx markdown, sheets XLSX export, slides markers) and STORY-006-08 (multimodal LLM fallback for scanned PDFs — provider routing, size guard, async conversion). 007 has no dependencies on 008; 008 depends on 007. | Claude (doc-manager) |
+| 2026-04-13 | Added STORY-006-09 (Delete Workspace) — L1 fast-track. DELETE endpoint + frontend button + confirmation dialog. All child data removed via ON DELETE CASCADE (skills, knowledge_index, workspace_channels). | Claude (doc-manager) |
+| 2026-04-13 | Added STORY-006-10 (Cached Content) and STORY-006-11 (Re-Index). 010 adds cached_content column + cache-first reads in read_drive_file. 011 adds reindex endpoint + frontend button to re-extract all files with improved extractors. Dependency chain: 007 → 010 → 011 (extractors must exist before caching, caching column must exist before re-index populates it). | Claude (doc-manager) |

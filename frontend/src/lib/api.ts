@@ -121,6 +121,8 @@ export function getMe(): Promise<AuthUser> {
 export interface SlackTeam {
   /** Slack-assigned team identifier, e.g. "T0123ABCDEF". */
   slack_team_id: string;
+  /** Human-readable Slack team/company name from OAuth. */
+  slack_team_name?: string;
   /** Slack bot user ID associated with the installation. */
   slack_bot_user_id: string;
   /** ISO 8601 timestamp of when Tee-Mo was installed in this workspace. */

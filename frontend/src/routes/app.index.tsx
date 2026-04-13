@@ -118,18 +118,14 @@ function TeamCard({ team }: TeamCardProps) {
       onClick={handleClick}
       role="button"
       tabIndex={0}
-      aria-label={`View workspaces for team ${team.slack_team_id}`}
+      aria-label={`View workspaces for team ${team.slack_team_name || team.slack_team_id}`}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') handleClick();
       }}
     >
       <div className="flex flex-col gap-1">
-        <div className="font-mono text-sm font-medium text-slate-900">
-          {team.slack_team_id}
-        </div>
-        <div className="text-xs text-slate-500">
-          <span className="text-slate-400">Bot:</span>{' '}
-          <span>{team.slack_bot_user_id}</span>
+        <div className="text-sm font-semibold text-slate-900">
+          {team.slack_team_name || team.slack_team_id}
         </div>
         <div className="text-xs text-slate-400">
           Installed {installedDate}

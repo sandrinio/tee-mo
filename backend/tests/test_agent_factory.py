@@ -154,9 +154,10 @@ async def test_build_agent_registers_four_skill_tools(monkeypatch: Any) -> None:
     call_kwargs = mock_agent_cls.call_args[1]  # keyword args
     tools_arg = call_kwargs.get("tools")
     assert tools_arg is not None, "Agent() must be called with tools= keyword argument"
-    assert len(tools_arg) == 8, (
-        f"Expected 8 tools, got {len(tools_arg)}. "
-        "Required: load_skill, create_skill, update_skill, delete_skill, web_search, crawl_page, http_request, read_drive_file"
+    assert len(tools_arg) == 13, (
+        f"Expected 13 tools, got {len(tools_arg)}. "
+        "Required: load_skill, create_skill, update_skill, delete_skill, web_search, crawl_page, "
+        "http_request, read_document, create_document, update_document, delete_document, read_wiki_page, lint_wiki"
     )
 
 
@@ -477,32 +478,29 @@ def test_ensure_model_imports_openai_sets_globals(monkeypatch: Any) -> None:
 # ---------------------------------------------------------------------------
 # STORY-006-04: Agent Drive Tool — RED PHASE tests
 #
-# Tests for 6 Gherkin scenarios:
-#   1. System prompt includes file catalog when workspace has files
-#   2. System prompt omits file section when no files
-#   3. read_drive_file returns content
-#   4. read_drive_file self-heals stale metadata (hash mismatch)
-#   5. read_drive_file handles revoked token (invalid_grant)
-#   6. read_drive_file rejects unknown file ID
+# Tests for Gherkin scenarios (STORY-015-03 refactor):
+#   1. System prompt includes document catalog when workspace has documents
+#   2. System prompt omits document section when no documents
+#   3. read_document returns content by UUID
+#   4. read_document returns "Document not found." for unknown UUID
 # ---------------------------------------------------------------------------
 
 
-def _make_supabase_mock_with_knowledge(
+def _make_supabase_mock_with_documents(
     workspace_row: dict,
-    knowledge_files: list[dict],
+    documents: list[dict],
 ) -> MagicMock:
     """Build a Supabase client mock that routes different table queries correctly.
 
     Routes:
       - teemo_workspaces  → returns workspace_row via maybe_single().execute()
-      - teemo_knowledge_index → returns knowledge_files via execute() (no maybe_single)
+      - teemo_documents   → returns documents via execute() (no maybe_single)
 
-    The routing is done via supabase.table(name).select(...).eq(...) side_effect
-    so that distinct call sequences return the right data.
+    STORY-015-03: replaces the legacy teemo_knowledge_index routing.
 
     Args:
-        workspace_row:    Workspace dict as returned by DB (ai_provider, etc.).
-        knowledge_files:  List of knowledge index rows (drive_file_id, title, ai_description).
+        workspace_row: Workspace dict as returned by DB (ai_provider, etc.).
+        documents:     List of document rows (id, title, ai_description).
     """
     # Result for workspace query (maybe_single path)
     workspace_result = MagicMock()
@@ -514,21 +512,21 @@ def _make_supabase_mock_with_knowledge(
     workspace_chain.eq.return_value = workspace_chain
     workspace_chain.select.return_value = workspace_chain
 
-    # Result for knowledge index query (direct execute path)
-    knowledge_result = MagicMock()
-    knowledge_result.data = knowledge_files
+    # Result for teemo_documents query (direct execute path)
+    docs_result = MagicMock()
+    docs_result.data = documents
 
-    knowledge_chain = MagicMock()
-    knowledge_chain.execute.return_value = knowledge_result
-    knowledge_chain.eq.return_value = knowledge_chain
-    knowledge_chain.select.return_value = knowledge_chain
+    docs_chain = MagicMock()
+    docs_chain.execute.return_value = docs_result
+    docs_chain.eq.return_value = docs_chain
+    docs_chain.select.return_value = docs_chain
 
     supabase = MagicMock()
 
     def _table_router(table_name: str) -> MagicMock:
         """Route supabase.table() calls to the correct chain by table name."""
-        if table_name == "teemo_knowledge_index":
-            return knowledge_chain
+        if table_name == "teemo_documents":
+            return docs_chain
         return workspace_chain
 
     supabase.table.side_effect = _table_router
@@ -536,18 +534,18 @@ def _make_supabase_mock_with_knowledge(
 
 
 # ---------------------------------------------------------------------------
-# Scenario 1: System prompt includes file catalog when workspace has files
+# Scenario 1: System prompt includes document catalog when workspace has documents
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_system_prompt_includes_available_files_section(monkeypatch: Any) -> None:
-    """When workspace has 3 indexed files, system_prompt contains '## Available Files'
-    and lists all 3 files with drive_file_id, title, and ai_description.
+async def test_system_prompt_includes_available_documents_section(monkeypatch: Any) -> None:
+    """When workspace has 3 documents, system_prompt contains '## Available Documents'
+    and lists all 3 with UUID id, title, and ai_description.
 
-    Verifies R2 and R3 from STORY-006-04 §1.2: _build_system_prompt appends the
-    file catalog when knowledge_files is non-empty, and build_agent() queries
-    teemo_knowledge_index and passes results to the prompt builder.
+    Verifies R2 from STORY-015-03: _build_system_prompt appends the document catalog
+    when documents is non-empty, and build_agent() queries teemo_documents and passes
+    results to the prompt builder.
     """
     import app.agents.agent as agent_module  # type: ignore[import]
 
@@ -565,25 +563,25 @@ async def test_system_prompt_includes_available_files_section(monkeypatch: Any) 
         "app.services.skill_service.list_skills", lambda workspace_id, supabase: []
     )
 
-    knowledge_files = [
+    documents = [
         {
-            "drive_file_id": "file-id-001",
+            "id": "uuid-doc-001",
             "title": "Q3 Financial Report",
             "ai_description": "Quarterly financial summary for Q3.",
         },
         {
-            "drive_file_id": "file-id-002",
+            "id": "uuid-doc-002",
             "title": "Engineering Roadmap",
             "ai_description": "Technical roadmap for the engineering team.",
         },
         {
-            "drive_file_id": "file-id-003",
+            "id": "uuid-doc-003",
             "title": "HR Policy Handbook",
             "ai_description": "Company HR policies and procedures.",
         },
     ]
 
-    supabase = _make_supabase_mock_with_knowledge(_workspace_row(), knowledge_files)
+    supabase = _make_supabase_mock_with_documents(_workspace_row(), documents)
 
     await agent_module.build_agent(WORKSPACE_ID, USER_ID, supabase)
 
@@ -592,34 +590,33 @@ async def test_system_prompt_includes_available_files_section(monkeypatch: Any) 
     system_prompt = call_kwargs.get("system_prompt")
 
     assert system_prompt is not None, "Agent() must be called with system_prompt= kwarg"
-    assert "## Available Files" in system_prompt, (
-        "system_prompt must contain '## Available Files' when workspace has indexed files"
+    assert "## Available Documents" in system_prompt, (
+        "system_prompt must contain '## Available Documents' when workspace has indexed documents"
     )
 
-    # All 3 files must be listed with all 3 fields
-    for f in knowledge_files:
-        assert f["drive_file_id"] in system_prompt, (
-            f"drive_file_id '{f['drive_file_id']}' must appear in system_prompt"
+    # All 3 documents must be listed with all 3 fields
+    for d in documents:
+        assert d["id"] in system_prompt, (
+            f"document id '{d['id']}' must appear in system_prompt"
         )
-        assert f["title"] in system_prompt, (
-            f"title '{f['title']}' must appear in system_prompt"
+        assert d["title"] in system_prompt, (
+            f"title '{d['title']}' must appear in system_prompt"
         )
-        assert f["ai_description"] in system_prompt, (
-            f"ai_description '{f['ai_description']}' must appear in system_prompt"
+        assert d["ai_description"] in system_prompt, (
+            f"ai_description '{d['ai_description']}' must appear in system_prompt"
         )
 
 
 # ---------------------------------------------------------------------------
-# Scenario 2: System prompt omits file section when no files
+# Scenario 2: System prompt omits document section when no documents
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_system_prompt_omits_available_files_when_no_files(monkeypatch: Any) -> None:
-    """When workspace has 0 indexed files, system_prompt does NOT contain '## Available Files'.
+async def test_system_prompt_omits_available_documents_when_no_documents(monkeypatch: Any) -> None:
+    """When workspace has 0 documents, system_prompt does NOT contain '## Available Documents'.
 
-    Verifies R5 from STORY-006-04 §1.2: the files section is omitted entirely
-    when knowledge_files is empty — no empty section header should appear.
+    The section is omitted entirely when documents is empty — no empty header.
     """
     import app.agents.agent as agent_module  # type: ignore[import]
 
@@ -635,8 +632,8 @@ async def test_system_prompt_omits_available_files_when_no_files(monkeypatch: An
         "app.services.skill_service.list_skills", lambda workspace_id, supabase: []
     )
 
-    # Empty knowledge index
-    supabase = _make_supabase_mock_with_knowledge(_workspace_row(), [])
+    # Empty documents
+    supabase = _make_supabase_mock_with_documents(_workspace_row(), [])
 
     await agent_module.build_agent(WORKSPACE_ID, USER_ID, supabase)
 
@@ -644,42 +641,37 @@ async def test_system_prompt_omits_available_files_when_no_files(monkeypatch: An
     system_prompt = call_kwargs.get("system_prompt")
 
     assert system_prompt is not None
-    assert "## Available Files" not in system_prompt, (
-        "system_prompt must NOT contain '## Available Files' when no files are indexed"
+    assert "## Available Documents" not in system_prompt, (
+        "system_prompt must NOT contain '## Available Documents' when no documents are indexed"
     )
 
 
 # ---------------------------------------------------------------------------
-# Helper: build a supabase mock for read_drive_file tool tests.
-# These tests need the mock to handle 3 distinct table query patterns:
+# Helper: build a supabase mock for read_document tool tests.
+# Needs to handle 2 distinct table query patterns:
 #   1. teemo_workspaces (workspace row for build_agent) — maybe_single chain
-#   2. teemo_knowledge_index (for knowledge files in build_agent) — execute chain
-#   3. teemo_knowledge_index (for file lookup in read_drive_file) — execute chain
-#   4. teemo_workspaces (for refresh token in read_drive_file) — maybe_single chain
+#   2. teemo_documents (for doc catalog in build_agent) — execute chain
+#   3. teemo_documents (for read_document_content call) — maybe_single chain
 # ---------------------------------------------------------------------------
 
 
-def _make_drive_tool_supabase(
+def _make_doc_tool_supabase(
     workspace_row: dict,
-    knowledge_files_for_prompt: list[dict],
-    file_lookup_result: list[dict],
-    workspace_token_row: dict | None = None,
+    docs_for_prompt: list[dict],
+    read_doc_content: str | None,
 ) -> MagicMock:
-    """Build a multi-query Supabase mock for read_drive_file tool scenario tests.
+    """Build a multi-query Supabase mock for read_document tool scenario tests.
 
-    The mock tracks call count to route the 4 distinct query phases:
-      Phase 1: build_agent workspace query  → workspace_row (maybe_single)
-      Phase 2: build_agent knowledge_index  → knowledge_files_for_prompt (execute)
-      Phase 3: read_drive_file file lookup  → file_lookup_result (execute)
-      Phase 4: read_drive_file ws token     → workspace_token_row (maybe_single)
+    The mock tracks call count to route distinct query phases:
+      Phase 1: build_agent workspace query    → workspace_row (maybe_single)
+      Phase 2: build_agent teemo_documents    → docs_for_prompt (execute)
+      Phase 3: read_document_content lookup   → read_doc_content (maybe_single)
 
     Args:
-        workspace_row:              Full workspace dict with ai_provider, ai_model, etc.
-        knowledge_files_for_prompt: Knowledge files injected into system prompt during build.
-        file_lookup_result:         File rows returned when read_drive_file looks up the file.
-        workspace_token_row:        Workspace row with encrypted_google_refresh_token field,
-                                    returned when read_drive_file fetches the token. None means
-                                    not found (triggers revoked-token error path).
+        workspace_row:    Full workspace dict with ai_provider, ai_model, etc.
+        docs_for_prompt:  Documents injected into system prompt during build.
+        read_doc_content: Content string returned for the document read, or None
+                          for "not found".
     """
     supabase = MagicMock()
 
@@ -692,48 +684,35 @@ def _make_drive_tool_supabase(
     ws_build_chain.eq.return_value = ws_build_chain
     ws_build_chain.select.return_value = ws_build_chain
 
-    # -- build_agent knowledge index chain --
-    ki_build_result = MagicMock()
-    ki_build_result.data = knowledge_files_for_prompt
-    ki_build_chain = MagicMock()
-    ki_build_chain.execute.return_value = ki_build_result
-    ki_build_chain.eq.return_value = ki_build_chain
-    ki_build_chain.select.return_value = ki_build_chain
+    # -- build_agent teemo_documents catalog chain (direct execute path) --
+    docs_build_result = MagicMock()
+    docs_build_result.data = docs_for_prompt
+    docs_build_chain = MagicMock()
+    docs_build_chain.execute.return_value = docs_build_result
+    docs_build_chain.eq.return_value = docs_build_chain
+    docs_build_chain.select.return_value = docs_build_chain
 
-    # -- read_drive_file file-lookup chain --
-    file_lookup_res = MagicMock()
-    file_lookup_res.data = file_lookup_result
-    file_lookup_chain = MagicMock()
-    file_lookup_chain.execute.return_value = file_lookup_res
-    file_lookup_chain.eq.return_value = file_lookup_chain
-    file_lookup_chain.select.return_value = file_lookup_chain
+    # -- read_document_content lookup (maybe_single path) --
+    doc_read_result = MagicMock()
+    doc_read_result.data = {"content": read_doc_content} if read_doc_content is not None else None
+    doc_read_chain = MagicMock()
+    doc_read_chain.maybe_single.return_value = doc_read_chain
+    doc_read_chain.execute.return_value = doc_read_result
+    doc_read_chain.eq.return_value = doc_read_chain
+    doc_read_chain.select.return_value = doc_read_chain
 
-    # -- read_drive_file workspace token chain (maybe_single path) --
-    ws_token_result = MagicMock()
-    ws_token_result.data = workspace_token_row
-    ws_token_chain = MagicMock()
-    ws_token_chain.maybe_single.return_value = ws_token_chain
-    ws_token_chain.execute.return_value = ws_token_result
-    ws_token_chain.eq.return_value = ws_token_chain
-    ws_token_chain.select.return_value = ws_token_chain
-
-    # Track call sequence: table() is called in this order across the full lifecycle
-    _call_sequence: list[str] = []
+    # Track call sequence to route multiple teemo_documents calls correctly.
+    _docs_call_count = [0]
 
     def _table_router(table_name: str) -> MagicMock:
-        """Return the appropriate chain based on table name and call position."""
-        _call_sequence.append(table_name)
-        count = _call_sequence.count(table_name)
+        """Return appropriate chain based on table name and call order."""
         if table_name == "teemo_workspaces":
-            # 1st call = build_agent workspace query; 2nd call = token lookup in tool
-            if count == 1:
-                return ws_build_chain
-            return ws_token_chain
-        if table_name == "teemo_knowledge_index":
-            # 1st call = build_agent prompt files; 2nd call = file lookup in tool
-            if count == 1:
-                return ki_build_chain
-            return file_lookup_chain
+            return ws_build_chain
+        if table_name == "teemo_documents":
+            _docs_call_count[0] += 1
+            if _docs_call_count[0] == 1:
+                return docs_build_chain  # catalog fetch during build_agent
+            return doc_read_chain  # content fetch during read_document call
         return MagicMock()
 
     supabase.table.side_effect = _table_router
@@ -741,16 +720,16 @@ def _make_drive_tool_supabase(
 
 
 # ---------------------------------------------------------------------------
-# Scenario 3: read_drive_file returns content
+# Scenario 3: read_document returns content by UUID
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_read_drive_file_returns_content(monkeypatch: Any) -> None:
-    """read_drive_file returns the file content string when the file is found.
+async def test_read_document_returns_content(monkeypatch: Any) -> None:
+    """read_document returns the document content string when the document is found.
 
-    Verifies R1 from STORY-006-04 §1.2: the tool fetches content from Drive API
-    and returns it to the agent as a plain string.
+    Verifies R1 from STORY-015-03: the tool reads from teemo_documents by UUID
+    and returns the content column value.
     """
     import app.agents.agent as agent_module  # type: ignore[import]
 
@@ -768,51 +747,29 @@ async def test_read_drive_file_returns_content(monkeypatch: Any) -> None:
         "app.services.skill_service.list_skills", lambda workspace_id, supabase: []
     )
 
-    # The file that will be requested
-    file_row = {
-        "drive_file_id": "file-id-abc",
+    doc_id = "uuid-doc-abc-001"
+    doc_content = "This is the Q3 financial report content."
+    doc_row = {
+        "id": doc_id,
         "title": "Q3 Report",
         "ai_description": "A Q3 financial report.",
-        "content_hash": "hash-abc-old",
-        "mime_type": "application/vnd.google-apps.document",
     }
-    ws_token_row = {
-        "id": WORKSPACE_ID,
-        "encrypted_google_refresh_token": "enc-refresh-token-001",
-        "ai_provider": "openai",
-        "encrypted_api_key": "enc-key-blob",
-    }
-
-    supabase = _make_drive_tool_supabase(
+    supabase = _make_doc_tool_supabase(
         workspace_row=_workspace_row(),
-        knowledge_files_for_prompt=[file_row],
-        file_lookup_result=[file_row],
-        workspace_token_row=ws_token_row,
+        docs_for_prompt=[doc_row],
+        read_doc_content=doc_content,
     )
-
-    # Mock drive_service: get_drive_client returns a fake client,
-    # fetch_file_content returns canned content.
-    mock_drive_client = MagicMock(name="drive_client")
-    file_content = "This is the Q3 financial report content."
-    mock_get_drive_client = MagicMock(return_value=mock_drive_client)
-    mock_fetch_file_content = MagicMock(return_value=file_content)
-    # Hash matches stored hash so no self-heal path is triggered.
-    mock_compute_content_hash = MagicMock(return_value="hash-abc-old")
-
-    monkeypatch.setattr("app.services.drive_service.get_drive_client", mock_get_drive_client)
-    monkeypatch.setattr("app.services.drive_service.fetch_file_content", mock_fetch_file_content)
-    monkeypatch.setattr("app.services.drive_service.compute_content_hash", mock_compute_content_hash)
 
     await agent_module.build_agent(WORKSPACE_ID, USER_ID, supabase)
 
-    # Extract read_drive_file tool from tools list passed to Agent()
+    # Extract read_document tool from tools list passed to Agent()
     tools_arg = mock_agent_cls.call_args.kwargs["tools"]
-    read_drive_file_fn = next(
-        (t for t in tools_arg if getattr(t, "__name__", "") == "read_drive_file"),
+    read_document_fn = next(
+        (t for t in tools_arg if getattr(t, "__name__", "") == "read_document"),
         None,
     )
-    assert read_drive_file_fn is not None, (
-        "build_agent must register a tool named 'read_drive_file'"
+    assert read_document_fn is not None, (
+        "build_agent must register a tool named 'read_document'"
     )
 
     # Build a fake ctx with deps
@@ -823,26 +780,25 @@ async def test_read_drive_file_returns_content(monkeypatch: Any) -> None:
     mock_ctx = MagicMock()
     mock_ctx.deps = mock_deps
 
-    result = await read_drive_file_fn(mock_ctx, "file-id-abc")
+    result = await read_document_fn(mock_ctx, doc_id)
 
-    assert result == file_content, (
-        f"read_drive_file must return file content string, got: {result!r}"
+    assert result == doc_content, (
+        f"read_document must return document content string, got: {result!r}"
     )
 
 
 # ---------------------------------------------------------------------------
-# Scenario 4: read_drive_file self-heals stale metadata (hash mismatch)
+# Scenario 4: read_document returns "Document not found." for unknown UUID
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_read_drive_file_self_heals_stale_metadata(monkeypatch: Any) -> None:
-    """read_drive_file detects a content hash mismatch and re-generates AI description.
+async def test_read_document_returns_not_found_for_unknown_uuid(monkeypatch: Any) -> None:
+    """read_document returns 'Document not found.' when the UUID is not in the workspace.
 
-    Verifies R1 (self-heal path) from STORY-006-04 §1.2: when the content hash of
-    the fetched file differs from the stored hash, the tool must call
-    scan_service.generate_ai_description and upsert the updated row into
-    teemo_knowledge_index with the new hash + description.
+    Verifies the workspace isolation guard from STORY-015-03 R1: if the requested
+    document UUID is not present in teemo_documents for this workspace, the tool
+    returns the standard not-found message without crashing.
     """
     import app.agents.agent as agent_module  # type: ignore[import]
 
@@ -860,57 +816,22 @@ async def test_read_drive_file_self_heals_stale_metadata(monkeypatch: Any) -> No
         "app.services.skill_service.list_skills", lambda workspace_id, supabase: []
     )
 
-    # The indexed file has an old hash — content has changed on Drive.
-    file_row = {
-        "drive_file_id": "file-id-xyz",
-        "title": "Engineering Roadmap",
-        "ai_description": "Old AI description from last scan.",
-        "content_hash": "old_hash_aaa",
-        "mime_type": "application/vnd.google-apps.document",
-    }
-    ws_token_row = {
-        "id": WORKSPACE_ID,
-        "encrypted_google_refresh_token": "enc-refresh-token-001",
-        "ai_provider": "openai",
-        "encrypted_api_key": "enc-key-blob",
-    }
-
-    supabase = _make_drive_tool_supabase(
+    # No documents in prompt; read_doc_content=None simulates not-found.
+    supabase = _make_doc_tool_supabase(
         workspace_row=_workspace_row(),
-        knowledge_files_for_prompt=[file_row],
-        file_lookup_result=[file_row],
-        workspace_token_row=ws_token_row,
-    )
-
-    # Drive returns new content with a different hash
-    mock_drive_client = MagicMock(name="drive_client")
-    new_content = "Updated engineering roadmap content."
-    new_hash = "new_hash_bbb"
-    new_description = "Updated description of engineering roadmap."
-
-    mock_get_drive_client = MagicMock(return_value=mock_drive_client)
-    mock_fetch_file_content = MagicMock(return_value=new_content)
-    mock_compute_content_hash = MagicMock(return_value=new_hash)
-
-    monkeypatch.setattr("app.services.drive_service.get_drive_client", mock_get_drive_client)
-    monkeypatch.setattr("app.services.drive_service.fetch_file_content", mock_fetch_file_content)
-    monkeypatch.setattr("app.services.drive_service.compute_content_hash", mock_compute_content_hash)
-
-    # scan_service.generate_ai_description returns the new description
-    mock_generate_ai_description = AsyncMock(return_value=new_description)
-    monkeypatch.setattr(
-        "app.services.scan_service.generate_ai_description", mock_generate_ai_description
+        docs_for_prompt=[],
+        read_doc_content=None,
     )
 
     await agent_module.build_agent(WORKSPACE_ID, USER_ID, supabase)
 
     tools_arg = mock_agent_cls.call_args.kwargs["tools"]
-    read_drive_file_fn = next(
-        (t for t in tools_arg if getattr(t, "__name__", "") == "read_drive_file"),
+    read_document_fn = next(
+        (t for t in tools_arg if getattr(t, "__name__", "") == "read_document"),
         None,
     )
-    assert read_drive_file_fn is not None, (
-        "build_agent must register a tool named 'read_drive_file'"
+    assert read_document_fn is not None, (
+        "build_agent must register a tool named 'read_document'"
     )
 
     mock_deps = MagicMock()
@@ -920,166 +841,8 @@ async def test_read_drive_file_self_heals_stale_metadata(monkeypatch: Any) -> No
     mock_ctx = MagicMock()
     mock_ctx.deps = mock_deps
 
-    result = await read_drive_file_fn(mock_ctx, "file-id-xyz")
+    result = await read_document_fn(mock_ctx, "uuid-does-not-exist")
 
-    # Tool must have called generate_ai_description with the new content
-    mock_generate_ai_description.assert_called_once()
-    call_args = mock_generate_ai_description.call_args
-    assert call_args[0][0] == new_content, (
-        "generate_ai_description must be called with the new file content"
-    )
-
-    # Supabase upsert must have been called on teemo_knowledge_index
-    assert supabase.table.called, "supabase.table must be called"
-    # The upsert call should contain new hash and description
-    upsert_calls = [
-        c for c in supabase.table.call_args_list
-        if "teemo_knowledge_index" in str(c)
-    ]
-    # At minimum, verify the tool returned content (not an error)
-    assert result == new_content, (
-        f"read_drive_file must return the updated file content, got: {result!r}"
-    )
-
-
-# ---------------------------------------------------------------------------
-# Scenario 5: read_drive_file handles revoked token (invalid_grant)
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_read_drive_file_handles_revoked_token(monkeypatch: Any) -> None:
-    """read_drive_file returns a user-friendly message when the OAuth token is revoked.
-
-    Verifies R6 from STORY-006-04 §1.2: if get_drive_client raises an exception
-    containing 'invalid_grant', the tool returns a clear error message instructing
-    the user to reconnect Drive from the dashboard.
-    """
-    import app.agents.agent as agent_module  # type: ignore[import]
-
-    mock_agent_cls = MagicMock(name="Agent")
-    mock_agent_instance = MagicMock(name="agent_instance")
-    mock_agent_cls.return_value = mock_agent_instance
-    mock_openai_model = MagicMock(name="OpenAIChatModel")
-    mock_openai_provider = MagicMock(name="OpenAIProvider")
-
-    monkeypatch.setattr(agent_module, "Agent", mock_agent_cls)
-    monkeypatch.setattr(agent_module, "OpenAIChatModel", mock_openai_model)
-    monkeypatch.setattr(agent_module, "OpenAIProvider", mock_openai_provider)
-    monkeypatch.setattr("app.core.encryption.decrypt", lambda enc: DECRYPTED_KEY)
-    monkeypatch.setattr(
-        "app.services.skill_service.list_skills", lambda workspace_id, supabase: []
-    )
-
-    file_row = {
-        "drive_file_id": "file-id-revoked",
-        "title": "Secret Doc",
-        "ai_description": "A document requiring Drive access.",
-        "content_hash": "hash-xyz",
-        "mime_type": "application/vnd.google-apps.document",
-    }
-    ws_token_row = {
-        "id": WORKSPACE_ID,
-        "encrypted_google_refresh_token": "enc-stale-token",
-        "ai_provider": "openai",
-        "encrypted_api_key": "enc-key-blob",
-    }
-
-    supabase = _make_drive_tool_supabase(
-        workspace_row=_workspace_row(),
-        knowledge_files_for_prompt=[file_row],
-        file_lookup_result=[file_row],
-        workspace_token_row=ws_token_row,
-    )
-
-    # get_drive_client raises an error simulating invalid_grant (revoked token)
-    def _raise_invalid_grant(encrypted_token: str):
-        raise Exception("invalid_grant: Token has been expired or revoked.")
-
-    monkeypatch.setattr("app.services.drive_service.get_drive_client", _raise_invalid_grant)
-
-    await agent_module.build_agent(WORKSPACE_ID, USER_ID, supabase)
-
-    tools_arg = mock_agent_cls.call_args.kwargs["tools"]
-    read_drive_file_fn = next(
-        (t for t in tools_arg if getattr(t, "__name__", "") == "read_drive_file"),
-        None,
-    )
-    assert read_drive_file_fn is not None, (
-        "build_agent must register a tool named 'read_drive_file'"
-    )
-
-    mock_deps = MagicMock()
-    mock_deps.workspace_id = WORKSPACE_ID
-    mock_deps.supabase = supabase
-    mock_deps.user_id = USER_ID
-    mock_ctx = MagicMock()
-    mock_ctx.deps = mock_deps
-
-    result = await read_drive_file_fn(mock_ctx, "file-id-revoked")
-
-    assert "Google Drive access has been revoked" in result, (
-        f"Result must contain revoked-token message, got: {result!r}"
-    )
-
-
-# ---------------------------------------------------------------------------
-# Scenario 6: read_drive_file rejects unknown file ID
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_read_drive_file_rejects_unknown_file_id(monkeypatch: Any) -> None:
-    """read_drive_file returns 'File not found' when the file ID is not in the workspace.
-
-    Verifies the file isolation guard: if the requested drive_file_id is not
-    present in teemo_knowledge_index for this workspace, the tool must return a
-    not-found error rather than attempting to fetch from Drive.
-    """
-    import app.agents.agent as agent_module  # type: ignore[import]
-
-    mock_agent_cls = MagicMock(name="Agent")
-    mock_agent_instance = MagicMock(name="agent_instance")
-    mock_agent_cls.return_value = mock_agent_instance
-    mock_openai_model = MagicMock(name="OpenAIChatModel")
-    mock_openai_provider = MagicMock(name="OpenAIProvider")
-
-    monkeypatch.setattr(agent_module, "Agent", mock_agent_cls)
-    monkeypatch.setattr(agent_module, "OpenAIChatModel", mock_openai_model)
-    monkeypatch.setattr(agent_module, "OpenAIProvider", mock_openai_provider)
-    monkeypatch.setattr("app.core.encryption.decrypt", lambda enc: DECRYPTED_KEY)
-    monkeypatch.setattr(
-        "app.services.skill_service.list_skills", lambda workspace_id, supabase: []
-    )
-
-    # No files in the prompt and the file lookup returns empty (file not found)
-    supabase = _make_drive_tool_supabase(
-        workspace_row=_workspace_row(),
-        knowledge_files_for_prompt=[],
-        file_lookup_result=[],    # empty = file not found in workspace
-        workspace_token_row=None,
-    )
-
-    await agent_module.build_agent(WORKSPACE_ID, USER_ID, supabase)
-
-    tools_arg = mock_agent_cls.call_args.kwargs["tools"]
-    read_drive_file_fn = next(
-        (t for t in tools_arg if getattr(t, "__name__", "") == "read_drive_file"),
-        None,
-    )
-    assert read_drive_file_fn is not None, (
-        "build_agent must register a tool named 'read_drive_file'"
-    )
-
-    mock_deps = MagicMock()
-    mock_deps.workspace_id = WORKSPACE_ID
-    mock_deps.supabase = supabase
-    mock_deps.user_id = USER_ID
-    mock_ctx = MagicMock()
-    mock_ctx.deps = mock_deps
-
-    result = await read_drive_file_fn(mock_ctx, "file-id-does-not-exist")
-
-    assert "File not found" in result, (
-        f"Result must contain 'File not found' for unknown file ID, got: {result!r}"
+    assert result == "Document not found.", (
+        f"Result must be 'Document not found.' for unknown document UUID, got: {result!r}"
     )

@@ -68,6 +68,10 @@ class Settings(BaseSettings):
 
     debug: bool = False
     cors_origins: str = "http://localhost:5173"
+    # Console log verbosity — sourced from LOG_LEVEL env var (STORY-016-01).
+    # Accepts standard Python level names: DEBUG, INFO, WARNING, ERROR.
+    # Invalid values are caught by setup_logging() which falls back to INFO.
+    log_level: str = "INFO"
     supabase_url: str
     supabase_anon_key: str
     supabase_service_role_key: str

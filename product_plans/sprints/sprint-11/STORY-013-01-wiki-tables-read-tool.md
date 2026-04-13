@@ -84,3 +84,11 @@ Feature: Wiki Tables + Agent Read Tool
 | Date | Author | Change |
 |------|--------|--------|
 | 2026-04-13 | Claude (doc-manager) | Initial draft for S-11. |
+
+---
+
+## Token Usage
+
+| Agent | Input | Output | Total |
+|-------|-------|--------|-------|
+| Developer | 1,995 | 4,677 | 6,672 |

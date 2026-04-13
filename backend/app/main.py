@@ -17,13 +17,19 @@ Usage (from ``backend/`` directory)::
     uvicorn app.main:app --reload
 """
 
+import asyncio
 import logging
+import time
+import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 
 from app.api.routes.auth import router as auth_router
 from app.api.routes import keys as keys_module
@@ -36,13 +42,65 @@ from app.api.routes.workspaces import router as workspace_router
 from app.core.config import settings
 from app.core.db import get_supabase
 from app.core.encryption import key_fingerprint
+from app.core.logging_config import setup_logging, request_id_ctx
+from app.services.drive_sync_cron import drive_sync_loop
+from app.services.wiki_ingest_cron import wiki_ingest_loop
+
+# Configure logging as early as possible — before any route registration or
+# module-level log calls below. This ensures the startup banner and the
+# enc-key fingerprint line are both captured in JSON format.
+setup_logging(settings.log_level)
 
 logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """FastAPI lifespan context manager — startup and shutdown hooks.
+
+    On startup:
+      - Registers the Drive Content Sync Cron as an asyncio background task
+        (STORY-015-05). The task runs every 10 minutes, checking all connected
+        Google Drive workspaces for content changes.
+      - Registers the Wiki Ingest Cron as an asyncio background task
+        (STORY-013-03). The task runs every 60 seconds, processing all
+        ``teemo_documents`` rows with ``sync_status='pending'``.
+
+    On shutdown:
+      - Cancels both cron tasks so the event loop can terminate cleanly.
+        Each task catches ``asyncio.CancelledError`` and logs a shutdown event
+        before re-raising to allow clean termination.
+    """
+    # Start Drive content sync cron as a background task.
+    cron_task = asyncio.create_task(drive_sync_loop())
+    logger.info("lifespan.startup", extra={"event": "lifespan.startup", "message": "Drive sync cron registered"})
+
+    # Start Wiki Ingest Cron as a background task.
+    wiki_cron_task = asyncio.create_task(wiki_ingest_loop())
+    logger.info("lifespan.startup", extra={"event": "lifespan.startup", "message": "Wiki ingest cron registered"})
+
+    yield
+
+    # Shutdown: cancel background tasks gracefully.
+    cron_task.cancel()
+    wiki_cron_task.cancel()
+    try:
+        await cron_task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await wiki_cron_task
+    except asyncio.CancelledError:
+        pass
+    logger.info("lifespan.shutdown", extra={"event": "lifespan.shutdown", "message": "Drive sync cron stopped"})
+    logger.info("lifespan.shutdown", extra={"event": "lifespan.shutdown", "message": "Wiki ingest cron stopped"})
+
 
 app = FastAPI(
     title="Tee-Mo API",
     version="0.1.0",
     description="Tee-Mo: AI assistant for Slack workspaces",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -52,6 +110,72 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class RequestIdMiddleware(BaseHTTPMiddleware):
+    """Middleware that generates a UUID4 request ID for every incoming request.
+
+    The ID is:
+    1. Stored in ``request_id_ctx`` (ContextVar) so that all log calls made
+       during the request automatically include it via ``RequestIdFilter``.
+    2. Added to the HTTP response as ``X-Request-Id`` header for client-side
+       correlation and debugging.
+
+    Must be registered BEFORE ``AccessLogMiddleware`` so the context variable
+    is set by the time the access log is written.
+    """
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        """Generate request ID, set context var, delegate, and add header."""
+        request_id = str(uuid.uuid4())
+        token = request_id_ctx.set(request_id)
+        try:
+            response: Response = await call_next(request)
+        finally:
+            request_id_ctx.reset(token)
+        response.headers["X-Request-Id"] = request_id
+        return response
+
+
+class AccessLogMiddleware(BaseHTTPMiddleware):
+    """Middleware that logs one INFO line per completed HTTP request.
+
+    Emits a structured log with: ``event``, ``method``, ``path``, ``status``,
+    ``duration_ms``, ``request_id`` so that HTTP traffic is observable without
+    requiring an external access log parser.
+
+    The ``/api/health`` path is skipped to avoid flooding logs with liveness
+    probe traffic from load balancers and Kubernetes probes.
+    """
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        """Time the request and emit an access log entry on completion."""
+        start = time.monotonic()
+        response: Response = await call_next(request)
+        duration_ms = round((time.monotonic() - start) * 1000)
+
+        # Skip health-check path to avoid probe noise
+        if request.url.path != "/api/health":
+            _access_logger.info(
+                "http.request",
+                extra={
+                    "event": "http.request",
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status": response.status_code,
+                    "duration_ms": duration_ms,
+                    "request_id": request_id_ctx.get() or "–",
+                },
+            )
+        return response
+
+
+# Module-level logger for access log entries — distinct name so operators can
+# filter/route access logs separately if needed.
+_access_logger = logging.getLogger("teemo.access")
+
+app.add_middleware(AccessLogMiddleware)
+app.add_middleware(RequestIdMiddleware)
 
 app.include_router(auth_router)
 app.include_router(slack_events_router)
@@ -72,14 +196,17 @@ logger.info("enc key fp: %s", key_fingerprint())
 # The teemo_ prefix is non-negotiable: this is a shared Supabase instance.
 # Extended in STORY-003-03 per ADR-024: added teemo_slack_teams (migration 005)
 # and teemo_workspace_channels (migration 006).
+# Extended in STORY-013-01: added teemo_wiki_pages and teemo_wiki_log (migration 011).
 TEEMO_TABLES = (
     "teemo_users",
     "teemo_workspaces",
-    "teemo_knowledge_index",
+    "teemo_documents",
     "teemo_skills",
     "teemo_slack_teams",
     "teemo_workspace_channels",
     "teemo_slack_team_members",
+    "teemo_wiki_pages",
+    "teemo_wiki_log",
 )
 
 

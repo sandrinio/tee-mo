@@ -164,3 +164,11 @@ The prompt tuning loop uses the conversation-tier model to evaluate wiki page qu
 |------|--------|--------|
 | 2026-04-13 | Claude (doc-manager) | Initial draft for S-11. L3 due to LLM prompt engineering + tuning loop. |
 | 2026-04-13 | Claude (doc-manager) | Pre-sprint refinement: added AI judge evaluation loop (conversation-tier rates scan-tier output), RAG_TESTING test data path (8 files), tiny doc threshold (<100 chars skip ingest), spreadsheet page count estimates, pass threshold (all criteria ≥3.5 across 8 files). |
+
+---
+
+## Token Usage
+
+| Agent | Input | Output | Total |
+|-------|-------|--------|-------|
+| Developer | 20 | 925 | 945 |

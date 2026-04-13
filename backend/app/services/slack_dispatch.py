@@ -154,20 +154,40 @@ async def handle_slack_event(payload: dict) -> None:
     signature verification. Extracts the inner ``event`` dict from the
     event_callback envelope and dispatches based on ``event.type``.
 
+    Emits ``event.received`` lifecycle log at entry so that every inbound
+    Slack event is traceable in the structured log stream (STORY-016-01 R7).
+
     Args:
         payload: The full Slack event_callback JSON payload (already parsed).
 
     Returns:
         None. All errors are caught internally and posted back to Slack.
     """
+    import time as _time
+
     event: dict = payload.get("event", {})
     event_type: str = event.get("type", "")
     channel_type: str = event.get("channel_type", "")
+    channel: str = event.get("channel", "")
+    team: str = event.get("team", "") or payload.get("team_id", "")
+
+    # R7: lifecycle event — log every received Slack event for observability
+    logger.info(
+        "event.received",
+        extra={
+            "event": "event.received",
+            "event_type": event_type,
+            "channel": channel,
+            "team": team,
+        },
+    )
+
+    _dispatch_start = _time.monotonic()
 
     if event_type == "app_mention":
-        await _handle_app_mention(event)
+        await _handle_app_mention(event, _dispatch_start=_dispatch_start)
     elif event_type == "message" and channel_type == "im":
-        await _handle_dm(event)
+        await _handle_dm(event, _dispatch_start=_dispatch_start)
     else:
         logger.debug(
             "slack_dispatch: unhandled event type=%r channel_type=%r — ignoring",
@@ -181,7 +201,7 @@ async def handle_slack_event(payload: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def _handle_app_mention(event: dict) -> None:
+async def _handle_app_mention(event: dict, *, _dispatch_start: float | None = None) -> None:
     """Handle an @mention of the bot in a Slack channel.
 
     Resolution steps:
@@ -198,9 +218,15 @@ async def _handle_app_mention(event: dict) -> None:
       Errors from ValueError("no_key_configured") are posted as user-facing
       error messages rather than propagated.
 
+    Emits ``agent.built``, ``tool.called`` (delegated to agent), and
+    ``response.sent`` lifecycle logs for STORY-016-01 R7 observability.
+
     Args:
         event: The inner Slack event dict from the event_callback envelope.
+        _dispatch_start: Optional monotonic start time from handle_slack_event
+            used to compute total_duration_ms in the ``response.sent`` event.
     """
+    import time as _time
     channel: str = event.get("channel", "")
     team: str = event.get("team", "")
     text: str = event.get("text", "")
@@ -298,10 +324,22 @@ async def _handle_app_mention(event: dict) -> None:
     try:
         # 7. Build agent first — raises ValueError("no_key_configured") if no BYOK key
         #    We build before fetching thread history so we short-circuit cheaply on missing keys.
+        _agent_build_start = _time.monotonic()
         agent, deps = await _agent_module.build_agent(
             workspace_id=workspace_id,
             user_id=owner_user_id,
             supabase=supabase,
+        )
+        _agent_build_ms = round((_time.monotonic() - _agent_build_start) * 1000)
+
+        # R7: lifecycle — agent.built
+        logger.info(
+            "agent.built",
+            extra={
+                "event": "agent.built",
+                "workspace_id": workspace_id,
+                "duration_ms": _agent_build_ms,
+            },
         )
 
         # 8. Fetch thread history for multi-turn context (only if agent was built successfully)
@@ -321,6 +359,22 @@ async def _handle_app_mention(event: dict) -> None:
             thread_ts,
             deps=deps,
             message_history=history,
+        )
+
+        # R7: lifecycle — response.sent
+        _total_ms = (
+            round((_time.monotonic() - _dispatch_start) * 1000)
+            if _dispatch_start is not None
+            else None
+        )
+        logger.info(
+            "response.sent",
+            extra={
+                "event": "response.sent",
+                "channel": channel,
+                "thread_ts": thread_ts,
+                "total_duration_ms": _total_ms,
+            },
         )
 
     except ValueError as exc:
@@ -368,10 +422,15 @@ async def _handle_app_mention(event: dict) -> None:
                 logger.error("slack_dispatch: failed to post unexpected ValueError error to %s", channel)
     except Exception as exc:
         # R6 error categories 3, 4, 5: provider errors, rate-limit, and any other exception.
+        # R7: lifecycle — event.error (structured)
         logger.error(
-            "slack_dispatch: agent error in _handle_app_mention channel=%s: %s",
-            channel,
-            type(exc).__name__,
+            "event.error",
+            extra={
+                "event": "event.error",
+                "error_type": type(exc).__name__,
+                "error_message": str(exc),
+                "channel": channel,
+            },
             exc_info=True,
         )
         try:
@@ -389,7 +448,7 @@ async def _handle_app_mention(event: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def _handle_dm(event: dict) -> None:
+async def _handle_dm(event: dict, *, _dispatch_start: float | None = None) -> None:
     """Handle a direct message to the bot.
 
     Self-message filter: DMs sent by the bot itself (identified by either a
@@ -403,9 +462,15 @@ async def _handle_dm(event: dict) -> None:
       4. If no default workspace → post a setup nudge and return.
       5. Same agent flow as _handle_app_mention (steps 5-10, without thread history).
 
+    Emits ``agent.built``, ``response.sent``, and ``event.error`` lifecycle logs
+    for STORY-016-01 R7 observability.
+
     Args:
         event: The inner Slack event dict from the event_callback envelope.
+        _dispatch_start: Optional monotonic start time from handle_slack_event
+            used to compute total_duration_ms in the ``response.sent`` event.
     """
+    import time as _time
     channel: str = event.get("channel", "")
     team: str = event.get("team", "")
     text: str = event.get("text", "")
@@ -484,10 +549,22 @@ async def _handle_dm(event: dict) -> None:
 
     try:
         # 5. Build agent first — raises ValueError("no_key_configured") if no BYOK key
+        _agent_build_start = _time.monotonic()
         agent, deps = await _agent_module.build_agent(
             workspace_id=workspace_id,
             user_id=owner_user_id,
             supabase=supabase,
+        )
+        _agent_build_ms = round((_time.monotonic() - _agent_build_start) * 1000)
+
+        # R7: lifecycle — agent.built
+        logger.info(
+            "agent.built",
+            extra={
+                "event": "agent.built",
+                "workspace_id": workspace_id,
+                "duration_ms": _agent_build_ms,
+            },
         )
 
         # 6. Run agent with streaming — DMs don't use threaded history
@@ -498,6 +575,22 @@ async def _handle_dm(event: dict) -> None:
             channel,
             thread_ts,
             deps=deps,
+        )
+
+        # R7: lifecycle — response.sent
+        _total_ms = (
+            round((_time.monotonic() - _dispatch_start) * 1000)
+            if _dispatch_start is not None
+            else None
+        )
+        logger.info(
+            "response.sent",
+            extra={
+                "event": "response.sent",
+                "channel": channel,
+                "thread_ts": thread_ts,
+                "total_duration_ms": _total_ms,
+            },
         )
 
     except ValueError as exc:
@@ -545,10 +638,15 @@ async def _handle_dm(event: dict) -> None:
                 logger.error("slack_dispatch: failed to post unexpected ValueError error to %s", channel)
     except Exception as exc:
         # R6 error categories 3, 4, 5: provider errors, rate-limit, and any other exception.
+        # R7: lifecycle — event.error (structured)
         logger.error(
-            "slack_dispatch: agent error in _handle_dm channel=%s: %s",
-            channel,
-            type(exc).__name__,
+            "event.error",
+            extra={
+                "event": "event.error",
+                "error_type": type(exc).__name__,
+                "error_message": str(exc),
+                "channel": channel,
+            },
             exc_info=True,
         )
         try:

@@ -416,26 +416,62 @@ export interface DriveStatus {
 }
 
 /**
- * A single indexed knowledge file record returned by the knowledge CRUD endpoints.
- * Mirrors backend/app/models/knowledge.py::KnowledgeFileResponse (STORY-006-03).
+ * Document source — where the document originated.
+ *
+ * - `google_drive` — indexed from Google Drive via the Picker widget.
+ * - `upload`       — uploaded directly by the user (EPIC-014).
+ * - `agent`        — created by the Tee-Mo agent tool (STORY-015-03).
+ */
+export type DocumentSource = 'google_drive' | 'upload' | 'agent';
+
+/**
+ * A single knowledge document record returned by the knowledge CRUD endpoints.
+ * Mirrors backend/app/models/knowledge.py::KnowledgeIndexResponse (STORY-015-02).
+ *
+ * STORY-015-02 shape changes vs original STORY-006-03:
+ *   - Added `source` (google_drive | upload | agent).
+ *   - Added `doc_type` (google_doc, pdf, docx, xlsx, google_sheet, google_slides).
+ *   - `external_id` is the canonical Drive file ID (replaces `drive_file_id`).
+ *   - `external_link` is the canonical URL (replaces `link`).
+ *   - `mime_type` removed from backend response — use `doc_type` instead.
+ *   - Backward-compat fields kept optional for any cached responses.
  */
 export interface KnowledgeFile {
   /** UUID primary key for this knowledge file record. */
   id: string;
   /** UUID of the workspace this file belongs to. */
   workspace_id: string;
-  /** Google Drive file ID. */
-  drive_file_id: string;
-  /** Human-readable file title from Google Drive. */
+  /** Human-readable file title. */
   title: string;
-  /** Direct link to the file in Google Drive. */
-  link: string;
-  /** MIME type of the file (e.g. "application/vnd.google-apps.document"). */
-  mime_type: string;
-  /** AI-generated description of the file content. */
-  ai_description: string;
-  /** SHA-256 hash of the extracted file content for change detection. */
-  content_hash: string;
+  /**
+   * Document source — determines badge and link rendering behavior.
+   * Only `google_drive` documents have an `external_link`.
+   * Optional for backward-compat with records created before STORY-015-02.
+   */
+  source?: DocumentSource | null;
+  /**
+   * Document type derived from MIME type.
+   * e.g. "google_doc", "pdf", "docx", "xlsx", "google_sheet", "google_slides".
+   * Optional for backward-compat with records created before STORY-015-02.
+   */
+  doc_type?: string | null;
+  /**
+   * Google Drive file ID (canonical column in teemo_documents).
+   * Null for upload/agent documents that have no external file ID.
+   * Optional for backward-compat with records created before STORY-015-02.
+   */
+  external_id?: string | null;
+  /**
+   * Direct URL to the source document.
+   * Only present for `google_drive` documents — null for upload/agent.
+   * Use this (not the legacy `link` field) to render external link icons.
+   * Optional for backward-compat with records created before STORY-015-02.
+   */
+  external_link?: string | null;
+  /** AI-generated description of the document content. */
+  ai_description: string | null;
+  /** SHA-256 hash of the extracted content for change detection. */
+  content_hash: string | null;
   /** ISO 8601 timestamp when this record was created. */
   created_at: string | null;
   /** ISO 8601 timestamp of the last successful content scan. */
@@ -445,6 +481,16 @@ export interface KnowledgeFile {
    * Present when the file exceeded 50,000 characters and was cut short.
    */
   warning?: string;
+  // ---------------------------------------------------------------------------
+  // Backward-compat fields (STORY-006-03 shape) — kept optional so cached API
+  // responses do not break before the backend migration is fully deployed.
+  // ---------------------------------------------------------------------------
+  /** @deprecated Use `external_id`. Kept for backward compatibility. */
+  drive_file_id?: string | null;
+  /** @deprecated Use `external_link`. Kept for backward compatibility. */
+  link?: string | null;
+  /** @deprecated Use `doc_type`. Kept for backward compatibility. */
+  mime_type?: string | null;
 }
 
 /**

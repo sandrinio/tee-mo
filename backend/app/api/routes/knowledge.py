@@ -1,15 +1,21 @@
-"""Knowledge Index CRUD routes (STORY-006-03).
+"""Knowledge document CRUD routes (STORY-015-02 refactor of STORY-006-03).
 
-Provides four endpoints for managing the knowledge index for a workspace:
+Provides endpoints for managing the knowledge store for a workspace.
+All document CRUD now goes through ``document_service`` which writes to
+``teemo_documents``. The legacy ``teemo_knowledge_index`` table is gone.
+
+Endpoints:
   POST   /api/workspaces/{workspace_id}/knowledge              — index a Drive file
-  GET    /api/workspaces/{workspace_id}/knowledge              — list all indexed files
-  DELETE /api/workspaces/{workspace_id}/knowledge/{kid}        — remove a file from the index
-  GET    /api/workspaces/{workspace_id}/drive/picker-token     — mint a Google Picker access token
+  GET    /api/workspaces/{workspace_id}/knowledge              — list all documents
+  DELETE /api/workspaces/{workspace_id}/knowledge/{kid}        — remove a document
+  GET    /api/workspaces/{workspace_id}/drive/picker-token     — mint a Picker access token
+  POST   /api/workspaces/{workspace_id}/knowledge/reindex      — re-index Drive documents
+  POST   /api/workspaces/{workspace_id}/documents              — create an agent/upload document
 
 ADR compliance:
   - ADR-005: Drive content read at index time (real-time, not cached).
   - ADR-006: AI description generated at index time, stored in DB, re-generated on hash change.
-  - ADR-007: 15-file hard cap enforced at the route level.
+  - ADR-007: 15-document hard cap enforced at the route level (count check) and DB trigger.
   - ADR-016: Supported MIME types list — only 6 types accepted.
   - ADR-002/009: Refresh token encrypted, never logged; access tokens are transient.
 
@@ -20,13 +26,13 @@ Import notes (FLASHCARDS.md):
   - ``import app.services.drive_service as _drive_service`` and
     ``import app.services.scan_service as _scan_service`` similarly so tests can patch
     individual functions on the module object.
+  - ``import app.services.document_service as _document_service`` for the same reason.
+  - SHA-256 is used for content hashing (sprint-context rule; document_service.compute_content_hash).
 """
 
 import asyncio
 import inspect
 import logging
-import uuid
-from datetime import datetime
 
 import httpx  # MUST be at module level — tests monkeypatch httpx.AsyncClient (FLASHCARDS.md)
 
@@ -34,11 +40,12 @@ from fastapi import APIRouter, Depends, HTTPException
 
 import app.core.db as _db  # module import so monkeypatch works (FLASHCARDS.md)
 import app.services.drive_service as _drive_service  # module import for monkeypatching
+import app.services.document_service as _document_service  # module import for monkeypatching
 import app.services.scan_service as _scan_service  # module import for monkeypatching
 from app.api.deps import get_current_user_id
 from app.core.config import get_settings
 import app.core.encryption as _enc  # module import so monkeypatch works
-from app.models.knowledge import IndexFileRequest
+from app.models.knowledge import CreateDocumentRequest, IndexFileRequest
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +62,20 @@ ALLOWED_MIME_TYPES = {
     "application/pdf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
+
+# ---------------------------------------------------------------------------
+# R2: MIME type → doc_type mapping (ADR-016)
+# Maps Google/Office MIME types to the doc_type enum values in teemo_documents.
+# ---------------------------------------------------------------------------
+
+MIME_TO_DOC_TYPE: dict[str, str] = {
+    "application/vnd.google-apps.document": "google_doc",
+    "application/pdf": "pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+    "application/vnd.google-apps.spreadsheet": "google_sheet",
+    "application/vnd.google-apps.presentation": "google_slides",
 }
 
 # ---------------------------------------------------------------------------
@@ -133,21 +154,20 @@ async def index_file(
     payload: IndexFileRequest,
     user_id: str = Depends(get_current_user_id),
 ) -> dict:
-    """Index a Google Drive file into the workspace knowledge store.
+    """Index a Google Drive file into the workspace knowledge store (teemo_documents).
 
     Workflow:
       1. Assert workspace ownership (404 if not owner).
       2. Check Drive connection (encrypted refresh token) — 400 if missing.
       3. Check BYOK API key — 400 if missing.
       4. Validate MIME type against ADR-016 allowed set — 400 if unsupported.
-      5. Acquire per-workspace asyncio.Lock (R8: sequential indexing).
-      6. Count existing files — 400 if >= 15 (ADR-007 hard cap).
-      7. Check for duplicate drive_file_id — 409 if already indexed.
+      5. Acquire per-workspace asyncio.Lock (R8: sequential indexing queue).
+      6. Count existing documents — 400 if >= 15 (ADR-007 hard cap).
+      7. Check for duplicate external_id (drive_file_id) — 409 if already indexed.
       8. Fetch file content from Drive (get_drive_client + fetch_file_content).
-      9. Compute content hash (compute_content_hash).
-      10. Generate AI description (generate_ai_description with BYOK key).
-      11. Insert row into teemo_knowledge_index.
-      12. Add truncation warning to response if content was truncated.
+      9. Call document_service.create_document with source='google_drive' and mapped doc_type.
+         (document_service handles SHA-256 hash + AI description internally.)
+      10. Add truncation warning to response if content was truncated.
 
     Args:
         workspace_id: Path parameter — target workspace UUID.
@@ -155,7 +175,7 @@ async def index_file(
         user_id: Injected by get_current_user_id; raises 401 if missing/invalid.
 
     Returns:
-        The newly created knowledge index row as a dict, with an optional
+        The newly created document row as a dict, with an optional
         ``warning`` field if the file content was truncated.
 
     Raises:
@@ -189,11 +209,13 @@ async def index_file(
     # Step 5: Acquire workspace lock (R8: sequential indexing queue)
     lock = _get_workspace_lock(workspace_id)
     async with lock:
-        # Step 6: 15-file cap check (ADR-007) — inside lock to prevent TOCTOU
+        supabase = _db.get_supabase()
+
+        # Step 6: 15-document cap check (ADR-007) — inside lock to prevent TOCTOU
         count_result = (
-            _db.get_supabase()
-            .table("teemo_knowledge_index")
-            .select("id", count="exact")
+            supabase
+            .table("teemo_documents")
+            .select("*", count="exact")
             .eq("workspace_id", workspace_id)
             .execute()
         )
@@ -204,13 +226,13 @@ async def index_file(
                 detail="Maximum 15 files per workspace. Remove a file before adding another.",
             )
 
-        # Step 7: Duplicate check
+        # Step 7: Duplicate check — look for an existing document with the same external_id
         dup_result = (
-            _db.get_supabase()
-            .table("teemo_knowledge_index")
+            supabase
+            .table("teemo_documents")
             .select("id")
             .eq("workspace_id", workspace_id)
-            .eq("drive_file_id", payload.drive_file_id)
+            .eq("external_id", payload.drive_file_id)
             .limit(1)
             .execute()
         )
@@ -237,39 +259,21 @@ async def index_file(
                 _fetch, drive_client, payload.drive_file_id, payload.mime_type
             )
 
-        # Step 9: Compute content hash for change-detection (ADR-006)
-        content_hash = _drive_service.compute_content_hash(content)
-
-        # Step 10: Generate AI description with BYOK key (ADR-004/006)
-        provider = workspace.get("ai_provider", "anthropic")
-        api_key_plaintext = _enc.decrypt(encrypted_api_key)
-        ai_description = await _scan_service.generate_ai_description(
-            content, provider, api_key_plaintext
+        # Step 9: Map MIME type to doc_type and create document via document_service.
+        # document_service handles SHA-256 hash + AI description generation internally.
+        doc_type = MIME_TO_DOC_TYPE.get(payload.mime_type, "pdf")
+        response_row = await _document_service.create_document(
+            supabase=supabase,
+            workspace_id=workspace_id,
+            title=payload.title,
+            content=content,
+            doc_type=doc_type,
+            source="google_drive",
+            external_id=payload.drive_file_id,
+            external_link=payload.link,
         )
 
-        # Step 11: Insert into teemo_knowledge_index
-        new_id = str(uuid.uuid4())
-        row = {
-            "id": new_id,
-            "workspace_id": workspace_id,
-            "drive_file_id": payload.drive_file_id,
-            "title": payload.title,
-            "link": payload.link,
-            "mime_type": payload.mime_type,
-            "ai_description": ai_description,
-            "content_hash": content_hash,
-            "cached_content": content,  # STORY-006-10: cache extracted content at index time
-        }
-        insert_result = (
-            _db.get_supabase()
-            .table("teemo_knowledge_index")
-            .insert(row)
-            .execute()
-        )
-
-        response_row = insert_result.data[0] if insert_result.data else row
-
-    # Step 12: Add truncation warning if content was truncated by drive_service
+    # Step 10: Add truncation warning if content was truncated by drive_service
     # drive_service._TRUNCATION_NOTICE is appended when content > 50,000 chars (ADR-016).
     if "[Content truncated" in content:
         response_row = dict(response_row)
@@ -282,7 +286,7 @@ async def index_file(
 
 
 # ---------------------------------------------------------------------------
-# GET /api/workspaces/{workspace_id}/knowledge — list indexed files
+# GET /api/workspaces/{workspace_id}/knowledge — list documents
 # ---------------------------------------------------------------------------
 
 
@@ -291,31 +295,23 @@ async def list_knowledge(
     workspace_id: str,
     user_id: str = Depends(get_current_user_id),
 ) -> list:
-    """Return all indexed files for a workspace, ordered by created_at descending.
+    """Return all documents for a workspace, ordered by created_at descending.
+
+    Delegates to document_service.list_documents which queries teemo_documents.
 
     Args:
         workspace_id: Path parameter — target workspace UUID.
         user_id: Injected by get_current_user_id; raises 401 if missing/invalid.
 
     Returns:
-        List of knowledge index row dicts, newest first. Empty list if none indexed.
+        List of document row dicts, newest first. Empty list if none exist.
 
     Raises:
         HTTPException(401): No valid auth cookie/token.
         HTTPException(404): Workspace not found or not owned by user.
     """
     await _assert_workspace_owner(workspace_id, user_id)
-
-    result = (
-        _db.get_supabase()
-        .table("teemo_knowledge_index")
-        .select("*")
-        .eq("workspace_id", workspace_id)
-        .order("created_at", desc=True)
-        .execute()
-    )
-
-    return result.data or []
+    return await _document_service.list_documents(_db.get_supabase(), workspace_id)
 
 
 # ---------------------------------------------------------------------------
@@ -329,14 +325,14 @@ async def delete_knowledge(
     knowledge_id: str,
     user_id: str = Depends(get_current_user_id),
 ) -> dict:
-    """Remove a file from the workspace knowledge index.
+    """Remove a document from the workspace knowledge store.
 
-    Deletes the row where both id=knowledge_id AND workspace_id=workspace_id
-    so a user cannot delete files from workspaces they don't own (scoped delete).
+    The knowledge_id path parameter is the document UUID (``teemo_documents.id``).
+    Delegates to document_service.delete_document for workspace-scoped deletion.
 
     Args:
         workspace_id: Path parameter — owning workspace UUID.
-        knowledge_id: Path parameter — knowledge index row UUID to delete.
+        knowledge_id: Path parameter — document UUID to delete.
         user_id: Injected by get_current_user_id; raises 401 if missing/invalid.
 
     Returns:
@@ -347,11 +343,7 @@ async def delete_knowledge(
         HTTPException(404): Workspace not found or not owned by user.
     """
     await _assert_workspace_owner(workspace_id, user_id)
-
-    _db.get_supabase().table("teemo_knowledge_index").delete().eq(
-        "id", knowledge_id
-    ).eq("workspace_id", workspace_id).execute()
-
+    await _document_service.delete_document(_db.get_supabase(), workspace_id, knowledge_id)
     return {"status": "deleted"}
 
 
@@ -430,7 +422,7 @@ async def get_picker_token(
 
 
 # ---------------------------------------------------------------------------
-# POST /api/workspaces/{workspace_id}/knowledge/reindex — re-extract all files
+# POST /api/workspaces/{workspace_id}/knowledge/reindex — re-extract Drive docs
 # ---------------------------------------------------------------------------
 
 
@@ -439,12 +431,15 @@ async def reindex_knowledge(
     workspace_id: str,
     user_id: str = Depends(get_current_user_id),
 ) -> dict:
-    """Re-extract content and regenerate AI descriptions for all indexed files.
+    """Re-extract content and regenerate AI descriptions for Google Drive documents.
 
-    Iterates all rows in ``teemo_knowledge_index`` for the workspace, re-fetches
-    each file from Google Drive, recomputes the content hash, regenerates the AI
-    description, and updates the row in Supabase (via ``.update()``, not
-    ``.upsert()`` — these are existing rows).
+    Only processes documents with ``source='google_drive'``. Documents with
+    ``source='upload'`` or ``source='agent'`` are untouched — they have no
+    corresponding Drive file to re-fetch.
+
+    Iterates all google_drive documents for the workspace, re-fetches each file
+    from Google Drive, recomputes the SHA-256 content hash, regenerates the AI
+    description, and updates the row via document_service.update_document.
 
     Per-file errors are caught and collected in the ``errors`` list so a single
     failing file does not abort the entire re-index run.
@@ -487,12 +482,15 @@ async def reindex_knowledge(
     # Build the Drive client once for all files
     drive_client = _drive_service.get_drive_client(encrypted_refresh_token)
 
-    # Fetch all indexed files for this workspace
+    supabase = _db.get_supabase()
+
+    # Fetch only Google Drive documents — skip upload/agent sources (R1/reindex spec)
     list_result = (
-        _db.get_supabase()
-        .table("teemo_knowledge_index")
+        supabase
+        .table("teemo_documents")
         .select("*")
         .eq("workspace_id", workspace_id)
+        .eq("source", "google_drive")
         .execute()
     )
     file_rows = list_result.data or []
@@ -502,37 +500,30 @@ async def reindex_knowledge(
     errors: list[dict] = []
 
     for file_row in file_rows:
-        file_id = file_row.get("drive_file_id", "")
+        file_id = file_row.get("external_id", "")
+        doc_id = file_row.get("id", "")
+        mime_type = file_row.get("metadata", {}).get("mime_type") or ""
         try:
             # Re-fetch content from Drive
             # fetch_file_content returns _AwaitableStr — use inspect.isawaitable to handle both
             # sync and async return values (FLASHCARDS.md / STORY-006-08 pattern).
             _result = _drive_service.fetch_file_content(
                 drive_client,
-                file_row["drive_file_id"],
-                file_row["mime_type"],
+                file_id,
+                mime_type,
                 provider=provider,
                 api_key=api_key_plaintext,
             )
             content = (await _result) if inspect.isawaitable(_result) else _result
 
-            # Recompute content hash
-            content_hash = _drive_service.compute_content_hash(content)
-
-            # Regenerate AI description
-            ai_description = await _scan_service.generate_ai_description(
-                content, provider, api_key_plaintext
+            # Update the document via document_service — recomputes SHA-256 hash and
+            # regenerates AI description; resets sync_status to 'pending'.
+            await _document_service.update_document(
+                supabase=supabase,
+                workspace_id=workspace_id,
+                document_id=doc_id,
+                content=content,
             )
-
-            # Update the existing row — use .update() not .upsert() (existing rows)
-            _db.get_supabase().table("teemo_knowledge_index").update(
-                {
-                    "cached_content": content,
-                    "content_hash": content_hash,
-                    "ai_description": ai_description,
-                    "last_scanned_at": datetime.utcnow().isoformat(),
-                }
-            ).eq("id", file_row["id"]).execute()
 
             reindexed += 1
 
@@ -547,3 +538,54 @@ async def reindex_knowledge(
             errors.append({"file_id": file_id, "error": str(exc)})
 
     return {"reindexed": reindexed, "failed": failed, "errors": errors}
+
+
+# ---------------------------------------------------------------------------
+# POST /api/workspaces/{workspace_id}/documents — create an agent/upload document
+# ---------------------------------------------------------------------------
+
+
+@router.post("/api/workspaces/{workspace_id}/documents")
+async def create_document(
+    workspace_id: str,
+    payload: CreateDocumentRequest,
+    user_id: str = Depends(get_current_user_id),
+) -> dict:
+    """Create a document with source='agent' and doc_type='markdown'.
+
+    Accepts a title and content body, creates a row in teemo_documents via
+    document_service.create_document. Used by agent tools (STORY-015-03) and
+    is also available as a public API endpoint for programmatic document creation.
+
+    Args:
+        workspace_id: Path parameter — target workspace UUID.
+        payload: Request body containing title and content.
+        user_id: Injected by get_current_user_id; raises 401 if missing/invalid.
+
+    Returns:
+        The created document row as a dict.
+
+    Raises:
+        HTTPException(401): No valid auth cookie/token.
+        HTTPException(404): Workspace not found or not owned by user.
+        HTTPException(400): Document cap exceeded (DB trigger fires).
+    """
+    await _assert_workspace_owner(workspace_id, user_id)
+    try:
+        doc = await _document_service.create_document(
+            supabase=_db.get_supabase(),
+            workspace_id=workspace_id,
+            title=payload.title,
+            content=payload.content,
+            doc_type="markdown",
+            source="agent",
+        )
+    except Exception as exc:  # noqa: BLE001
+        # DB trigger fires when cap is exceeded — surface as 400
+        logger.warning(
+            "create_document: failed for workspace %s: %s",
+            workspace_id,
+            exc,
+        )
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return doc

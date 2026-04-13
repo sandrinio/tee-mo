@@ -376,7 +376,7 @@ function FilesStepContent({ workspaceId }: { workspaceId: string }) {
             {files.map((f) => (
               <li key={f.id} className="py-3 flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
-                  <a href={f.link} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-brand-500 hover:underline truncate block">
+                  <a href={f.external_link ?? f.link ?? undefined} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-brand-500 hover:underline truncate block">
                     {f.title}
                   </a>
                   {f.ai_description && (

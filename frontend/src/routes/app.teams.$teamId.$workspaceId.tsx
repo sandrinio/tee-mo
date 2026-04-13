@@ -35,12 +35,13 @@ import { useState, useCallback } from 'react';
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
+import { Badge } from '../components/ui/Badge';
 import { Card } from '../components/ui/Card';
 import { useWorkspaceQuery } from '../hooks/useWorkspaces';
 import { useKeyQuery } from '../hooks/useKey';
 import { useDriveStatusQuery, useDisconnectDriveMutation } from '../hooks/useDrive';
 import { useKnowledgeQuery, useAddKnowledgeMutation, useRemoveKnowledgeMutation, useReindexKnowledgeMutation } from '../hooks/useKnowledge';
-import { getPickerToken, deleteWorkspace, type KnowledgeFile } from '../lib/api';
+import { getPickerToken, deleteWorkspace, type KnowledgeFile, type DocumentSource } from '../lib/api';
 import { SetupStepper } from '../components/workspace/SetupStepper';
 import { ChannelSection } from '../components/workspace/ChannelSection';
 
@@ -91,18 +92,77 @@ function loadGapiScript(): Promise<void> {
 }
 
 /**
- * Returns a human-readable file type label derived from a Google Drive MIME type.
- * Used in the KnowledgeList table to give a visual type indicator without icons.
+ * Returns a human-readable file type label derived from the `doc_type` field
+ * (STORY-015-02 canonical field) or the legacy `mime_type` string (fallback for
+ * records created before the teemo_documents migration).
  *
- * @param mimeType - MIME type string from Google Drive.
- * @returns Short label string, e.g. "Doc", "Sheet", "Slide", "PDF", "File".
+ * @param docType  - doc_type value from the new API shape, e.g. "google_doc".
+ * @param mimeType - MIME type string from the legacy API shape (fallback).
+ * @returns Short label string, e.g. "Doc", "Sheet", "Slide", "PDF", "MD", "File".
  */
-function mimeTypeLabel(mimeType: string): string {
-  if (mimeType.includes('document')) return 'Doc';
-  if (mimeType.includes('spreadsheet')) return 'Sheet';
-  if (mimeType.includes('presentation')) return 'Slide';
-  if (mimeType === 'application/pdf') return 'PDF';
+function docTypeLabel(docType: string | null | undefined, mimeType: string | null | undefined): string {
+  // Prefer new canonical doc_type field
+  if (docType) {
+    switch (docType) {
+      case 'google_doc':     return 'Doc';
+      case 'google_sheet':   return 'Sheet';
+      case 'google_slides':  return 'Slide';
+      case 'pdf':            return 'PDF';
+      case 'docx':           return 'DOCX';
+      case 'xlsx':           return 'XLSX';
+      case 'markdown':       return 'MD';
+      default:               return docType.toUpperCase().slice(0, 6);
+    }
+  }
+  // Fall back to legacy mime_type for old records
+  if (mimeType) {
+    if (mimeType.includes('document'))     return 'Doc';
+    if (mimeType.includes('spreadsheet'))  return 'Sheet';
+    if (mimeType.includes('presentation')) return 'Slide';
+    if (mimeType === 'application/pdf')    return 'PDF';
+  }
   return 'File';
+}
+
+/**
+ * Returns the Badge variant and label text for a document source.
+ *
+ * Source badge design (Design Guide §2.2 — functional color only):
+ *   - `google_drive` → neutral/slate — understated, already has a link icon
+ *   - `upload`       → info/sky — subtle blue to distinguish from Drive
+ *   - `agent`        → no built-in brand variant, so we use `info` with a
+ *                       purple-ish override via className (brand is reserved
+ *                       for primary CTAs — using a separate `agent` visual
+ *                       without violating the "one accent per screen" rule)
+ *
+ * NOTE: The Badge component only supports 5 semantic variants (success, warning,
+ * danger, info, neutral). `agent` maps to `info` variant with a className override
+ * so as not to add a new variant to the shared component.
+ *
+ * @param source - DocumentSource value from the API response.
+ * @returns Object with Badge `variant` and `label` string.
+ */
+function sourceBadgeProps(source: DocumentSource | null): {
+  variant: 'neutral' | 'info';
+  label: string;
+  className?: string;
+} {
+  switch (source) {
+    case 'google_drive':
+      return { variant: 'neutral', label: 'Drive' };
+    case 'upload':
+      return { variant: 'info', label: 'Upload' };
+    case 'agent':
+      // Purple tint for agent-created docs without adding a new Badge variant.
+      // Uses inline Tailwind overrides — stays within Tailwind 4 built-ins.
+      return {
+        variant: 'info',
+        label: 'Agent',
+        className: '!bg-purple-50 !text-purple-700 [&>span]:!bg-purple-400',
+      };
+    default:
+      return { variant: 'neutral', label: 'File' };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -409,19 +469,24 @@ interface KnowledgeListProps {
 }
 
 /**
- * KnowledgeList — table of indexed knowledge files with Remove actions.
+ * KnowledgeList — cards of indexed knowledge documents with source badges and Remove actions.
  *
- * Columns: Title (link to Drive), AI Description (truncated ~100 chars),
- * Type label, Remove button.
+ * Each document card shows (STORY-015-06):
+ *   - Source badge (Drive / Upload / Agent) derived from `file.source`.
+ *   - Title as an external link when `file.external_link` is present (Drive docs only).
+ *     Upload and agent documents render the title as plain text — no link icon.
+ *   - AI description truncated to ~100 characters.
+ *   - Remove button (all document types deletable — backend enforces ownership).
+ *
+ * Legacy `mime_type` / `link` fields from STORY-006-03 are supported via the
+ * backward-compat fields on `KnowledgeFile` — the component prefers the new
+ * fields (`external_link`, `source`) and falls back to old ones gracefully.
  *
  * Empty state: "No files indexed yet. Use the picker above to add files."
  * Loading state: skeleton rows.
  *
- * Remove button calls useRemoveKnowledgeMutation and the list updates
- * automatically via query cache invalidation on success.
- *
  * @param workspaceId - UUID of the workspace (used by remove mutation).
- * @param files       - Array of knowledge file records to display.
+ * @param files       - Array of knowledge document records to display.
  * @param isLoading   - Whether the knowledge query is loading.
  */
 function KnowledgeList({ workspaceId, files, isLoading }: KnowledgeListProps) {
@@ -452,58 +517,82 @@ function KnowledgeList({ workspaceId, files, isLoading }: KnowledgeListProps) {
 
   return (
     <div className="space-y-2">
-      {files.map((file) => (
-        <Card key={file.id} className="p-4">
-          <div className="flex items-start justify-between gap-4">
-            {/* File info */}
-            <div className="min-w-0 flex-1">
-              {/* Title + type badge */}
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-xs bg-slate-100 text-slate-600 rounded px-1.5 py-0.5 font-semibold shrink-0">
-                  {mimeTypeLabel(file.mime_type)}
-                </span>
-                <a
-                  href={file.link}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm font-semibold text-slate-900 truncate hover:text-rose-500"
-                >
-                  {file.title}
-                </a>
+      {files.map((file) => {
+        // Resolve canonical link — prefer new `external_link`, fall back to legacy `link`.
+        const externalLink = file.external_link ?? file.link ?? null;
+        // Resolve source badge props. Fall back to 'google_drive' when source is missing
+        // and a legacy link exists (old Drive records pre-015-02 migration).
+        const effectiveSource: DocumentSource | null =
+          file.source ?? (externalLink ? 'google_drive' : null);
+        const { variant, label, className: badgeClassName } = sourceBadgeProps(effectiveSource);
+
+        return (
+          <Card key={file.id} className="p-4">
+            <div className="flex items-start justify-between gap-4">
+              {/* Document info */}
+              <div className="min-w-0 flex-1">
+                {/* Source badge + title row (R2, R3) */}
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                  {/* Source badge — Drive / Upload / Agent (R2) */}
+                  <Badge variant={variant} className={`shrink-0 ${badgeClassName ?? ''}`}>
+                    {label}
+                  </Badge>
+
+                  {/* Document type label — Doc / Sheet / Slide / PDF / MD / etc. */}
+                  <span className="text-xs bg-slate-100 text-slate-600 rounded px-1.5 py-0.5 font-semibold shrink-0">
+                    {docTypeLabel(file.doc_type, file.mime_type)}
+                  </span>
+
+                  {/* Title: link for Drive docs (external_link present), plain text otherwise */}
+                  {externalLink ? (
+                    <a
+                      href={externalLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm font-semibold text-slate-900 truncate hover:text-rose-500 min-w-0"
+                    >
+                      {file.title}
+                    </a>
+                  ) : (
+                    <span className="text-sm font-semibold text-slate-900 truncate min-w-0">
+                      {file.title}
+                    </span>
+                  )}
+                </div>
+
+                {/* AI description (truncated to ~100 chars) */}
+                {file.ai_description && (
+                  <p className="text-xs text-slate-500 line-clamp-2">
+                    {file.ai_description.length > 100
+                      ? `${file.ai_description.slice(0, 100)}…`
+                      : file.ai_description}
+                  </p>
+                )}
               </div>
 
-              {/* AI description (truncated) */}
-              {file.ai_description && (
-                <p className="text-xs text-slate-500 line-clamp-2">
-                  {file.ai_description.length > 100
-                    ? `${file.ai_description.slice(0, 100)}…`
-                    : file.ai_description}
-                </p>
-              )}
+              {/* Remove button — all document types are deletable (R4) */}
+              <button
+                type="button"
+                onClick={() => removeMutation.mutate(file.id)}
+                disabled={removeMutation.isPending}
+                className="shrink-0 text-xs font-semibold text-rose-500 hover:opacity-70 disabled:opacity-40"
+                aria-label={`Remove ${file.title}`}
+              >
+                {removeMutation.isPending ? 'Removing…' : 'Remove'}
+              </button>
             </div>
 
-            {/* Remove button */}
-            <button
-              type="button"
-              onClick={() => removeMutation.mutate(file.id)}
-              disabled={removeMutation.isPending}
-              className="shrink-0 text-xs font-semibold text-rose-500 hover:opacity-70 disabled:opacity-40"
-              aria-label={`Remove ${file.title}`}
-            >
-              {removeMutation.isPending ? 'Removing…' : 'Remove'}
-            </button>
-          </div>
-
-          {/* Remove error */}
-          {removeMutation.error && (
-            <p className="mt-1 text-xs text-rose-600" role="alert">
-              {removeMutation.error instanceof Error
-                ? removeMutation.error.message
-                : 'Failed to remove file.'}
-            </p>
-          )}
-        </Card>
-      ))}
+            {/* Remove error */}
+            {removeMutation.error && (
+              <p className="mt-1 text-xs text-rose-600" role="alert">
+                {removeMutation.error instanceof Error
+                  ? removeMutation.error.message
+                  : 'Failed to remove file.'}
+              </p>
+            )}
+          </Card>
+        );
+      })}
     </div>
   );
 }

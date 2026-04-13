@@ -36,6 +36,11 @@ from urllib.parse import urlparse
 
 import httpx
 
+from pydantic_ai import RunContext
+
+from app.services import document_service as _doc_service
+from app.services import wiki_service as _wiki_service
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -226,23 +231,46 @@ def _build_pydantic_ai_model(model_id: str, provider: str, api_key: str) -> Any:
 
 def _build_system_prompt(
     skills: list[dict],
-    knowledge_files: list[dict] | None = None,
+    documents: list[dict] | None = None,
+    wiki_pages: list[dict] | None = None,
 ) -> str:
     """Assemble the system prompt for the Tee-Mo agent.
 
-    Combines a static identity preamble with an optional skill catalog section
-    and an optional file catalog section. Sections are only included when the
-    workspace has at least one active skill or indexed file respectively —
-    omitting them entirely when empty prevents the LLM from being confused by
-    empty catalog headers.
+    Combines a static identity preamble with an optional skill catalog section,
+    an optional wiki index section, and an optional document catalog section.
+    Sections are only included when the workspace has relevant data — omitting
+    empty sections prevents the LLM from being confused by empty catalog headers.
+
+    Updated in STORY-015-03 to use ``teemo_documents`` (UUID-based) instead of
+    the legacy ``teemo_knowledge_index``. The document catalog section is titled
+    ``## Available Documents``.
+
+    Updated in STORY-013-01 to add wiki index support. When ``wiki_pages`` is
+    non-empty, a ``## Wiki Index`` section is rendered above the document
+    catalog. Use ``read_wiki_page(slug)`` to retrieve full page content.
+
+    Wiki index logic (STORY-013-01 R3):
+      - When ``wiki_pages`` is non-empty: render ``## Wiki Index`` with one
+        entry per page in ``[{slug}] {title} — {tldr}`` format. Wiki pages
+        provide structured, AI-synthesized knowledge and should be the primary
+        answer source.
+      - ``## Available Documents`` is rendered as an ADDITIONAL section
+        alongside the wiki index, providing fallback access for exact quotes
+        and data points not covered by wiki pages.
+      - When ``wiki_pages`` is empty/None and ``documents`` is non-empty:
+        only ``## Available Documents`` appears (transitional behavior before
+        wiki ingest runs).
 
     Args:
-        skills:          List of skill dicts with ``name`` and ``summary`` keys,
-                         as returned by skill_service.list_skills(). May be empty.
-        knowledge_files: Optional list of knowledge index dicts with
-                         ``drive_file_id``, ``title``, and ``ai_description``
-                         keys, as returned from teemo_knowledge_index. May be
-                         None or empty when no files are indexed.
+        skills:     List of skill dicts with ``name`` and ``summary`` keys,
+                    as returned by skill_service.list_skills(). May be empty.
+        documents:  Optional list of document dicts with ``id``, ``title``,
+                    and ``ai_description`` keys, as returned from
+                    teemo_documents. May be None or empty.
+        wiki_pages: Optional list of wiki page dicts with ``slug``, ``title``,
+                    and ``tldr`` keys, as returned from teemo_wiki_pages. When
+                    non-empty, the wiki index section is rendered above the
+                    document catalog.
 
     Returns:
         A fully assembled system prompt string.
@@ -273,7 +301,10 @@ def _build_system_prompt(
         "- *http_request(method, url, ...)*: Make raw HTTP requests to APIs. Use this when you need "
         "custom headers (e.g. Authorization tokens), non-GET methods (POST, PUT, DELETE), "
         "or need to work with structured API responses (JSON). Best for authenticated API calls, "
-        "webhooks, and data retrieval from REST endpoints."
+        "webhooks, and data retrieval from REST endpoints.\n"
+        "- *read_wiki_page(slug)*: Retrieve the full content of a wiki page by its slug. "
+        "Use this to answer questions using your workspace knowledge base. "
+        "Available slugs are listed in the Wiki Index section (when present)."
     )
 
     prompt = preamble
@@ -284,12 +315,26 @@ def _build_system_prompt(
         )
         prompt += f"\n\n## Available Skills\n{skill_lines}"
 
-    if knowledge_files:
-        file_lines = "\n".join(
-            f"- [{f['drive_file_id']}] \"{f['title']}\" — {f['ai_description']}"
-            for f in knowledge_files
+    if wiki_pages:
+        # Wiki index is present — render it as the primary knowledge catalog.
+        # STORY-013-01 R3: format is "- [{slug}] {title} — {tldr}"
+        wiki_lines = "\n".join(
+            f"- [{p['slug']}] {p['title']} — {p.get('tldr', '')}"
+            for p in wiki_pages
         )
-        prompt += f"\n\n## Available Files\n{file_lines}"
+        prompt += f"\n\n## Wiki Index\n{wiki_lines}"
+
+    if documents:
+        doc_lines = "\n".join(
+            f"- [{d['id']}] \"{d['title']}\" — {d.get('ai_description') or 'No description available.'}"
+            for d in documents
+        )
+        prompt += f"\n\n## Available Documents\n{doc_lines}"
+        prompt += (
+            "\n\nPrefer wiki pages (`read_wiki_page`) for answering questions when available. "
+            "Use `read_document` when you need exact quotes, specific data points, or the wiki "
+            "doesn't cover the topic yet. Only create documents when the user explicitly asks you to."
+        )
 
     return prompt
 
@@ -318,11 +363,12 @@ async def build_agent(
       5. Lazy-import model/provider classes for the provider.
       6. Instantiate the pydantic-ai model via _build_pydantic_ai_model.
       7. Fetch active skills via skill_service.list_skills.
-      7.5. Fetch knowledge file catalog from teemo_knowledge_index.
-      8. Assemble system prompt with optional skill + file catalogs.
+      7.5. Fetch wiki pages and document catalog for system prompt.
+      8. Assemble system prompt with optional skill + wiki/document catalogs.
       9. Build 4 skill tool functions (load_skill, create_skill, update_skill, delete_skill).
       10. Build web tools (web_search, crawl_page, http_request).
-      11.5. Build read_drive_file tool (Drive content fetch with self-healing).
+      11.5. Build document CRUD tools (read_document, create_document, update_document, delete_document).
+      11.6. Build read_wiki_page tool.
       12. Construct and return (Agent, AgentDeps).
 
     Args:
@@ -381,29 +427,41 @@ async def build_agent(
     # --- 7. Fetch skills ---
     skills = list_skills(workspace_id, supabase)
 
-    # --- 7.5. Fetch knowledge files for system prompt ---
-    # Query teemo_knowledge_index to build the file catalog injected into the
-    # system prompt (ADR-005: real-time retrieval — agent picks file by
-    # ai_description, then calls read_drive_file to fetch content on-demand).
-    knowledge_result = (
-        supabase.table("teemo_knowledge_index")
-        .select("drive_file_id, title, ai_description")
+    # --- 7.5. Fetch wiki pages and document catalog for system prompt ---
+    # STORY-013-01 R3: Query teemo_wiki_pages first. When pages exist, the wiki
+    # index is rendered in the system prompt as the primary knowledge section.
+    # The document catalog (## Available Documents) is rendered alongside as
+    # a fallback for exact quotes and data not yet covered by wiki pages.
+    wiki_result = (
+        supabase.table("teemo_wiki_pages")
+        .select("slug, title, tldr")
+        .eq("workspace_id", workspace_id)
+        .execute()
+    )
+    raw_wiki_pages = wiki_result.data
+    wiki_pages: list[dict] = raw_wiki_pages if isinstance(raw_wiki_pages, list) else []
+
+    # Query teemo_documents for the document catalog.
+    # STORY-015-03: replaces legacy teemo_knowledge_index query.
+    docs_result = (
+        supabase.table("teemo_documents")
+        .select("id, title, ai_description")
         .eq("workspace_id", workspace_id)
         .execute()
     )
     # Guard against mocks or unexpected non-list data from the DB client.
-    raw_files = knowledge_result.data
-    knowledge_files: list[dict] = raw_files if isinstance(raw_files, list) else []
+    raw_docs = docs_result.data
+    documents: list[dict] = raw_docs if isinstance(raw_docs, list) else []
 
     # --- 8. Build system prompt ---
-    prompt = _build_system_prompt(skills, knowledge_files)
+    prompt = _build_system_prompt(skills, documents, wiki_pages)
 
     # --- 9. Build skill tool functions ---
     # Tools are defined as closures capturing (workspace_id, supabase) from
     # the factory's scope. pydantic-ai will introspect the function signature
     # to determine parameter names when the LLM calls them.
 
-    async def load_skill(ctx: Any, skill_name: str) -> str:
+    async def load_skill(ctx: RunContext[AgentDeps], skill_name: str) -> str:
         """Load detailed workflow instructions for a named skill.
 
         Args:
@@ -423,7 +481,7 @@ async def build_agent(
         return f"## Skill: {skill['name']}\n\n{skill['instructions']}"
 
     async def create_skill(
-        ctx: Any,
+        ctx: RunContext[AgentDeps],
         name: str,
         summary: str,
         instructions: str,
@@ -455,7 +513,7 @@ async def build_agent(
             return f"Failed to create skill: {exc}"
 
     async def update_skill(
-        ctx: Any,
+        ctx: RunContext[AgentDeps],
         skill_name: str,
         summary: str | None = None,
         instructions: str | None = None,
@@ -483,7 +541,7 @@ async def build_agent(
             logger.error("[AGENT] update_skill unexpected error: %s", exc)
             return f"Failed to update skill: {exc}"
 
-    async def delete_skill(ctx: Any, skill_name: str) -> str:
+    async def delete_skill(ctx: RunContext[AgentDeps], skill_name: str) -> str:
         """Delete a workspace skill by name.
 
         Args:
@@ -505,7 +563,7 @@ async def build_agent(
 
     # --- 10. Web search tools (SearXNG + Crawl4AI) ---
 
-    async def web_search(ctx: Any, query: str) -> str:
+    async def web_search(ctx: RunContext[AgentDeps], query: str) -> str:
         """Search the web for information.
 
         Args:
@@ -531,7 +589,7 @@ async def build_agent(
         except (httpx.TimeoutException, httpx.ConnectError) as e:
             return f"Search service unavailable: {e}"
 
-    async def crawl_page(ctx: Any, url: str) -> str:
+    async def crawl_page(ctx: RunContext[AgentDeps], url: str) -> str:
         """Fetch a web page and return its content as markdown.
 
         Args:
@@ -560,7 +618,7 @@ async def build_agent(
     # --- 11. HTTP request tool (authenticated API calls) ---
 
     async def http_request(
-        ctx: Any,
+        ctx: RunContext[AgentDeps],
         method: str,
         url: str,
         headers: dict[str, str] | None = None,
@@ -604,121 +662,244 @@ async def build_agent(
         except httpx.ConnectError as e:
             return f"Connection failed: {e}"
 
-    # --- 11.5. Drive file reader tool ---
-    async def read_drive_file(ctx: Any, drive_file_id: str) -> str:
-        """Read a file from the workspace's Google Drive knowledge base.
+    # --- 11.5. Document CRUD tools (STORY-015-03) ---
 
-        Fetches the file content from Drive, checks for content changes
-        (self-healing), and returns the plain text content to the agent.
-        If the file has changed since the last scan, re-generates the AI
-        description automatically and upserts the updated row into
-        teemo_knowledge_index.
+    async def read_document(ctx: RunContext[AgentDeps], document_id: str) -> str:
+        """Read a document from the workspace's knowledge base by UUID.
 
-        Workspace isolation is enforced: only files indexed under the
-        calling workspace's teemo_knowledge_index rows are accessible.
+        Fetches the ``content`` column from ``teemo_documents`` using the
+        document's UUID. Works for all document sources (Google Drive,
+        upload, agent-created). Workspace isolation is enforced via the
+        workspace_id filter in document_service.
+
+        This tool replaces the legacy ``read_drive_file`` tool which required
+        a Drive file ID and made live Drive API calls. Content is now stored in
+        ``teemo_documents.content`` and served directly from the database.
 
         Args:
-            ctx:           pydantic-ai RunContext with deps.
-            drive_file_id: The Google Drive file ID to read (as listed in
-                           the '## Available Files' section of the system prompt).
+            ctx:         pydantic-ai RunContext with deps.
+            document_id: UUID of the document to read (as listed in the
+                         '## Available Documents' section of the system prompt).
 
         Returns:
-            The plain text content of the file, or a user-friendly error
-            message if the file is not found or Drive access is unavailable.
+            The plain text content of the document, or "Document not found."
+            if no matching row exists in this workspace.
         """
-        from app.services.drive_service import (
-            get_drive_client,
-            fetch_file_content,
-            compute_content_hash,
+        content = await _doc_service.read_document_content(
+            ctx.deps.supabase,
+            ctx.deps.workspace_id,
+            document_id,
         )
-        from app.services.scan_service import generate_ai_description
+        if content is None:
+            return "Document not found."
+        return content
 
-        deps = ctx.deps
+    async def create_document(ctx: RunContext[AgentDeps], title: str, content: str) -> str:
+        """Create a new markdown document in the workspace knowledge base.
+
+        Inserts a new row into ``teemo_documents`` with ``source='agent'`` and
+        ``doc_type='markdown'``. The document will be picked up by the wiki
+        ingest pipeline (EPIC-013) and appear in the Available Documents catalog
+        on the next agent invocation.
+
+        Respects the 15-document-per-workspace cap enforced by the DB trigger.
+        Only call this tool when the user explicitly asks to create a document.
+
+        Args:
+            ctx:     pydantic-ai RunContext with deps.
+            title:   Document title (max 512 chars).
+            content: Markdown content of the document.
+
+        Returns:
+            Confirmation string with the new document ID, or an error message
+            if the workspace document cap is reached.
+        """
+        try:
+            row = await _doc_service.create_document(
+                supabase=ctx.deps.supabase,
+                workspace_id=ctx.deps.workspace_id,
+                title=title,
+                content=content,
+                doc_type="markdown",
+                source="agent",
+            )
+            doc_id = row["id"]
+            return (
+                f"Document '{title}' created (ID: {doc_id}). "
+                "It will appear in the wiki shortly."
+            )
+        except Exception as exc:
+            exc_str = str(exc)
+            if "Maximum 15 documents" in exc_str or "doc_cap" in exc_str:
+                return "Maximum 15 documents per workspace reached. Delete a document before creating a new one."
+            logger.error("[AGENT] create_document unexpected error: %s", exc)
+            return f"Failed to create document: {exc}"
+
+    async def update_document(ctx: RunContext[AgentDeps], document_id: str, content: str) -> str:
+        """Update the content of an agent-created document.
+
+        Only documents with ``source='agent'`` can be updated via this tool.
+        Drive and upload documents are managed by the sync pipeline and cannot
+        be overwritten by the agent. Updating content resets ``sync_status``
+        to ``'pending'`` so the wiki pipeline re-ingests the document.
+
+        Args:
+            ctx:         pydantic-ai RunContext with deps.
+            document_id: UUID of the document to update.
+            content:     New markdown content to store.
+
+        Returns:
+            Success confirmation, or an error message if the document does not
+            exist, is not agent-created, or the update fails.
+        """
+        # Source guard: only agent-created documents may be modified.
+        doc_result = (
+            ctx.deps.supabase.table("teemo_documents")
+            .select("source")
+            .eq("id", document_id)
+            .eq("workspace_id", ctx.deps.workspace_id)
+            .maybe_single()
+            .execute()
+        )
+        if not doc_result or not doc_result.data:
+            return "Document not found."
+        if doc_result.data.get("source") != "agent":
+            return "Only agent-created documents can be updated."
 
         try:
-            # 1. Look up file in knowledge index — enforces workspace isolation.
-            file_result = (
-                deps.supabase.table("teemo_knowledge_index")
-                .select("*")
-                .eq("workspace_id", deps.workspace_id)
-                .eq("drive_file_id", drive_file_id)
+            await _doc_service.update_document(
+                supabase=ctx.deps.supabase,
+                workspace_id=ctx.deps.workspace_id,
+                document_id=document_id,
+                content=content,
+            )
+            return f"Document {document_id} updated successfully."
+        except Exception as exc:
+            logger.error("[AGENT] update_document unexpected error: %s", exc)
+            return f"Failed to update document: {exc}"
+
+    async def delete_document(ctx: RunContext[AgentDeps], document_id: str) -> str:
+        """Delete an agent-created document from the workspace knowledge base.
+
+        Only documents with ``source='agent'`` can be deleted via this tool.
+        Drive and upload documents are managed by the sync pipeline and are
+        removed when deleted from the source system.
+
+        Args:
+            ctx:         pydantic-ai RunContext with deps.
+            document_id: UUID of the document to delete.
+
+        Returns:
+            Success confirmation, or an error message if the document does not
+            exist or is not agent-created.
+        """
+        # Source guard: only agent-created documents may be deleted via this tool.
+        doc_result = (
+            ctx.deps.supabase.table("teemo_documents")
+            .select("source")
+            .eq("id", document_id)
+            .eq("workspace_id", ctx.deps.workspace_id)
+            .maybe_single()
+            .execute()
+        )
+        if not doc_result or not doc_result.data:
+            return "Document not found."
+        if doc_result.data.get("source") != "agent":
+            return "Only agent-created documents can be deleted via this tool."
+
+        try:
+            deleted = await _doc_service.delete_document(
+                supabase=ctx.deps.supabase,
+                workspace_id=ctx.deps.workspace_id,
+                document_id=document_id,
+            )
+            if deleted:
+                return f"Document {document_id} deleted successfully."
+            return "Document not found."
+        except Exception as exc:
+            logger.error("[AGENT] delete_document unexpected error: %s", exc)
+            return f"Failed to delete document: {exc}"
+
+    # --- 11.6. read_wiki_page tool (STORY-013-01) ---
+    async def read_wiki_page(ctx: RunContext[AgentDeps], slug: str) -> str:
+        """Retrieve the full content of a wiki page by its slug.
+
+        Queries ``teemo_wiki_pages`` for a row matching both the current
+        workspace and the given slug. Returns the page's ``content`` field when
+        found, or a canonical not-found message directing the agent to the Wiki
+        Index in the system prompt when the slug is unknown.
+
+        Use this tool to answer questions using the workspace's structured
+        knowledge base. The available slugs are listed in the ``## Wiki Index``
+        section of the system prompt (when wiki pages have been ingested).
+
+        Wiki pages are AI-synthesized summaries of workspace documents. They
+        provide curated, structured answers. For exact quotes or data not yet
+        in the wiki, fall back to ``read_document`` with the document UUID.
+
+        Args:
+            ctx:  pydantic-ai RunContext with deps (workspace_id, supabase).
+            slug: The wiki page slug to retrieve (e.g. ``"onboarding-process"``).
+
+        Returns:
+            The full page content string, or a not-found guidance message.
+        """
+        try:
+            result = (
+                ctx.deps.supabase.table("teemo_wiki_pages")
+                .select("content")
+                .eq("workspace_id", ctx.deps.workspace_id)
+                .eq("slug", slug)
                 .execute()
             )
-            if not file_result.data:
-                return "File not found in this workspace's knowledge base."
-
-            file_row = file_result.data[0]
-
-            # STORY-006-10: Cache-first fast-path — return immediately if content is cached.
-            # Avoids Drive API call on every agent invocation; Drive is only hit on cache miss.
-            cached = file_row.get("cached_content")
-            if cached:
-                return cached
-
-            # 2. Get workspace's Drive refresh token.
-            ws_result = (
-                deps.supabase.table("teemo_workspaces")
-                .select("encrypted_google_refresh_token, ai_provider, encrypted_api_key")
-                .eq("id", deps.workspace_id)
-                .maybe_single()
-                .execute()
+            rows = result.data
+            if rows and isinstance(rows, list) and len(rows) > 0:
+                return rows[0]["content"]
+            return (
+                "Wiki page not found. "
+                "Available wiki pages can be seen in the Wiki Index above."
             )
-            if ws_result.data is None or not ws_result.data.get("encrypted_google_refresh_token"):
-                return "Google Drive access has been revoked. Please reconnect Drive from the dashboard."
+        except Exception as exc:
+            logger.error("read_wiki_page failed for slug=%s: %s", slug, exc, exc_info=True)
+            return f"Failed to read wiki page: {exc}"
 
-            ws_row = ws_result.data
+    # --- 11.7. lint_wiki tool (STORY-013-04) ---
+    async def lint_wiki(ctx: RunContext[AgentDeps]) -> str:
+        """Scan the entire workspace wiki for structural quality issues.
 
-            # 3. Build Drive client and fetch content.
-            try:
-                drive_client = get_drive_client(ws_row["encrypted_google_refresh_token"])
-            except Exception as e:
-                if "invalid_grant" in str(e):
-                    return "Google Drive access has been revoked. Please reconnect Drive from the dashboard."
-                return f"Drive access error: {e}"
+        Performs a pure DB scan — no LLM calls — across all wiki pages in the
+        workspace and returns a markdown health report. Checks for:
+          - Orphan pages (no incoming related_slugs from other pages)
+          - Stale pages (source documents have sync_status='pending')
+          - Documents missing wiki coverage (no source-summary page exists)
+          - Low-confidence pages (confidence='low')
 
-            # Decrypt the BYOK API key so fetch_file_content can trigger multimodal
-            # fallback if the file is a scanned/image-only PDF (STORY-006-08).
-            from app.core.encryption import decrypt as _decrypt_key
-            api_key_plain = _decrypt_key(ws_row["encrypted_api_key"])
-            _result = fetch_file_content(
-                drive_client,
-                drive_file_id,
-                file_row["mime_type"],
-                provider=ws_row["ai_provider"],
-                api_key=api_key_plain,
+        The report is suitable for posting directly to Slack. Use this tool when
+        the user asks to audit the workspace wiki quality, find broken or stale
+        content, or check which documents still need to be ingested.
+
+        Args:
+            ctx: pydantic-ai RunContext with deps (workspace_id, supabase).
+
+        Returns:
+            A markdown-formatted ``## Wiki Health Report`` string listing counts
+            and details of any quality issues found.
+        """
+        try:
+            return await _wiki_service.lint_wiki(
+                ctx.deps.supabase,
+                ctx.deps.workspace_id,
             )
-            import inspect
-            content = (await _result) if inspect.isawaitable(_result) else _result
-
-            # 4. Self-healing: always upsert cached_content on Drive fetch (backfill or update).
-            #    Only re-generate AI description when the content hash has actually changed (ADR-006).
-            #    Omit DEFAULT NOW() columns from the upsert payload (FLASHCARDS.md rule).
-            new_hash = compute_content_hash(content)
-            update_payload: dict = {
-                "workspace_id": deps.workspace_id,
-                "drive_file_id": drive_file_id,
-                "cached_content": content,
-                "content_hash": new_hash,
-            }
-            if new_hash != file_row.get("content_hash"):
-                new_description = await generate_ai_description(
-                    content, ws_row["ai_provider"], api_key_plain
-                )
-                update_payload["ai_description"] = new_description
-
-            deps.supabase.table("teemo_knowledge_index").upsert(update_payload).execute()
-
-            return content
-        except Exception as e:
-            logger.error("read_drive_file failed for %s: %s", drive_file_id, e, exc_info=True)
-            return f"Failed to read file: {e}"
+        except Exception as exc:
+            logger.error("lint_wiki failed for workspace=%s: %s", ctx.deps.workspace_id, exc, exc_info=True)
+            return f"Failed to lint wiki: {exc}"
 
     # --- 12. Construct Agent and deps ---
     agent = Agent(
         model,
         system_prompt=prompt,
         deps_type=AgentDeps,
-        tools=[load_skill, create_skill, update_skill, delete_skill, web_search, crawl_page, http_request, read_drive_file],
+        tools=[load_skill, create_skill, update_skill, delete_skill, web_search, crawl_page, http_request, read_document, create_document, update_document, delete_document, read_wiki_page, lint_wiki],
     )
     deps = AgentDeps(
         workspace_id=workspace_id,

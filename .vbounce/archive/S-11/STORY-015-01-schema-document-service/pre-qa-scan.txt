@@ -1,0 +1,17 @@
+# Pre-Gate Scan Results
+Date: 2026-04-13 17:29 UTC
+Target: /Users/ssuladze/Documents/Dev/SlaXadeL/.worktrees/STORY-015-01-schema-document-service
+Gate: qa
+
+| Check | Status | Detail |
+|-------|--------|--------|
+| tests_exist | FAIL | 2/2 source files missing tests |
+| tests_pass | SKIP | No test runner detected |
+| build | SKIP | No build command detected |
+| lint | SKIP | No linter detected |
+| no_debug_output | PASS | No debug statements in modified files |
+| no_todo_fixme | PASS | No TODO/FIXME in modified files |
+| exports_have_docs | SKIP | No exports in modified files |
+
+
+PASS: 2  FAIL: 1  SKIP: 4

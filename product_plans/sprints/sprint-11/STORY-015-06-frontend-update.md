@@ -71,3 +71,11 @@ Feature: Frontend Source Badges
 | Date | Author | Change |
 |------|--------|--------|
 | 2026-04-13 | Claude (doc-manager) | Initial draft for S-11. |
+
+---
+
+## Token Usage
+
+| Agent | Input | Output | Total |
+|-------|-------|--------|-------|
+| Developer | 41 | 2,003 | 2,044 |

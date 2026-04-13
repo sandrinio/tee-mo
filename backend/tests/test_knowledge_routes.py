@@ -1,7 +1,9 @@
-"""Tests for STORY-006-03 — Knowledge Index CRUD + AI Description + Picker Token.
+"""Tests for STORY-006-03 / STORY-015-02 — Knowledge Document CRUD + AI Description + Picker Token.
 
-Covers all 12 Gherkin scenarios from §2.1 plus unit tests for the Pydantic request
-model and MIME type validation.
+STORY-015-02 refactors the knowledge routes to use teemo_documents + document_service.
+These tests cover both the original STORY-006-03 scenarios (Drive indexing, list, delete,
+picker token, reindex) and the new STORY-015-02 scenarios (source/doc_type fields,
+POST /documents endpoint).
 
 Strategy:
 - Use FastAPI TestClient (sync) so assertions are straightforward.
@@ -12,14 +14,11 @@ Strategy:
 - Drive service functions are mocked via monkeypatch.setattr on the module reference
   (following FLASHCARDS.md module-import rule).
 - Scan service generate_ai_description is mocked similarly.
+- document_service functions are mocked via monkeypatch.setattr on the module reference.
 - httpx.AsyncClient is replaced with FakeKnowledgeAsyncClient for picker-token endpoint
   (same pattern as FakeDriveAsyncClient in test_drive_oauth.py).
-- Table routing is handled in _make_knowledge_supabase_mock (one mock handles both
-  teemo_workspaces and teemo_knowledge_index via side_effect dispatch).
-
-RED PHASE: All tests FAIL because:
-  - knowledge.py route module does not exist yet → 404 on all route tests
-  - app/models/knowledge.py Pydantic models do not exist yet
+- Table routing is handled in _TableRouter (one mock handles teemo_workspaces and
+  teemo_documents via side_effect dispatch).
 
 ADR compliance:
   - ADR-005: Drive content read at index time (real-time, not cached)
@@ -33,6 +32,7 @@ FLASHCARDS.md consulted:
   - Supabase module import pattern: import app.core.db as _db (not from ... import)
   - teemo_ table prefix (all tables use teemo_ prefix)
   - Worktree-relative paths only in Edit/Write calls
+  - SHA-256 for content hashing (sprint-context rule)
 """
 
 from __future__ import annotations
@@ -259,31 +259,43 @@ def _make_knowledge_row(
     mime_type: str = "application/vnd.google-apps.document",
     ai_description: str = FAKE_AI_DESCRIPTION,
     content_hash: str = FAKE_CONTENT_HASH,
+    source: str = "google_drive",
+    doc_type: str = "google_doc",
 ) -> dict[str, Any]:
-    """Build a knowledge index row dict simulating teemo_knowledge_index data.
+    """Build a document row dict simulating teemo_documents data.
+
+    STORY-015-02: teemo_documents replaces teemo_knowledge_index.
+    Added source and doc_type fields. external_id replaces drive_file_id.
 
     Args:
         knowledge_id: Primary key UUID.
         workspace_id: Owning workspace UUID.
-        drive_file_id: Google Drive file ID.
+        drive_file_id: Google Drive file ID (stored as external_id in teemo_documents).
         title: File title.
-        link: File URL.
-        mime_type: MIME type string.
+        link: File URL (stored as external_link in teemo_documents).
+        mime_type: MIME type string (stored in metadata).
         ai_description: AI-generated summary.
-        content_hash: MD5 hash of file content.
+        content_hash: SHA-256 hash of file content.
+        source: Document source: google_drive, upload, or agent.
+        doc_type: Document type: google_doc, pdf, docx, etc.
 
     Returns:
-        Dict with all columns of teemo_knowledge_index.
+        Dict with all columns of teemo_documents.
     """
     return {
         "id": knowledge_id,
         "workspace_id": workspace_id,
-        "drive_file_id": drive_file_id,
+        "external_id": drive_file_id,
+        "drive_file_id": drive_file_id,  # backward-compat alias
         "title": title,
-        "link": link,
-        "mime_type": mime_type,
+        "external_link": link,
+        "link": link,  # backward-compat alias
+        "metadata": {"mime_type": mime_type},
         "ai_description": ai_description,
         "content_hash": content_hash,
+        "source": source,
+        "doc_type": doc_type,
+        "sync_status": "pending",
         "last_scanned_at": "2026-04-12T10:00:00Z",
         "created_at": "2026-04-12T10:00:00Z",
     }
@@ -292,8 +304,10 @@ def _make_knowledge_row(
 class _TableRouter:
     """Routes Supabase .table() calls to per-table mock configurations.
 
-    Holds knowledge of both teemo_workspaces and teemo_knowledge_index,
-    dispatching each .table(name) call to the appropriate mock chain.
+    STORY-015-02: Routes teemo_workspaces and teemo_documents (replacing the
+    former teemo_knowledge_index routing).
+
+    Dispatches each .table(name) call to the appropriate mock chain.
     """
 
     def __init__(
@@ -308,7 +322,7 @@ class _TableRouter:
 
         Args:
             workspace_row: The workspace row returned from teemo_workspaces.
-            knowledge_rows: List of knowledge rows returned from teemo_knowledge_index.
+            knowledge_rows: List of document rows returned from teemo_documents.
             file_count: If provided, override the count returned for COUNT queries.
             duplicate_exists: If True, simulate a duplicate check returning a row.
             insert_result_row: Row returned by .insert().execute(). Defaults to first knowledge row.
@@ -331,8 +345,9 @@ class _TableRouter:
         """
         if table_name == "teemo_workspaces":
             return self._workspace_table_mock()
-        if table_name == "teemo_knowledge_index":
-            return self._knowledge_table_mock()
+        if table_name in ("teemo_documents", "teemo_knowledge_index"):
+            # teemo_knowledge_index kept for backward-compat during migration
+            return self._documents_table_mock()
         # Fallback: return a generic MagicMock for unexpected tables
         return MagicMock()
 
@@ -361,12 +376,22 @@ class _TableRouter:
         table_mock.select.return_value = select_mock
         return table_mock
 
-    def _knowledge_table_mock(self) -> MagicMock:
-        """Build the mock chain for teemo_knowledge_index table."""
+    def _documents_table_mock(self) -> MagicMock:
+        """Build the mock chain for teemo_documents table.
+
+        STORY-015-02: renamed from _knowledge_table_mock (was teemo_knowledge_index).
+        Handles all query shapes the knowledge routes perform on teemo_documents:
+          - COUNT select for the 15-cap check
+          - Duplicate check (select by external_id)
+          - List select (select("*").eq().order().execute())
+          - INSERT for create_document
+          - DELETE for delete_document
+          - UPDATE for reindex (update_document)
+        """
         table_mock = MagicMock()
 
         # ---- SELECT for count check (file count < 15 guard) ----
-        # .select("id", count="exact").eq().execute()
+        # .select("*", count="exact").eq().execute()
         count_result = MagicMock()
         count_result.count = self._file_count
         count_result.data = self._knowledge_rows[: self._file_count]
@@ -400,7 +425,7 @@ class _TableRouter:
 
         table_mock.select.return_value = select_mock
 
-        # ---- INSERT for index endpoint ----
+        # ---- INSERT for create_document (document_service) ----
         insert_result = MagicMock()
         insert_result.data = [self._insert_result_row]
 
@@ -408,7 +433,7 @@ class _TableRouter:
         insert_mock.execute.return_value = insert_result
         table_mock.insert.return_value = insert_mock
 
-        # ---- DELETE for remove endpoint ----
+        # ---- DELETE for delete_document (document_service) ----
         delete_eq_mock = MagicMock()
         delete_eq_mock.execute.return_value = MagicMock(data=[])
         delete_eq_mock.eq.return_value = delete_eq_mock
@@ -417,7 +442,21 @@ class _TableRouter:
         delete_mock.eq.return_value = delete_eq_mock
         table_mock.delete.return_value = delete_mock
 
+        # ---- UPDATE for update_document (reindex) ----
+        update_eq_mock = MagicMock()
+        update_eq_mock.execute.return_value = MagicMock(data=[self._insert_result_row])
+        update_eq_mock.eq.return_value = update_eq_mock
+
+        update_mock = MagicMock()
+        update_mock.eq.return_value = update_eq_mock
+        table_mock.update.return_value = update_mock
+
         return table_mock
+
+    # Keep old name as alias for tests that subclass and override it
+    def _knowledge_table_mock(self) -> MagicMock:
+        """Alias for _documents_table_mock — kept for backward-compat subclasses."""
+        return self._documents_table_mock()
 
 
 def _make_supabase_mock(
@@ -430,13 +469,14 @@ def _make_supabase_mock(
     """Build a minimal Supabase client mock for knowledge route tests.
 
     Routes all .table() calls through _TableRouter so both teemo_workspaces
-    and teemo_knowledge_index are handled correctly without a single massive
-    flat MagicMock.
+    and teemo_documents are handled correctly without a single massive flat MagicMock.
+
+    STORY-015-02: Updated to route teemo_documents instead of teemo_knowledge_index.
 
     Args:
         workspace_row: Workspace row to return from teemo_workspaces. Defaults to
             a valid workspace with Drive connected and BYOK key set.
-        knowledge_rows: List of knowledge index rows. Defaults to empty list.
+        knowledge_rows: List of document rows. Defaults to empty list.
         file_count: Override for the COUNT query result. Defaults to len(knowledge_rows).
         duplicate_exists: If True, duplicate check returns an existing row.
         insert_result_row: Row returned after INSERT. Defaults to knowledge_rows[0] or
@@ -466,6 +506,35 @@ def _make_supabase_mock(
 # ---------------------------------------------------------------------------
 # Helpers — service monkeypatching
 # ---------------------------------------------------------------------------
+
+
+def _patch_document_service(
+    monkeypatch: pytest.MonkeyPatch,
+    created_row: dict[str, Any] | None = None,
+    listed_rows: list[dict[str, Any]] | None = None,
+) -> None:
+    """Patch document_service functions used by refactored knowledge routes (STORY-015-02).
+
+    Patches create_document, list_documents, and delete_document so tests can
+    bypass the real document_service without needing a fully wired Supabase mock.
+
+    Args:
+        monkeypatch: pytest MonkeyPatch fixture.
+        created_row: Row to return from create_document. Defaults to _make_knowledge_row().
+        listed_rows: Rows to return from list_documents. Defaults to empty list.
+    """
+    if created_row is None:
+        created_row = _make_knowledge_row()
+    if listed_rows is None:
+        listed_rows = []
+    try:
+        import app.services.document_service as ds  # type: ignore[import]
+        monkeypatch.setattr(ds, "create_document", AsyncMock(return_value=created_row))
+        monkeypatch.setattr(ds, "list_documents", AsyncMock(return_value=listed_rows))
+        monkeypatch.setattr(ds, "delete_document", AsyncMock(return_value=True))
+        monkeypatch.setattr(ds, "update_document", AsyncMock(return_value=created_row))
+    except (ImportError, AttributeError):
+        pass
 
 
 def _patch_drive_services(
@@ -1396,20 +1465,20 @@ class TestConcurrentIndexingSerialized:
 
 
 # ---------------------------------------------------------------------------
-# STORY-006-10: cached_content column — Test 1
+# STORY-015-02: content column in teemo_documents (replaces cached_content)
 # ---------------------------------------------------------------------------
 
 
 class TestIndexFileStoresCachedContent:
-    """STORY-006-10 Test 1: index_file endpoint must store cached_content in the inserted row.
+    """STORY-015-02 (was STORY-006-10): index_file endpoint must store content in teemo_documents.
 
-    When a file is successfully indexed the INSERT payload sent to Supabase must
-    include a ``cached_content`` key whose value equals the raw text fetched from
-    Drive at index time.
+    STORY-015-02 refactor: the column is ``content`` in teemo_documents (not ``cached_content``
+    which was a teemo_knowledge_index column). The INSERT is now performed via
+    document_service.create_document which writes to teemo_documents.
 
-    RED: Fails because knowledge.py does not yet include ``cached_content`` in the
-    insert row dict (line ~258 in the current implementation inserts a row without
-    that column).
+    When a file is successfully indexed the INSERT payload sent to Supabase via
+    document_service.create_document must include ``content`` equal to the raw text
+    fetched from Drive at index time.
     """
 
     def test_index_file_insert_payload_includes_cached_content(
@@ -1418,24 +1487,24 @@ class TestIndexFileStoresCachedContent:
         override_current_user: str,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """POST /api/workspaces/{id}/knowledge must include cached_content in the Supabase INSERT.
+        """POST /api/workspaces/{id}/knowledge must include content in the teemo_documents INSERT.
+
+        STORY-015-02: The column is now ``content`` (not ``cached_content``).
+        document_service.create_document is the path that writes to teemo_documents.
 
         Strategy:
-          - Intercept the Supabase .insert() call on teemo_knowledge_index.
+          - Intercept the Supabase .insert() call on teemo_documents.
           - Capture the payload passed to .insert().
-          - Assert that the payload dict contains ``cached_content`` equal to FAKE_FILE_CONTENT.
-
-        RED: The current insert row dict in knowledge.py omits ``cached_content``,
-        so this assertion will fail until the Green phase adds it.
+          - Assert that the payload dict contains ``content`` equal to FAKE_FILE_CONTENT.
         """
         inserted_payloads: list[dict] = []
 
-        # Build a customised _TableRouter that records insert payloads.
+        # Build a customised _TableRouter that records insert payloads on teemo_documents.
         class _CapturingTableRouter(_TableRouter):
-            """Extends _TableRouter to record what is passed to .insert()."""
+            """Extends _TableRouter to record what is passed to .insert() on teemo_documents."""
 
-            def _knowledge_table_mock(self) -> MagicMock:
-                base_mock = super()._knowledge_table_mock()
+            def _documents_table_mock(self) -> MagicMock:
+                base_mock = super()._documents_table_mock()
 
                 # Wrap the insert side to capture the payload.
                 original_insert = base_mock.insert
@@ -1475,18 +1544,21 @@ class TestIndexFileStoresCachedContent:
 
         assert inserted_payloads, (
             "No INSERT payload was captured — the Supabase .insert() was not called. "
-            "Check that the knowledge route is calling _db.get_supabase().table('teemo_knowledge_index').insert(...)."
+            "Check that the knowledge route calls document_service.create_document which "
+            "calls _db.get_supabase().table('teemo_documents').insert(...)."
         )
 
         payload = inserted_payloads[0]
-        assert "cached_content" in payload, (
-            f"INSERT payload is missing 'cached_content'. "
-            f"STORY-006-10 requires the fetched content to be stored at index time. "
+        # STORY-015-02: column is 'content' in teemo_documents (was 'cached_content')
+        assert "content" in payload, (
+            f"INSERT payload is missing 'content'. "
+            f"STORY-015-02 requires document_service.create_document to store content "
+            f"at index time via the teemo_documents 'content' column. "
             f"Payload keys found: {list(payload.keys())}"
         )
-        assert payload["cached_content"] == FAKE_FILE_CONTENT, (
-            f"INSERT payload 'cached_content' must equal the fetched file content. "
-            f"Expected: {FAKE_FILE_CONTENT!r}. Got: {payload['cached_content']!r}"
+        assert payload["content"] == FAKE_FILE_CONTENT, (
+            f"INSERT payload 'content' must equal the fetched file content. "
+            f"Expected: {FAKE_FILE_CONTENT!r}. Got: {payload['content']!r}"
         )
 
 
@@ -1501,14 +1573,17 @@ def _make_reindex_supabase_mock(
 ) -> MagicMock:
     """Build a Supabase mock suitable for reindex endpoint tests.
 
+    STORY-015-02: Updated to route teemo_documents instead of teemo_knowledge_index.
+
     The reindex endpoint performs:
       1. teemo_workspaces ownership check (.select().eq().eq().limit().execute())
-      2. teemo_knowledge_index list all files (.select('*').eq().execute())
-      3. For each file: teemo_knowledge_index .update().eq().execute()
+      2. teemo_documents list Drive docs (.select('*').eq(workspace_id).eq(source).execute())
+      3. For each file: calls document_service.update_document
+         which calls teemo_documents .update().eq().execute()
 
     Args:
         workspace_row: Workspace row to return. Defaults to a connected, keyed workspace.
-        knowledge_rows: Files to return from the list query. Defaults to empty list.
+        knowledge_rows: Drive documents to return from the list query. Defaults to empty list.
 
     Returns:
         MagicMock Supabase client.
@@ -1522,6 +1597,10 @@ def _make_reindex_supabase_mock(
     ownership_result = MagicMock()
     ownership_result.data = [workspace_row]
 
+    # Also used by document_service._resolve_ai_description (maybe_single query)
+    ws_maybe_single_result = MagicMock()
+    ws_maybe_single_result.data = workspace_row  # maybe_single returns .data as dict
+
     limit_mock = MagicMock()
     limit_mock.execute.return_value = ownership_result
 
@@ -1529,6 +1608,7 @@ def _make_reindex_supabase_mock(
     inner_eq_mock.limit.return_value = limit_mock
     inner_eq_mock.execute.return_value = ownership_result
     inner_eq_mock.eq.return_value = inner_eq_mock
+    inner_eq_mock.maybe_single.return_value = MagicMock(execute=MagicMock(return_value=ws_maybe_single_result))
 
     outer_eq_mock = MagicMock()
     outer_eq_mock.eq.return_value = inner_eq_mock
@@ -1541,24 +1621,29 @@ def _make_reindex_supabase_mock(
     ws_table_mock = MagicMock()
     ws_table_mock.select.return_value = ws_select_mock
 
-    # --- knowledge index table mock ---
-    # List query: .select('*').eq().execute()
+    # --- teemo_documents table mock ---
+    # List query: .select('*').eq(workspace_id).eq(source='google_drive').execute()
     list_result = MagicMock()
     list_result.data = knowledge_rows
 
     ki_inner_eq = MagicMock()
     ki_inner_eq.execute.return_value = list_result
+    ki_inner_eq.eq.return_value = ki_inner_eq  # chaining .eq().eq()
 
     ki_select_mock = MagicMock()
     ki_select_mock.eq.return_value = ki_inner_eq
 
-    # Update chain: .update().eq().execute()
+    # Update chain for document_service.update_document:
+    # .update({...}).eq(id).eq(workspace_id).execute()
+    knowledge_rows_by_id = {row.get("id", ""): row for row in knowledge_rows}
+    update_row = knowledge_rows[0] if knowledge_rows else _make_knowledge_row()
+
     update_execute_mock = MagicMock()
-    update_execute_mock.execute.return_value = MagicMock(data=[])
+    update_execute_mock.execute.return_value = MagicMock(data=[update_row])
 
     update_eq_mock = MagicMock()
     update_eq_mock.eq.return_value = update_execute_mock
-    update_eq_mock.execute.return_value = MagicMock(data=[])
+    update_eq_mock.execute.return_value = MagicMock(data=[update_row])
 
     update_mock = MagicMock()
     update_mock.eq.return_value = update_eq_mock
@@ -1570,7 +1655,7 @@ def _make_reindex_supabase_mock(
     def _dispatch(table_name: str) -> MagicMock:
         if table_name == "teemo_workspaces":
             return ws_table_mock
-        if table_name == "teemo_knowledge_index":
+        if table_name in ("teemo_documents", "teemo_knowledge_index"):
             return ki_table_mock
         return MagicMock()
 
@@ -1758,3 +1843,267 @@ class TestReindexKnowledge:
         assert data == {"reindexed": 0, "failed": 0, "errors": []}, (
             f"Expected zero counts for empty workspace, got: {data}"
         )
+
+
+# ---------------------------------------------------------------------------
+# STORY-015-02: New endpoint POST /api/workspaces/{id}/documents
+# ---------------------------------------------------------------------------
+
+
+class TestCreateDocumentEndpoint:
+    """STORY-015-02 R4: POST /api/workspaces/{id}/documents creates an agent document.
+
+    Covers the new endpoint that accepts {title, content} and calls
+    document_service.create_document with source='agent', doc_type='markdown'.
+    """
+
+    def test_create_document_returns_200_with_source_agent(
+        self,
+        test_client: TestClient,
+        override_current_user: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """POST /api/workspaces/{id}/documents must return 200 and source='agent'.
+
+        Verifies the new endpoint creates a document with the correct source.
+        """
+        created_row = _make_knowledge_row(
+            source="agent",
+            doc_type="markdown",
+            title="Agent Report",
+        )
+        mock_sb = _make_supabase_mock(insert_result_row=created_row)
+        monkeypatch.setattr("app.core.db.get_supabase", lambda: mock_sb)
+        _patch_document_service(monkeypatch, created_row=created_row)
+        _patch_encryption(monkeypatch)
+
+        response = test_client.post(
+            f"/api/workspaces/{FAKE_WORKSPACE_ID}/documents",
+            json={"title": "Agent Report", "content": "# Agent Report\n\nContent here."},
+        )
+
+        assert response.status_code in (200, 201), (
+            f"Expected 200 or 201, got {response.status_code}: {response.text}"
+        )
+        data = response.json()
+        assert data.get("source") == "agent", (
+            f"Expected source='agent', got: {data.get('source')!r}. Full response: {data}"
+        )
+
+    def test_create_document_returns_doc_type_markdown(
+        self,
+        test_client: TestClient,
+        override_current_user: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """POST /api/workspaces/{id}/documents must return doc_type='markdown'.
+
+        Verifies the created document has the correct doc_type.
+        """
+        created_row = _make_knowledge_row(
+            source="agent",
+            doc_type="markdown",
+            title="Agent Report",
+        )
+        mock_sb = _make_supabase_mock(insert_result_row=created_row)
+        monkeypatch.setattr("app.core.db.get_supabase", lambda: mock_sb)
+        _patch_document_service(monkeypatch, created_row=created_row)
+        _patch_encryption(monkeypatch)
+
+        response = test_client.post(
+            f"/api/workspaces/{FAKE_WORKSPACE_ID}/documents",
+            json={"title": "Agent Report", "content": "# Agent Report\n\nContent here."},
+        )
+
+        assert response.status_code in (200, 201), (
+            f"Expected 200 or 201, got {response.status_code}: {response.text}"
+        )
+        data = response.json()
+        assert data.get("doc_type") == "markdown", (
+            f"Expected doc_type='markdown', got: {data.get('doc_type')!r}. Full response: {data}"
+        )
+
+    def test_create_document_requires_auth(self, test_client: TestClient) -> None:
+        """POST /api/workspaces/{id}/documents must return 401 without auth."""
+        response = test_client.post(
+            f"/api/workspaces/{FAKE_WORKSPACE_ID}/documents",
+            json={"title": "Test", "content": "test"},
+        )
+        assert response.status_code == 401, (
+            f"Expected 401 Unauthorized, got {response.status_code}: {response.text}"
+        )
+
+    def test_create_document_missing_title_returns_422(
+        self,
+        test_client: TestClient,
+        override_current_user: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """POST /api/workspaces/{id}/documents with missing title must return 422."""
+        mock_sb = _make_supabase_mock()
+        monkeypatch.setattr("app.core.db.get_supabase", lambda: mock_sb)
+
+        response = test_client.post(
+            f"/api/workspaces/{FAKE_WORKSPACE_ID}/documents",
+            json={"content": "No title here"},  # missing title
+        )
+        assert response.status_code == 422, (
+            f"Expected 422 (validation error), got {response.status_code}: {response.text}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# STORY-015-02: List endpoint returns source + doc_type
+# ---------------------------------------------------------------------------
+
+
+class TestListDocumentsIncludesSource:
+    """STORY-015-02 Scenario: List documents includes source and doc_type fields.
+
+    GET /knowledge should return documents with correct source values including
+    mixed sources (google_drive + agent).
+    """
+
+    def test_list_knowledge_includes_source_field(
+        self,
+        test_client: TestClient,
+        override_current_user: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """GET /api/workspaces/{id}/knowledge must include source in each returned document."""
+        files = [
+            _make_knowledge_row(knowledge_id="kid-d-1", source="google_drive", doc_type="google_doc"),
+            _make_knowledge_row(knowledge_id="kid-d-2", source="google_drive", doc_type="pdf"),
+            _make_knowledge_row(knowledge_id="kid-a-1", source="agent", doc_type="markdown"),
+        ]
+        mock_sb = _make_supabase_mock(knowledge_rows=files)
+        monkeypatch.setattr("app.core.db.get_supabase", lambda: mock_sb)
+        _patch_document_service(monkeypatch, listed_rows=files)
+
+        response = test_client.get(f"/api/workspaces/{FAKE_WORKSPACE_ID}/knowledge")
+
+        assert response.status_code == 200, (
+            f"Expected 200, got {response.status_code}: {response.text}"
+        )
+        data = response.json()
+        assert isinstance(data, list), f"Expected list, got {type(data)}: {data}"
+        assert len(data) == 3, f"Expected 3 documents, got {len(data)}: {data}"
+
+        sources = {doc.get("source") for doc in data}
+        assert "google_drive" in sources, f"Expected google_drive source, got sources: {sources}"
+        assert "agent" in sources, f"Expected agent source, got sources: {sources}"
+
+    def test_list_knowledge_includes_doc_type_field(
+        self,
+        test_client: TestClient,
+        override_current_user: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """GET /api/workspaces/{id}/knowledge must include doc_type in each returned document."""
+        files = [
+            _make_knowledge_row(knowledge_id="kid-pdf-1", source="google_drive", doc_type="pdf"),
+        ]
+        mock_sb = _make_supabase_mock(knowledge_rows=files)
+        monkeypatch.setattr("app.core.db.get_supabase", lambda: mock_sb)
+        _patch_document_service(monkeypatch, listed_rows=files)
+
+        response = test_client.get(f"/api/workspaces/{FAKE_WORKSPACE_ID}/knowledge")
+
+        assert response.status_code == 200, (
+            f"Expected 200, got {response.status_code}: {response.text}"
+        )
+        data = response.json()
+        assert len(data) >= 1
+        assert "doc_type" in data[0], f"Response object missing doc_type: {data[0]}"
+        assert data[0]["doc_type"] == "pdf", f"Expected doc_type='pdf', got: {data[0]['doc_type']!r}"
+
+
+# ---------------------------------------------------------------------------
+# STORY-015-02: Reindex skips non-Drive documents
+# ---------------------------------------------------------------------------
+
+
+class TestReindexSkipsNonDriveDocs:
+    """STORY-015-02 Scenario: Reindex only re-fetches Google Drive documents.
+
+    Documents with source='upload' or source='agent' must be skipped.
+    """
+
+    def test_reindex_only_processes_google_drive_documents(
+        self,
+        test_client: TestClient,
+        override_current_user: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """POST /knowledge/reindex must only re-index source='google_drive' documents.
+
+        Set up: 2 Drive files + 1 agent doc in workspace.
+        The mock returns only the 2 Drive files (matching the .eq(source=google_drive) filter).
+        Reindexed count should be 2, not 3.
+        """
+        drive_files = [
+            _make_knowledge_row(knowledge_id="kid-r-1", drive_file_id="drive-r-1", source="google_drive"),
+            _make_knowledge_row(knowledge_id="kid-r-2", drive_file_id="drive-r-2", source="google_drive"),
+        ]
+        # The mock returns only drive docs (simulating .eq("source", "google_drive") filter)
+        mock_sb = _make_reindex_supabase_mock(knowledge_rows=drive_files)
+        monkeypatch.setattr("app.core.db.get_supabase", lambda: mock_sb)
+
+        # Mock document_service.update_document to avoid actual AI calls
+        try:
+            import app.services.document_service as ds
+            monkeypatch.setattr(
+                ds, "update_document",
+                AsyncMock(return_value=drive_files[0])
+            )
+        except (ImportError, AttributeError):
+            pass
+
+        _patch_drive_services(monkeypatch)
+        _patch_scan_service(monkeypatch)
+        _patch_encryption(monkeypatch)
+
+        response = test_client.post(
+            f"/api/workspaces/{FAKE_WORKSPACE_ID}/knowledge/reindex"
+        )
+
+        assert response.status_code == 200, (
+            f"Expected 200, got {response.status_code}: {response.text}"
+        )
+        data = response.json()
+        assert data["reindexed"] == 2, (
+            f"Expected reindexed=2 (only Drive docs), got: {data}. "
+            "Reindex must skip agent/upload documents (source filter on google_drive)."
+        )
+        assert data["failed"] == 0, f"Expected failed=0, got: {data}"
+
+
+# ---------------------------------------------------------------------------
+# STORY-015-02: MIME → doc_type mapping
+# ---------------------------------------------------------------------------
+
+
+class TestMimeToDocTypeMapping:
+    """STORY-015-02 R2: MIME type is mapped to doc_type on index.
+
+    Verifies that the MIME_TO_DOC_TYPE mapping in knowledge.py is correct
+    and that the mapped doc_type is passed to document_service.create_document.
+    """
+
+    def test_mime_mapping_module_attribute_exists(self) -> None:
+        """knowledge module must define MIME_TO_DOC_TYPE mapping dict."""
+        try:
+            import app.api.routes.knowledge as km
+        except ImportError:
+            pytest.fail("app.api.routes.knowledge not importable")
+
+        assert hasattr(km, "MIME_TO_DOC_TYPE"), (
+            "knowledge module missing MIME_TO_DOC_TYPE dict (R2 of STORY-015-02)"
+        )
+        mapping = km.MIME_TO_DOC_TYPE
+        assert mapping.get("application/vnd.google-apps.document") == "google_doc"
+        assert mapping.get("application/pdf") == "pdf"
+        assert mapping.get("application/vnd.openxmlformats-officedocument.wordprocessingml.document") == "docx"
+        assert mapping.get("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") == "xlsx"
+        assert mapping.get("application/vnd.google-apps.spreadsheet") == "google_sheet"
+        assert mapping.get("application/vnd.google-apps.presentation") == "google_slides"

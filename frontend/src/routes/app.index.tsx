@@ -25,14 +25,14 @@
  *   - validateSearch narrows the `slack_install` param to a union type so useSearch
  *     returns typed data without any runtime overhead.
  */
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { createFileRoute, useSearch, useNavigate } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { listSlackTeams } from '../lib/api';
+import { listSlackTeams, deleteSlackTeam } from '../lib/api';
 import type { SlackTeam } from '../lib/api';
 
 // ---------------------------------------------------------------------------
@@ -100,16 +100,39 @@ interface TeamCardProps {
  * Clicking the card navigates to the team detail page at `/app/teams/$teamId`
  * via `useNavigate` (STORY-003-B05).
  */
-function TeamCard({ team }: TeamCardProps) {
+function TeamCard({ team, onDeleted }: TeamCardProps & { onDeleted?: () => void }) {
   const navigate = useNavigate();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const installedDate = new Intl.DateTimeFormat(undefined, {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(new Date(team.installed_at));
 
+  const isOwner = team.role === 'owner';
+
   function handleClick() {
     navigate({ to: '/app/teams/$teamId', params: { teamId: team.slack_team_id } });
+  }
+
+  async function handleDelete(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      return;
+    }
+    setDeleting(true);
+    try {
+      await deleteSlackTeam(team.slack_team_id);
+      toast.success(`Team "${team.slack_team_name || team.slack_team_id}" deleted.`);
+      onDeleted?.();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete team.');
+    } finally {
+      setDeleting(false);
+      setConfirmDelete(false);
+    }
   }
 
   return (
@@ -123,13 +146,51 @@ function TeamCard({ team }: TeamCardProps) {
         if (e.key === 'Enter' || e.key === ' ') handleClick();
       }}
     >
-      <div className="flex flex-col gap-1">
-        <div className="text-sm font-semibold text-slate-900">
-          {team.slack_team_name || team.slack_team_id}
+      <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold text-slate-900">
+              {team.slack_team_name || team.slack_team_id}
+            </span>
+            <span className="text-xs text-slate-400 bg-slate-100 rounded-full px-2 py-0.5">
+              {isOwner ? 'Owner' : 'Member'}
+            </span>
+          </div>
+          <div className="text-xs text-slate-400">
+            Installed {installedDate}
+          </div>
         </div>
-        <div className="text-xs text-slate-400">
-          Installed {installedDate}
-        </div>
+
+        {isOwner && (
+          <div onClick={(e) => e.stopPropagation()}>
+            {confirmDelete ? (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-rose-600">Delete everything?</span>
+                <button
+                  onClick={handleDelete}
+                  disabled={deleting}
+                  className="text-xs font-semibold text-rose-600 hover:text-rose-700"
+                >
+                  {deleting ? 'Deleting...' : 'Yes, delete'}
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setConfirmDelete(false); }}
+                  className="text-xs text-slate-400"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={handleDelete}
+                className="text-xs text-slate-400 hover:text-rose-500"
+                title="Delete team and all data"
+              >
+                Delete
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </Card>
   );
@@ -257,7 +318,7 @@ export function AppContent() {
         {!isLoading && !error && data && data.teams.length > 0 && (
           <>
             {data.teams.map((team) => (
-              <TeamCard key={team.slack_team_id} team={team} />
+              <TeamCard key={team.slack_team_id} team={team} onDeleted={() => refetch()} />
             ))}
             <div className="mt-4 text-center">
               <a

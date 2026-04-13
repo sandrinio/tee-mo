@@ -6,6 +6,8 @@ STORY-005A-05 adds ``SlackTeamResponse`` (GET /api/slack/teams response shape).
 
 from datetime import datetime
 
+from typing import Optional
+
 from pydantic import BaseModel
 
 
@@ -38,13 +40,10 @@ class SlackTeamResponse(BaseModel):
     in any API response (ADR-010). Defense in depth: the DB query also uses
     explicit-column ``.select(...)`` rather than ``*``, so the column is never
     fetched at all.
-
-    Fields:
-        slack_team_id:    The Slack workspace/team identifier (e.g. ``"T0123ABC"``).
-        slack_bot_user_id: The bot user ID in that workspace (e.g. ``"UBOT456"``).
-        installed_at:     UTC timestamp of the first install for this team.
     """
 
     slack_team_id: str
+    slack_team_name: Optional[str] = None
     slack_bot_user_id: str
     installed_at: datetime
+    role: str = "owner"

@@ -180,7 +180,7 @@ async def slack_oauth_callback(
         logger.warning("oauth.v2.access missing bot_user_id or team or access_token")
         return RedirectResponse("/app?slack_install=error", status_code=302)
 
-    # --- 6. Different-owner check BEFORE upsert (raises 409) ---
+    # --- 6. Check if team already exists ---
     sb = get_supabase()
     existing = (
         sb.table("teemo_slack_teams")
@@ -189,64 +189,111 @@ async def slack_oauth_callback(
         .limit(1)
         .execute()
     )
-    if existing.data and existing.data[0]["owner_user_id"] != user_id:
-        raise HTTPException(
-            status_code=409,
-            detail="This Slack team is already installed under a different account.",
-        )
+    is_new_team = not existing.data
+    is_owner = is_new_team or existing.data[0]["owner_user_id"] == user_id
 
-    # --- 7. Encrypt + upsert ---
+    # --- 7. Upsert team row (only if owner or new install) ---
     # NOTE: bot_token is NEVER passed to logger — ADR-002/010 security constraint.
     # installed_at is intentionally excluded from the upsert dict so the
-    # DEFAULT NOW() value from the first insert is preserved on re-install
-    # (spec Req 8: installed_at must be the original install timestamp).
-    encrypted = encrypt(bot_token)
-    upsert_data: dict = {
-        "slack_team_id": team_id,
-        "owner_user_id": user_id,
-        "slack_bot_user_id": bot_user_id,
-        "encrypted_slack_bot_token": encrypted,
-    }
-    if team_name:
-        upsert_data["slack_team_name"] = team_name
-    sb.table("teemo_slack_teams").upsert(upsert_data).execute()
+    # DEFAULT NOW() value from the first insert is preserved on re-install.
+    if is_owner:
+        encrypted = encrypt(bot_token)
+        upsert_data: dict = {
+            "slack_team_id": team_id,
+            "owner_user_id": user_id,
+            "slack_bot_user_id": bot_user_id,
+            "encrypted_slack_bot_token": encrypted,
+        }
+        if team_name:
+            upsert_data["slack_team_name"] = team_name
+        sb.table("teemo_slack_teams").upsert(upsert_data).execute()
+
+    # --- 8. Upsert membership row ---
+    # Owner gets 'owner' role, other users get 'member'.
+    # joined_at excluded so DEFAULT NOW() is preserved on re-install.
+    sb.table("teemo_slack_team_members").upsert(
+        {
+            "slack_team_id": team_id,
+            "user_id": user_id,
+            "role": "owner" if is_owner else "member",
+        }
+    ).execute()
 
     return RedirectResponse("/app?slack_install=ok", status_code=302)
 
 
 @router.get("/teams")
 async def list_slack_teams(user_id: str = Depends(get_current_user_id)) -> dict:
-    """Return the list of Slack teams owned by the authenticated user.
+    """Return Slack teams the authenticated user is a member of.
 
-    Fetches only the three safe columns — ``slack_team_id``, ``slack_bot_user_id``,
-    and ``installed_at`` — from ``teemo_slack_teams``. The ``encrypted_slack_bot_token``
-    column is intentionally excluded from the ``.select(...)`` call so it is never
-    returned from PostgREST, providing defense in depth per ADR-010 on top of the
-    model-level guard in ``SlackTeamResponse``.
+    Joins ``teemo_slack_team_members`` with ``teemo_slack_teams`` to return
+    teams where the user has any role (owner or member). Each response row
+    includes the user's ``role`` so the frontend can show/hide admin controls.
 
-    Results are ordered newest ``installed_at`` first for a predictable display order.
-    Empty result is HTTP 200 with ``{"teams": []}`` — NOT 404.
-
-    Args:
-        user_id: Injected by ``get_current_user_id``; raises 401 if missing/invalid.
-
-    Returns:
-        JSON object ``{"teams": [...]}`` where each element matches
-        ``SlackTeamResponse``. The wrapper object is intentional — forward compatible
-        for adding metadata (pagination cursors, total counts) without a breaking
-        API change.
+    The ``encrypted_slack_bot_token`` column is never fetched — defense in
+    depth per ADR-010.
     """
     sb = get_supabase()
-    result = (
+
+    # Fetch memberships for this user
+    memberships = (
+        sb.table("teemo_slack_team_members")
+        .select("slack_team_id, role")
+        .eq("user_id", user_id)
+        .execute()
+    )
+    if not memberships.data:
+        return {"teams": []}
+
+    # Build a map of team_id → role
+    role_map = {m["slack_team_id"]: m["role"] for m in memberships.data}
+    team_ids = list(role_map.keys())
+
+    # Fetch team details (safe columns only)
+    teams = (
         sb.table("teemo_slack_teams")
         .select("slack_team_id, slack_team_name, slack_bot_user_id, installed_at")
-        .eq("owner_user_id", user_id)
+        .in_("slack_team_id", team_ids)
         .order("installed_at", desc=True)
         .execute()
     )
+
     return {
         "teams": [
-            SlackTeamResponse(**row).model_dump(mode="json")
-            for row in (result.data or [])
+            SlackTeamResponse(
+                **row,
+                role=role_map.get(row["slack_team_id"], "member"),
+            ).model_dump(mode="json")
+            for row in (teams.data or [])
         ]
     }
+
+
+@router.delete("/teams/{team_id}")
+async def delete_slack_team(
+    team_id: str,
+    user_id: str = Depends(get_current_user_id),
+) -> dict:
+    """Delete a Slack team and ALL related data. Owner-only.
+
+    Cascade deletes: workspaces, workspace_channels, knowledge_index,
+    skills, and team_members are all removed by ON DELETE CASCADE.
+    """
+    sb = get_supabase()
+
+    # Verify caller is the team owner
+    membership = (
+        sb.table("teemo_slack_team_members")
+        .select("role")
+        .eq("slack_team_id", team_id)
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    if not membership.data or membership.data[0]["role"] != "owner":
+        raise HTTPException(status_code=403, detail="Only the team owner can delete a team.")
+
+    # Delete the team row — ON DELETE CASCADE handles everything else
+    sb.table("teemo_slack_teams").delete().eq("slack_team_id", team_id).execute()
+
+    return {"message": f"Team {team_id} and all related data deleted."}

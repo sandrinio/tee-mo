@@ -127,6 +127,8 @@ export interface SlackTeam {
   slack_bot_user_id: string;
   /** ISO 8601 timestamp of when Tee-Mo was installed in this workspace. */
   installed_at: string;
+  /** User's role in this team — 'owner' or 'member'. */
+  role?: string;
 }
 
 /**
@@ -147,6 +149,18 @@ export interface SlackTeamsResponse {
  */
 export async function listSlackTeams(): Promise<SlackTeamsResponse> {
   return apiGet<SlackTeamsResponse>('/api/slack/teams');
+}
+
+/**
+ * Deletes a Slack team and ALL related data (workspaces, channels, files, skills).
+ * Owner-only — returns 403 if the caller is not the team owner.
+ */
+export async function deleteSlackTeam(teamId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/slack/teams/${teamId}`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+  if (!res.ok) throw new Error(await res.text());
 }
 
 // ---------------------------------------------------------------------------

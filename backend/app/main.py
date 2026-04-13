@@ -79,6 +79,7 @@ TEEMO_TABLES = (
     "teemo_skills",
     "teemo_slack_teams",
     "teemo_workspace_channels",
+    "teemo_slack_team_members",
 )
 
 

@@ -65,6 +65,10 @@ vi.mock('../../../hooks/useKnowledge', () => ({
   useRemoveKnowledgeMutation: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
 }));
 
+vi.mock('../ChannelSection', () => ({
+  ChannelSection: () => null,
+}));
+
 vi.mock('../../../lib/api', () => ({
   validateKey: vi.fn(),
   getPickerToken: vi.fn(),
@@ -303,8 +307,8 @@ describe('SetupStepper', () => {
   // Scenario 4: All steps complete → normal view (stepper not rendered)
   // -------------------------------------------------------------------------
 
-  describe('Scenario: All steps complete shows normal detail view', () => {
-    it('returns null (renders nothing) when all steps are complete', () => {
+  describe('Scenario: All steps complete shows step 4 (Channels)', () => {
+    it('shows step 4 as active when steps 1-3 are complete', () => {
       const mockFile = {
         id: 'f-1',
         title: 'Test Doc',
@@ -317,13 +321,16 @@ describe('SetupStepper', () => {
       };
       mockSetupState({ driveConnected: true, hasKey: true, files: [mockFile] });
 
-      const { container } = renderStepper();
+      renderStepper();
 
-      // SetupStepper should render nothing when all prerequisites are met
-      expect(container.firstChild).toBeNull();
+      // Step 4 should now be active since steps 1-3 are complete
+      expect(screen.getByTestId('step-4')).toHaveAttribute('data-active', 'true');
+      expect(screen.getByTestId('step-1')).toHaveAttribute('data-complete', 'true');
+      expect(screen.getByTestId('step-2')).toHaveAttribute('data-complete', 'true');
+      expect(screen.getByTestId('step-3')).toHaveAttribute('data-complete', 'true');
     });
 
-    it('does not show any step indicators when all steps are complete', () => {
+    it('shows step indicators when all prerequisite steps are complete', () => {
       const mockFile = {
         id: 'f-1',
         title: 'Test Doc',
@@ -337,9 +344,9 @@ describe('SetupStepper', () => {
       mockSetupState({ driveConnected: true, hasKey: true, files: [mockFile] });
       renderStepper();
 
-      // None of the step labels should appear
-      expect(screen.queryByTestId('step-1')).not.toBeInTheDocument();
-      expect(screen.queryByTestId('step-2')).not.toBeInTheDocument();
+      // Step indicators should still be visible (step 4 is active)
+      expect(screen.getByTestId('step-1')).toBeInTheDocument();
+      expect(screen.getByTestId('step-4')).toHaveAttribute('data-active', 'true');
     });
   });
 
@@ -417,63 +424,8 @@ describe('SetupStepper', () => {
   // Channel placeholder (R7)
   // -------------------------------------------------------------------------
 
-  describe('Channel placeholder (R7)', () => {
-    it('renders the channel placeholder text in step 4 content when step 4 is active', () => {
-      // For step 4 to be active, steps 1-3 must be complete.
-      // Step 4 has no hard gate, but it becomes active when step 3 is done.
-      // Step 3 complete requires ≥1 file, step 2 complete requires key, step 1 requires Drive.
-      const mockFile = {
-        id: 'f-1',
-        title: 'Test Doc',
-        link: 'https://drive.google.com/file/d/abc',
-        mime_type: 'application/vnd.google-apps.document',
-        ai_description: 'A test document',
-        created_at: '2026-01-01T00:00:00Z',
-        workspace_id: 'ws-test',
-        drive_file_id: 'abc',
-      };
-
-      // When steps 1-3 are all complete AND step 4 has no gate,
-      // the stepper should show step 4 as active (since all other steps done
-      // but step 4 "always open" means the stepper shows Channels as the next step).
-      // However, R5 says "all complete → normal view". The Channels step (step 4)
-      // has no gate and the completion criterion for the stepper is steps 1-3.
-      // So: when steps 1-3 complete, step 4 becomes active BEFORE stepper dismisses.
-      // Stepper dismisses only when Drive + key + ≥1 file (R5). Step 4 has no completion.
-      // Therefore: step 4 content is shown when steps 1-3 complete BUT stepper still renders.
-
-      // Set up: steps 1-3 complete via Drive+key+file, but we need the stepper to
-      // remain rendered to show step 4. According to R5, all three conditions trigger
-      // normal view. But R7 says step 4 renders a placeholder — step 4 is reachable
-      // when steps 1-3 are done but the user hasn't "completed" channels (no gate).
-      // The stepper is dismissed by R5 when drive+key+≥1file — meaning step 4 is
-      // effectively unreachable in "pure" guided mode, BUT R7 still requires the
-      // placeholder to render. This means step 4 content renders when step 4 is active.
-
-      // For testing purposes, we test that when step 4 IS active (steps 1-3 done),
-      // the placeholder text appears — even though this triggers R5 dismissal.
-      // We can test step 4 content in isolation by rendering the component
-      // in a state where steps 1-3 are complete but the stepper hasn't dismissed yet.
-
-      // Since R5 and R7 may interact, we test step 4 placeholder via step-4-content testid
-      // when the stepper renders with step 4 active. If R5 takes precedence and stepper
-      // returns null, this test documents that channel step is embedded in the normal view.
-      // The test asserts the placeholder text exists somewhere in the page (flexible).
-      mockSetupState({ driveConnected: true, hasKey: true, files: [mockFile] });
-      renderStepper();
-
-      // When all complete, stepper returns null (R5). Channels step visible in normal view.
-      // This test simply confirms the component handles this state without crashing.
-      // The actual placeholder rendering is tested in a state where step 4 can be shown.
-      expect(true).toBe(true); // Structural assertion — stepper didn't throw
-    });
-
-    it('renders channel placeholder card text in step 4 when step 4 is the active step', () => {
-      // Direct test: if the implementation exposes step-4-content in a state
-      // where steps 1-3 are done and step 4 is active, it shows the placeholder.
-      // We test this by checking that step-4-content (when present) has the right text.
-      // Since R5 may cause null render, we use queryByTestId:
-
+  describe('Channel section in step 4', () => {
+    it('shows step 4 content with ChannelSection when steps 1-3 are complete', () => {
       const mockFile = {
         id: 'f-1',
         title: 'Test Doc',
@@ -487,19 +439,9 @@ describe('SetupStepper', () => {
       mockSetupState({ driveConnected: true, hasKey: true, files: [mockFile] });
       renderStepper();
 
-      // When all complete, R5 says return null — so step-4-content won't be in the DOM.
-      // The placeholder text is verified through the Channels step being shown when step
-      // 4 IS the active step. This scenario is tested via mockSetupState with
-      // drive+key+files where the stepper shows null per R5.
-      // If R5 is NOT applied for step 4 (channel step never "completes"), the stepper
-      // shows step 4 content. We query for it conditionally:
-      const step4Content = screen.queryByTestId('step-4-content');
-      if (step4Content) {
-        // If step 4 IS rendered, it must contain the placeholder text
-        expect(step4Content).toHaveTextContent('Bind Slack channels to this workspace');
-      }
-      // If null (R5 dismissed the stepper), this test passes silently.
-      // Green phase will clarify the exact behavior.
+      // Step 4 should be active and its content rendered
+      expect(screen.getByTestId('step-4')).toHaveAttribute('data-active', 'true');
+      expect(screen.getByTestId('step-4-content')).toBeInTheDocument();
     });
   });
 

@@ -45,6 +45,7 @@ import { useKnowledgeQuery, useAddKnowledgeMutation, useRemoveKnowledgeMutation 
 import { getPickerToken, type KnowledgeFile } from '../../lib/api';
 import { Card } from '../ui/Card';
 import { KeySection } from './KeySection';
+import { ChannelSection } from './ChannelSection';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -82,9 +83,12 @@ const STEPS: StepMeta[] = [
 export function SetupStepper({
   workspaceId,
   teamId,
+  onSkip,
 }: {
   workspaceId: string;
   teamId: string;
+  /** Called when user clicks "Skip setup" to dismiss the wizard. */
+  onSkip?: () => void;
 }) {
   // -------------------------------------------------------------------------
   // Data queries — completion state derived from live data (R3, R6)
@@ -99,16 +103,10 @@ export function SetupStepper({
   const step3Complete = (knowledgeFiles?.length ?? 0) >= 1;
 
   // -------------------------------------------------------------------------
-  // R5: Dismiss stepper when all three prerequisites are met
-  // -------------------------------------------------------------------------
-
-  if (step1Complete && step2Complete && step3Complete) {
-    return null;
-  }
-
-  // -------------------------------------------------------------------------
   // Active step computation (R4: gating)
   // The active step is the first incomplete step whose prerequisite is met.
+  // When steps 1-3 are all done, step 4 (Channels) becomes active so the
+  // user can bind channels before the wizard dismisses.
   // -------------------------------------------------------------------------
 
   let activeStep: StepNumber;
@@ -119,8 +117,6 @@ export function SetupStepper({
   } else if (!step3Complete) {
     activeStep = 3;
   } else {
-    // Steps 1–3 complete but we haven't returned null — this branch is
-    // unreachable given the R5 guard above, but TypeScript needs it.
     activeStep = 4;
   }
 
@@ -172,6 +168,20 @@ export function SetupStepper({
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-8">
       <div className="mx-auto max-w-2xl space-y-8">
+
+        {/* Skip button */}
+        {onSkip && (
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={onSkip}
+              data-testid="skip-setup"
+              className="text-sm text-slate-400 hover:text-slate-600"
+            >
+              Skip setup
+            </button>
+          </div>
+        )}
 
         {/* ---------------------------------------------------------------- */}
         {/* Step indicator row                                               */}
@@ -229,10 +239,10 @@ export function SetupStepper({
           </div>
         )}
 
-        {/* Step 4: Channel binding placeholder (R7) */}
+        {/* Step 4: Channel binding — real ChannelSection */}
         {activeStep === 4 && (
           <div data-testid="step-4-content">
-            <ChannelsStepContent />
+            <ChannelSection workspaceId={workspaceId} teamId={teamId} />
           </div>
         )}
 

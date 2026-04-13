@@ -41,6 +41,7 @@ import { useDriveStatusQuery, useDisconnectDriveMutation } from '../hooks/useDri
 import { useKnowledgeQuery, useAddKnowledgeMutation, useRemoveKnowledgeMutation } from '../hooks/useKnowledge';
 import { getPickerToken, type KnowledgeFile } from '../lib/api';
 import { SetupStepper } from '../components/workspace/SetupStepper';
+import { ChannelSection } from '../components/workspace/ChannelSection';
 
 // ---------------------------------------------------------------------------
 // Route declaration
@@ -499,6 +500,7 @@ function WorkspaceDetailPage() {
   const { teamId, workspaceId } = Route.useParams();
   const [truncationWarning, setTruncationWarning] = useState<string | null>(null);
   const [isIndexing, setIsIndexing] = useState(false);
+  const [wizardSkipped, setWizardSkipped] = useState(false);
 
   // Data queries
   const { data: workspace } = useWorkspaceQuery(workspaceId);
@@ -530,9 +532,15 @@ function WorkspaceDetailPage() {
     }
   }, []);
 
-  // Show guided setup mode when setup is incomplete (STORY-008-01)
-  if (!isSetupComplete) {
-    return <SetupStepper workspaceId={workspaceId} teamId={teamId} />;
+  // Show guided setup mode when setup is incomplete and user hasn't skipped
+  if (!isSetupComplete && !wizardSkipped) {
+    return (
+      <SetupStepper
+        workspaceId={workspaceId}
+        teamId={teamId}
+        onSkip={() => setWizardSkipped(true)}
+      />
+    );
   }
 
   return (
@@ -596,6 +604,9 @@ function WorkspaceDetailPage() {
           files={files}
           isLoading={knowledgeLoading}
         />
+
+        {/* Channel binding section (STORY-008-02) */}
+        <ChannelSection workspaceId={workspaceId} teamId={teamId} />
 
       </div>
     </div>

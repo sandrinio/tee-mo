@@ -203,3 +203,4 @@ navigate({ to: '/app/teams/$teamId/$workspaceId', params: { teamId, workspaceId:
 ## Token Usage
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| Developer | 137 | 10,864 | 11,001 |

@@ -14,7 +14,7 @@
  *   3. KnowledgeList  — table of indexed files with Remove action
  *
  * Design system (ADR-022):
- *   - Coral brand: text-rose-500, bg-[#E94560]
+ *   - Coral brand: text-rose-500, bg-brand-500
  *   - Slate neutrals for backgrounds and text
  *   - Inter font (inherited from app.css)
  *   - Max font weight: font-semibold (600) — never font-bold
@@ -172,7 +172,7 @@ function DriveSection({ workspaceId }: DriveSectionProps) {
           {/* Full-page redirect: browser must carry session cookie to OAuth endpoint */}
           <a
             href={`/api/workspaces/${encodeURIComponent(workspaceId)}/drive/connect`}
-            className="rounded-md bg-[#E94560] px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90"
+            className="rounded-md bg-brand-500 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-600"
           >
             Connect Google Drive
           </a>
@@ -310,7 +310,7 @@ function PickerSection({
                   ? `${MAX_FILES} file limit reached`
                   : undefined
             }
-            className="rounded-md bg-[#E94560] px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="rounded-md bg-brand-500 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {indexing ? 'Indexing…' : 'Add File'}
           </button>

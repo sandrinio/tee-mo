@@ -52,7 +52,7 @@ router = APIRouter(prefix="/api", tags=["keys"])
 
 # Default ai_model values per provider — Charter §3.4 conversation-tier defaults.
 _DEFAULT_MODELS: dict[str, str] = {
-    "google": "gemini-2.5-flash",
+    "google": "gemini-3-flash-preview",
     "openai": "gpt-4o",
     "anthropic": "claude-sonnet-4-6",
 }

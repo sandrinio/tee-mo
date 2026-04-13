@@ -319,7 +319,7 @@ class TestFetchFileContentGoogleSheets:
         mock_ws2 = MagicMock()
         mock_ws2.iter_rows.return_value = [("X", "Y"), ("3", "4")]
 
-        def _getitem(name):
+        def _getitem(_self, name):
             return {"Q1": mock_ws1, "Q2": mock_ws2}[name]
 
         mock_wb = MagicMock()

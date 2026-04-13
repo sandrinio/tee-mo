@@ -80,3 +80,61 @@ async def generate_ai_description(content: str, provider: str, api_key: str) -> 
 
     result = await scan_agent.run(content)
     return result.output
+
+
+async def extract_content_multimodal(
+    pdf_bytes: bytes, provider: str, api_key: str,
+) -> str:
+    """Extract text from a scanned PDF using the scan-tier multimodal model (STORY-006-08).
+
+    Called by drive_service.fetch_file_content when pymupdf4llm returns fewer than
+    _MULTIMODAL_FALLBACK_THRESHOLD characters — indicating an image-only or scanned
+    PDF that OCR cannot process.  Only supported for "google" and "openai" providers,
+    which can accept raw PDF bytes as multimodal input.
+
+    The function encodes the PDF as base64 and sends it to the scan-tier model
+    (SCAN_TIER_MODELS[provider]) via a single-use pydantic-ai Agent, instructing the
+    model to extract all text content and preserve tables and headings.
+
+    Like generate_ai_description, model classes are accessed via the ``_agent_module``
+    object reference so that test monkeypatches on agent.Agent / agent.GoogleModel etc.
+    take effect here (direct ``from ... import`` would bind to the pre-patch value).
+
+    Args:
+        pdf_bytes: Raw PDF file bytes from Google Drive.
+        provider:  BYOK provider slug — "google" or "openai" (not "anthropic").
+        api_key:   Decrypted plaintext BYOK API key for the provider.
+
+    Returns:
+        Extracted text content as a plain string (may include markdown tables/headings).
+
+    Raises:
+        KeyError: If provider is not in SCAN_TIER_MODELS.
+    """
+    import base64
+
+    model_id = SCAN_TIER_MODELS[provider]
+
+    # Ensure provider-specific pydantic-ai imports are available in agent module globals.
+    # If tests have already monkeypatched these to non-None mocks,
+    # _ensure_model_imports will skip the real import and keep the mock in place.
+    _agent_module._ensure_model_imports(provider)
+
+    # Build a scan-tier model instance via the agent module's builder so that
+    # tests can monkeypatch _agent_module.GoogleModel / OpenAIChatModel etc.
+    model = _agent_module._build_pydantic_ai_model(model_id, provider, api_key)
+
+    scan_agent = _agent_module.Agent(
+        model,
+        system_prompt=(
+            "Extract all text content from this PDF document. "
+            "Preserve tables as markdown tables. "
+            "Preserve headings and structure."
+        ),
+    )
+
+    b64_pdf = base64.b64encode(pdf_bytes).decode()
+    result = await scan_agent.run(
+        f"Extract all text from the following base64-encoded PDF:\n{b64_pdf}"
+    )
+    return result.output

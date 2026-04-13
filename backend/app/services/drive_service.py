@@ -19,6 +19,7 @@ All imports that tests monkeypatch are at module level so monkeypatch.setattr wo
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
 
@@ -42,6 +43,49 @@ from app.core.config import get_settings
 
 _TRUNCATION_LIMIT = 50_000
 _TRUNCATION_NOTICE = "\n\n[Content truncated at 50000 characters]"
+
+# ---------------------------------------------------------------------------
+# Multimodal fallback constants (STORY-006-08)
+#
+# PDFs returning fewer than _MULTIMODAL_FALLBACK_THRESHOLD characters from
+# pymupdf4llm are treated as scanned/image-only documents.  For supported
+# providers (google, openai) the file is re-processed via extract_content_multimodal.
+# Anthropic cannot process raw PDFs — a user-visible warning is appended instead.
+# Files larger than _MULTIMODAL_SIZE_LIMIT skip the AI fallback regardless of provider.
+# ---------------------------------------------------------------------------
+
+_SCANNED_PDF_WARNING = (
+    "\n\n[Warning: This file appears to be a scanned document. "
+    "Text extraction is limited for this provider. Consider using "
+    "Google or OpenAI as your AI provider for better scanned document support.]"
+)
+_OVERSIZED_PDF_WARNING = (
+    "\n\n[Warning: This scanned document is too large for "
+    "AI-assisted extraction. Text shown is best-effort.]"
+)
+_MULTIMODAL_FALLBACK_THRESHOLD = 100
+_MULTIMODAL_SIZE_LIMIT = 20_000_000  # 20 MB
+
+
+class _AwaitableStr(str):
+    """A str subclass that is also awaitable.
+
+    Returned by fetch_file_content so that the function can be called both
+    synchronously (legacy callers without provider/api_key) and with ``await``
+    (new async callers added in STORY-006-08) without changing the function
+    signature from a regular ``def`` to ``async def`` — which would break the
+    existing synchronous test suite.
+
+    When used as a plain string (e.g., ``"foo" in result``), behaviour is
+    identical to a normal ``str``.  When awaited, a completed asyncio ``Future``
+    is returned so the event loop yields once and then produces the plain string.
+    """
+
+    def __await__(self):
+        """Return an iterator over a completed Future holding this string's value."""
+        f = asyncio.get_event_loop().create_future()
+        f.set_result(str(self))
+        return f.__await__()
 
 # ---------------------------------------------------------------------------
 # MIME type routing
@@ -240,7 +284,14 @@ def _maybe_truncate(content: str) -> str:
     return content
 
 
-def fetch_file_content(drive_client, drive_file_id: str, mime_type: str) -> str:
+def fetch_file_content(
+    drive_client,
+    drive_file_id: str,
+    mime_type: str,
+    *,
+    provider: str | None = None,
+    api_key: str | None = None,
+) -> "_AwaitableStr":
     """Extract text content from a Google Drive file by MIME type.
 
     Dispatches to the appropriate extraction strategy based on mime_type:
@@ -248,6 +299,12 @@ def fetch_file_content(drive_client, drive_file_id: str, mime_type: str) -> str:
       - Google Sheets: export as XLSX, then extract as markdown tables.
       - Google Slides: export as text/plain, then add slide boundary markers.
       - PDF: downloads binary via get_media, extracts markdown with pymupdf4llm.
+        If the extracted text is fewer than _MULTIMODAL_FALLBACK_THRESHOLD characters
+        (indicating a scanned/image-only PDF), a multimodal fallback is attempted:
+          - google / openai + file ≤ 20 MB  → delegates to scan_service.extract_content_multimodal
+          - google / openai + file >  20 MB → appends _OVERSIZED_PDF_WARNING
+          - anthropic                        → appends _SCANNED_PDF_WARNING
+        Falls back gracefully (no warning) when provider/api_key are not supplied.
       - DOCX: downloads binary via get_media, extracts text + tables with python-docx.
       - XLSX: downloads binary via get_media, extracts markdown tables with openpyxl.
       - Unsupported types: raises ValueError.
@@ -255,13 +312,28 @@ def fetch_file_content(drive_client, drive_file_id: str, mime_type: str) -> str:
     Content is truncated at 50,000 characters with a trim notice appended
     (ADR-016 content cap to prevent LLM context overflow).
 
+    The return type is ``_AwaitableStr`` — a ``str`` subclass that also implements
+    ``__await__``.  This allows the function to be called both synchronously
+    (legacy callers without provider/api_key) and with ``await`` (new STORY-006-08
+    async callers) without changing the function to ``async def``.
+
+    When the multimodal fallback IS needed (provider in ("google", "openai") and
+    file is small enough), this function returns a *coroutine* object directly.
+    The caller must ``await`` it in that case — which is always true for the
+    new async callers that supply provider/api_key.
+
     Args:
         drive_client: Authenticated Drive v3 API client (from get_drive_client).
-        drive_file_id: Google Drive file ID (e.g. "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms").
+        drive_file_id: Google Drive file ID.
         mime_type: MIME type of the file (as returned by the Drive files.list API).
+        provider: Optional BYOK provider slug — "google", "anthropic", or "openai".
+            Required to enable the multimodal fallback for scanned PDFs.
+        api_key: Optional decrypted BYOK API key.  Must be supplied together with provider.
 
     Returns:
-        Extracted text content, truncated at 50,000 characters if necessary.
+        An ``_AwaitableStr`` containing the extracted text (truncated at 50 000 chars),
+        or a coroutine that resolves to such a string when the multimodal fallback path
+        is taken.
 
     Raises:
         ValueError: If mime_type is not one of the 6 supported types (ADR-016).
@@ -281,6 +353,31 @@ def fetch_file_content(drive_client, drive_file_id: str, mime_type: str) -> str:
         raw_bytes = _download_media(drive_client, drive_file_id)
         content = _extract_pdf(raw_bytes)
 
+        # Multimodal fallback for scanned/image-based PDFs (STORY-006-08).
+        # Only triggered when pymupdf4llm returns fewer than the threshold chars
+        # AND both provider and api_key are supplied by the caller.
+        if len(content.strip()) < _MULTIMODAL_FALLBACK_THRESHOLD and provider and api_key:
+            if len(raw_bytes) > _MULTIMODAL_SIZE_LIMIT:
+                # File is too large for AI-assisted extraction regardless of provider.
+                content += _OVERSIZED_PDF_WARNING
+            elif provider in ("google", "openai"):
+                # Return a coroutine — the async caller will await it.
+                # The lazy import ensures patch() context managers in tests work correctly.
+                async def _do_fallback(
+                    _raw_bytes=raw_bytes, _provider=provider, _api_key=api_key
+                ) -> str:
+                    """Run scan-tier multimodal extraction and apply content truncation."""
+                    from app.services.scan_service import extract_content_multimodal
+                    fb_content = await extract_content_multimodal(
+                        _raw_bytes, _provider, _api_key
+                    )
+                    return _maybe_truncate(fb_content)
+
+                return _do_fallback()
+            elif provider == "anthropic":
+                # Anthropic cannot process raw PDFs natively — warn the user instead.
+                content += _SCANNED_PDF_WARNING
+
     elif mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
         raw_bytes = _download_media(drive_client, drive_file_id)
         content = _extract_docx(raw_bytes)
@@ -295,7 +392,7 @@ def fetch_file_content(drive_client, drive_file_id: str, mime_type: str) -> str:
             f"Supported types: {sorted(_GOOGLE_EXPORT_MIMES.keys() | _BINARY_MIMES)}"
         )
 
-    return _maybe_truncate(content)
+    return _AwaitableStr(_maybe_truncate(content))
 
 
 def compute_content_hash(content: str) -> str:

@@ -235,21 +235,35 @@ export function ChannelSection({ workspaceId, teamId }: ChannelSectionProps) {
           data-testid="channel-picker"
           className="mt-2 border border-slate-200 rounded-lg bg-white shadow-sm p-3"
         >
-          {availableChannels.length === 0 ? (
-            <p className="text-slate-500 text-sm">All channels are already bound.</p>
+          {allChannels.length === 0 ? (
+            <p className="text-slate-500 text-sm">No channels found in this Slack team.</p>
           ) : (
             <ul>
-              {availableChannels.map((channel) => (
-                <li key={channel.id}>
-                  <button
-                    data-testid={`pick-channel-${channel.id}`}
-                    onClick={() => handlePickChannel(channel.id)}
-                    className="w-full text-left py-1 px-2 text-sm hover:bg-slate-50 rounded"
-                  >
-                    #{channel.name}
-                  </button>
-                </li>
-              ))}
+              {allChannels.map((channel) => {
+                const isBound = boundIds.has(channel.id);
+                return (
+                  <li key={channel.id}>
+                    {isBound ? (
+                      <div
+                        className="w-full text-left py-1 px-2 text-sm rounded flex items-center gap-2 opacity-50 cursor-not-allowed"
+                      >
+                        <span className="h-2 w-2 rounded-full bg-rose-400 shrink-0" />
+                        <span className="text-slate-400">#{channel.name}</span>
+                        <span className="text-xs text-slate-400 ml-auto">bound</span>
+                      </div>
+                    ) : (
+                      <button
+                        data-testid={`pick-channel-${channel.id}`}
+                        onClick={() => handlePickChannel(channel.id)}
+                        className="w-full text-left py-1 px-2 text-sm hover:bg-slate-50 rounded flex items-center gap-2"
+                      >
+                        <span className="h-2 w-2 rounded-full bg-emerald-400 shrink-0" />
+                        #{channel.name}
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
           <button

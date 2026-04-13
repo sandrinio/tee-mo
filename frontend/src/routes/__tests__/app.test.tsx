@@ -117,14 +117,15 @@ describe('AppContent — /app Slack Teams page', () => {
       teams: [
         {
           slack_team_id: 'T1',
+          slack_team_name: 'Acme Corp',
           slack_bot_user_id: 'UBOT1',
           installed_at: '2026-04-10T12:00:00Z',
         },
       ],
     });
     renderWithQuery();
-    await screen.findByText('T1');
-    expect(screen.getByText('UBOT1')).toBeInTheDocument();
+    // Team name is shown instead of raw ID
+    await screen.findByText('Acme Corp');
     const secondaryLink = screen.getByRole('link', { name: /install another team/i });
     expect(secondaryLink).toBeInTheDocument();
   });

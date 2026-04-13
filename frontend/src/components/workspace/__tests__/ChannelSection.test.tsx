@@ -257,11 +257,13 @@ describe('ChannelSection', () => {
     // Click "Add channel" button to open picker
     fireEvent.click(screen.getByTestId('add-channel-button'));
 
-    // Picker is now open — should show engineering and marketing but NOT general
+    // Picker is now open — engineering and marketing are clickable, general is shown as "bound" (disabled)
     expect(screen.getByTestId('channel-picker')).toBeInTheDocument();
     expect(screen.getByText('#engineering')).toBeInTheDocument();
     expect(screen.getByText('#marketing')).toBeInTheDocument();
-    expect(screen.queryByText('#general')).not.toBeInTheDocument();
+    // #general is visible but not clickable (no pick-channel button for it)
+    expect(screen.queryByTestId('pick-channel-C001')).not.toBeInTheDocument();
+    expect(screen.getByText('bound')).toBeInTheDocument();
   });
 
   // -------------------------------------------------------------------------

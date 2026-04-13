@@ -196,7 +196,7 @@ async def bind_channel(
         The channel is already bound to this workspace (``detail="channel_already_bound"``).
     """
     # 1. Verify workspace ownership — raises 403 for non-owners.
-    _assert_workspace_owner(workspace_id, user_id)
+    workspace_row = _assert_workspace_owner(workspace_id, user_id)
 
     sb = get_supabase()
 
@@ -216,6 +216,7 @@ async def bind_channel(
     payload: dict[str, Any] = {
         "slack_channel_id": body.slack_channel_id,
         "workspace_id": workspace_id,
+        "slack_team_id": workspace_row.get("slack_team_id", ""),
     }
     result = sb.table("teemo_workspace_channels").insert(payload).execute()
     if not result.data:

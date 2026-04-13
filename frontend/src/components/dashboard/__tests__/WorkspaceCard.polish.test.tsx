@@ -16,7 +16,7 @@
  */
 import { render, screen } from '@testing-library/react';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
-import type { Workspace, ChannelBinding } from '../../../lib/api';
+import type { Workspace, ChannelBinding, ProviderKey, DriveStatus } from '../../../lib/api';
 
 // ---------------------------------------------------------------------------
 // Hoisted mock variables (FLASHCARDS.md TDZ rule)
@@ -33,8 +33,8 @@ const {
   makeDefaultMutateFn: vi.fn(),
   renameMutateFn: vi.fn(),
   channelBindingsMockData: { current: [] as ChannelBinding[] },
-  keyDataMock: { current: { has_key: false, provider: null, key_mask: null, ai_model: null } },
-  driveStatusMock: { current: { connected: false, email: null } },
+  keyDataMock: { current: { has_key: false, provider: null, key_mask: null, ai_model: null } as ProviderKey },
+  driveStatusMock: { current: { connected: false, email: null } as DriveStatus },
   knowledgeFilesMock: { current: [] as { id: string }[] },
 }));
 

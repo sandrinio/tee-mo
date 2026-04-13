@@ -67,9 +67,6 @@ export function ChannelSection({ workspaceId, teamId }: ChannelSectionProps) {
   // IDs of channels already bound — used to filter the picker
   const boundIds = new Set(bindings.map((b) => b.slack_channel_id));
 
-  // Channels available for binding (not yet bound)
-  const availableChannels = allChannels.filter((c) => !boundIds.has(c.id));
-
   // ---------------------------------------------------------------------------
   // Handlers
   // ---------------------------------------------------------------------------

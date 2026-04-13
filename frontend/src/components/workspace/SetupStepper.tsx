@@ -42,7 +42,7 @@ import { useState, useCallback } from 'react';
 import { useDriveStatusQuery } from '../../hooks/useDrive';
 import { useKeyQuery } from '../../hooks/useKey';
 import { useKnowledgeQuery, useAddKnowledgeMutation, useRemoveKnowledgeMutation } from '../../hooks/useKnowledge';
-import { getPickerToken, type KnowledgeFile } from '../../lib/api';
+import { getPickerToken } from '../../lib/api';
 import { Card } from '../ui/Card';
 import { KeySection } from './KeySection';
 import { ChannelSection } from './ChannelSection';
@@ -401,19 +401,3 @@ function FilesStepContent({ workspaceId }: { workspaceId: string }) {
   );
 }
 
-/**
- * ChannelsStepContent — step 4 content (R7).
- * Placeholder for the future Slack channel binding feature.
- * Shown only when steps 1–3 are complete; in practice, R5 dismisses the
- * stepper at that point, so this content acts as a forward-looking placeholder.
- */
-function ChannelsStepContent() {
-  return (
-    <div className="rounded-lg border border-slate-200 bg-white p-6">
-      <h2 className="text-base font-semibold text-slate-900 mb-2">
-        Bind Slack channels to this workspace
-      </h2>
-      <p className="text-sm text-slate-400">Coming in next step</p>
-    </div>
-  );
-}

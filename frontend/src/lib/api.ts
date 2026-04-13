@@ -156,7 +156,7 @@ export async function listSlackTeams(): Promise<SlackTeamsResponse> {
  * Owner-only — returns 403 if the caller is not the team owner.
  */
 export async function deleteSlackTeam(teamId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/slack/teams/${teamId}`, {
+  const res = await fetch(`${API_URL}/api/slack/teams/${teamId}`, {
     method: 'DELETE',
     credentials: 'include',
   });

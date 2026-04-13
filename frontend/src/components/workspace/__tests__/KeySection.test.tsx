@@ -19,7 +19,6 @@
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
-import React from 'react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 // ---------------------------------------------------------------------------
@@ -45,13 +44,6 @@ import { KeySection } from '../KeySection';
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Creates a fresh QueryClient + Provider wrapper per test. */
-function makeWrapper(queryClient: QueryClient) {
-  return ({ children }: { children: React.ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  );
-}
-
 /** Returns a minimal idle mutation stub (not pending, no error). */
 function idleMutation() {
   return {
@@ -74,8 +66,8 @@ describe('KeySection', () => {
     vi.clearAllMocks();
 
     // Default stubs for mutations — override in individual tests when needed.
-    vi.mocked(useKeyModule.useSaveKeyMutation).mockReturnValue(idleMutation() as ReturnType<typeof useKeyModule.useSaveKeyMutation>);
-    vi.mocked(useKeyModule.useDeleteKeyMutation).mockReturnValue(idleMutation() as ReturnType<typeof useKeyModule.useDeleteKeyMutation>);
+    vi.mocked(useKeyModule.useSaveKeyMutation).mockReturnValue(idleMutation() as unknown as ReturnType<typeof useKeyModule.useSaveKeyMutation>);
+    vi.mocked(useKeyModule.useDeleteKeyMutation).mockReturnValue(idleMutation() as unknown as ReturnType<typeof useKeyModule.useDeleteKeyMutation>);
   });
 
   describe('collapsed state — no key configured', () => {

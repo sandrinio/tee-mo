@@ -42,7 +42,6 @@
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
-import React from 'react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 // ---------------------------------------------------------------------------
@@ -150,8 +149,8 @@ function mockSetupState({
     fetchStatus: 'idle',
   } as ReturnType<typeof useKnowledgeModule.useKnowledgeQuery>);
 
-  vi.mocked(useKeyModule.useSaveKeyMutation).mockReturnValue(idleMutation() as ReturnType<typeof useKeyModule.useSaveKeyMutation>);
-  vi.mocked(useKeyModule.useDeleteKeyMutation).mockReturnValue(idleMutation() as ReturnType<typeof useKeyModule.useDeleteKeyMutation>);
+  vi.mocked(useKeyModule.useSaveKeyMutation).mockReturnValue(idleMutation() as unknown as ReturnType<typeof useKeyModule.useSaveKeyMutation>);
+  vi.mocked(useKeyModule.useDeleteKeyMutation).mockReturnValue(idleMutation() as unknown as ReturnType<typeof useKeyModule.useDeleteKeyMutation>);
 }
 
 // ---------------------------------------------------------------------------

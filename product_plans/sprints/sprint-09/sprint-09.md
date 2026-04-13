@@ -2,7 +2,7 @@
 sprint_id: "sprint-09"
 sprint_goal: "Ship EPIC-008 — Guided setup wizard, channel binding UI, dashboard polish, top nav. First-time user can go from 'New Workspace' to fully configured workspace with bound channels in one guided flow."
 dates: "2026-04-13"
-status: "Confirmed"
+status: "Active"
 delivery: "D-05"
 confirmed_by: "sandrinio"
 confirmed_at: "2026-04-13"
@@ -28,9 +28,9 @@ confirmed_at: "2026-04-13"
 
 | Priority | Story | Epic | Label | V-Bounce State | Blocker |
 |----------|-------|------|-------|----------------|---------|
-| 1a | [STORY-008-01: Guided Setup Mode](./STORY-008-01-guided-setup-mode.md) | EPIC-008 | L3 | Refinement | — |
-| 1b | [STORY-008-02: Channel Binding UI](./STORY-008-02-channel-binding-ui.md) | EPIC-008 | L3 | Refinement | — |
-| 1c | [STORY-008-04: Top Nav & Chrome](./STORY-008-04-top-nav-chrome.md) | EPIC-008 | L2 | Refinement | — |
+| 1a | [STORY-008-01: Guided Setup Mode](./STORY-008-01-guided-setup-mode.md) | EPIC-008 | L3 | Bouncing | — |
+| 1b | [STORY-008-02: Channel Binding UI](./STORY-008-02-channel-binding-ui.md) | EPIC-008 | L3 | Bouncing | — |
+| 1c | [STORY-008-04: Top Nav & Chrome](./STORY-008-04-top-nav-chrome.md) | EPIC-008 | L2 | Bouncing | — |
 | 2 | [STORY-008-03: Card & Dashboard Polish](./STORY-008-03-card-dashboard-polish.md) | EPIC-008 | L2 | Refinement | 008-02, 008-04 |
 | 3 | [STORY-008-05: E2E Verification](./STORY-008-05-e2e-verification.md) | EPIC-008 | L2 | Refinement | All above |
 

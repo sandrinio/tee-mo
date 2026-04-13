@@ -209,3 +209,5 @@ if (!isSetupComplete) {
 ## Token Usage
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| Developer | 19 | 10,420 | 10,439 |
+| QA | 15 | 361 | 376 |

@@ -239,3 +239,5 @@ useEffect(() => {
 ## Token Usage
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| Developer | 35 | 5,480 | 5,515 |
+| Developer | 3,120 | 10,998 | 14,118 |

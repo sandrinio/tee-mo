@@ -246,3 +246,4 @@ return enriched
 ## Token Usage
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| Developer | 4 | 221 | 225 |

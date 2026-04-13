@@ -13,7 +13,9 @@ Strategy:
 - Uses a hand-rolled FakeAsyncWebClient that satisfies AsyncWebClient's
   conversations_replies() and users_info() async interface.
 - Tests are async, decorated with @pytest.mark.asyncio.
-- All tests FAIL in RED phase because app/services/slack_thread.py does not exist yet.
+
+Return type: list of pydantic-ai ModelMessage objects (ModelRequest for user
+turns, ModelResponse for assistant turns).
 
 Sprint context: S-07 rule — first use of AsyncWebClient; test with FakeAsyncWebClient.
 FLASHCARDS.md consulted:
@@ -27,6 +29,8 @@ from typing import Any
 
 import pytest
 import pytest_asyncio  # noqa: F401 — ensures pytest-asyncio is importable
+
+from pydantic_ai.messages import ModelRequest, ModelResponse
 
 from app.services.slack_thread import fetch_thread_history  # type: ignore[import]
 
@@ -112,20 +116,33 @@ def _bot_msg_by_bot_id(bot_id: str, text: str, ts: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Helpers — extract role/content from ModelMessage objects
+# ---------------------------------------------------------------------------
+
+
+def _is_user_msg(msg: Any) -> bool:
+    """Check if a ModelMessage is a user turn (ModelRequest)."""
+    return isinstance(msg, ModelRequest)
+
+
+def _is_assistant_msg(msg: Any) -> bool:
+    """Check if a ModelMessage is an assistant turn (ModelResponse)."""
+    return isinstance(msg, ModelResponse)
+
+
+def _get_text(msg: Any) -> str:
+    """Extract the text content from a ModelMessage."""
+    return msg.parts[0].content
+
+
+# ---------------------------------------------------------------------------
 # Scenario 1: Fetch thread with multiple speakers
-# Given a thread with messages from Alice (U001), Bob (U002), and bot (UBOT)
-# When fetch_thread_history is called
-# Then it returns role/name dicts for each non-trigger message:
-#   Alice → role="user", name="Alice"
-#   Bob   → role="user", name="Bob"
-#   Bot   → role="assistant", name="Tee-Mo"
-# And the trigger message (last) is excluded from the result
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_multiple_speakers_roles_and_names(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Thread with Alice, Bob, and bot messages → correct roles and names."""
+    """Thread with Alice, Bob, and bot messages → correct ModelMessage types."""
     messages = [
         _user_msg("U001", "Hello from Alice", "1000.001"),
         _user_msg("U002", "Hello from Bob", "1000.002"),
@@ -154,16 +171,19 @@ async def test_multiple_speakers_roles_and_names(monkeypatch: pytest.MonkeyPatch
     )
 
     assert len(result) == 3
-    assert result[0] == {"role": "user", "name": "Alice", "content": "Hello from Alice"}
-    assert result[1] == {"role": "user", "name": "Bob", "content": "Hello from Bob"}
-    assert result[2] == {"role": "assistant", "name": "Tee-Mo", "content": "Hello from Tee-Mo"}
+    # User messages become ModelRequest with UserPromptPart
+    assert _is_user_msg(result[0])
+    assert "Alice" in _get_text(result[0])
+    assert "Hello from Alice" in _get_text(result[0])
+    assert _is_user_msg(result[1])
+    assert "Bob" in _get_text(result[1])
+    # Bot messages become ModelResponse with TextPart
+    assert _is_assistant_msg(result[2])
+    assert _get_text(result[2]) == "Hello from Tee-Mo"
 
 
 # ---------------------------------------------------------------------------
 # Scenario 2: User name resolution failure
-# Given users.info fails for U999
-# When fetch_thread_history is called
-# Then the message has name="User U999" and no exception is raised
 # ---------------------------------------------------------------------------
 
 
@@ -196,16 +216,13 @@ async def test_user_name_resolution_failure(monkeypatch: pytest.MonkeyPatch) -> 
     )
 
     assert len(result) == 1
-    assert result[0]["name"] == "User U999"
-    assert result[0]["role"] == "user"
-    assert result[0]["content"] == "A mystery message"
+    assert _is_user_msg(result[0])
+    assert "User U999" in _get_text(result[0])
+    assert "A mystery message" in _get_text(result[0])
 
 
 # ---------------------------------------------------------------------------
 # Scenario 3: Empty thread (only trigger message)
-# Given a thread that has only the top-level trigger message
-# When fetch_thread_history is called
-# Then it returns an empty list
 # ---------------------------------------------------------------------------
 
 
@@ -237,15 +254,12 @@ async def test_empty_thread_only_trigger(monkeypatch: pytest.MonkeyPatch) -> Non
 
 # ---------------------------------------------------------------------------
 # Scenario 4: Bot message identified by bot_id field
-# Given a message with bot_id="B123" (no user field matching bot_user_id)
-# When fetch_thread_history is called
-# Then that message has role="assistant", name="Tee-Mo"
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_bot_identified_by_bot_id_field(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Message with bot_id field (no user match) → role="assistant", name="Tee-Mo"."""
+    """Message with bot_id field (no user match) → ModelResponse."""
     messages = [
         _bot_msg_by_bot_id("B123", "I am a bot response via bot_id", "1000.001"),
         _user_msg("U001", "The trigger", "1000.002"),  # excluded
@@ -268,16 +282,12 @@ async def test_bot_identified_by_bot_id_field(monkeypatch: pytest.MonkeyPatch) -
     )
 
     assert len(result) == 1
-    assert result[0]["role"] == "assistant"
-    assert result[0]["name"] == "Tee-Mo"
-    assert result[0]["content"] == "I am a bot response via bot_id"
+    assert _is_assistant_msg(result[0])
+    assert _get_text(result[0]) == "I am a bot response via bot_id"
 
 
 # ---------------------------------------------------------------------------
 # Scenario 5: Messages in chronological order
-# Given a thread with 5 messages
-# When fetch_thread_history is called
-# Then the first 4 are returned in order (5th excluded as trigger)
 # ---------------------------------------------------------------------------
 
 
@@ -315,12 +325,12 @@ async def test_messages_returned_in_chronological_order(
     )
 
     assert len(result) == 4
-    assert result[0]["content"] == "Message 1"
-    assert result[1]["content"] == "Message 2"
-    assert result[2]["content"] == "Message 3 from bot"
-    assert result[3]["content"] == "Message 4"
-    # Verify role assignment is correct in the ordered list
-    assert result[0]["role"] == "user"
-    assert result[1]["role"] == "user"
-    assert result[2]["role"] == "assistant"
-    assert result[3]["role"] == "user"
+    assert "Message 1" in _get_text(result[0])
+    assert "Message 2" in _get_text(result[1])
+    assert _get_text(result[2]) == "Message 3 from bot"
+    assert "Message 4" in _get_text(result[3])
+    # Verify type assignment is correct in the ordered list
+    assert _is_user_msg(result[0])
+    assert _is_user_msg(result[1])
+    assert _is_assistant_msg(result[2])
+    assert _is_user_msg(result[3])

@@ -15,6 +15,7 @@ FLASHCARDS compliance:
 
 from __future__ import annotations
 
+from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, TextPart
 from slack_sdk.web.async_client import AsyncWebClient
 
 
@@ -68,12 +69,9 @@ async def fetch_thread_history(
             this user ID are treated as assistant turns.
 
     Returns:
-        A list of dicts, each with keys:
-          - ``"role"`` — ``"user"`` or ``"assistant"``
-          - ``"name"`` — display name of the speaker
-          - ``"content"`` — the message text
-        Messages are returned in the original chronological order that
-        Slack returns them.  The trigger (last) message is not included.
+        A list of pydantic-ai ``ModelMessage`` objects (``ModelRequest`` for
+        user turns, ``ModelResponse`` for assistant turns) in chronological
+        order.  The trigger (last) message is not included.
     """
     client = _make_client(bot_token)
 
@@ -86,19 +84,17 @@ async def fetch_thread_history(
     # Per-call cache: user_id → resolved display name
     user_name_cache: dict[str, str] = {}
 
-    result: list[dict] = []
+    result: list = []
 
     for msg in history:
+        text: str = msg.get("text", "")
         # Determine role first — bot_id field takes priority over user match
         if msg.get("bot_id") or msg.get("user") == bot_user_id:
-            role = "assistant"
-            name = "Tee-Mo"
+            result.append(ModelResponse(parts=[TextPart(content=text)]))
         else:
-            role = "user"
             user_id: str = msg.get("user", "unknown")
             name = await _resolve_user_name(client, user_id, user_name_cache)
-
-        result.append({"role": role, "name": name, "content": msg.get("text", "")})
+            result.append(ModelRequest(parts=[UserPromptPart(content=f"{name}: {text}")]))
 
     return result
 

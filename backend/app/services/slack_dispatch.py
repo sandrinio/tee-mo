@@ -277,9 +277,11 @@ async def _handle_app_mention(event: dict) -> None:
     # 6. Strip mention prefix: "<@UBOT123> some question" → "some question"
     stripped_text = re.sub(r"<@[A-Z0-9]+>\s*", "", text).strip()
 
-    # 6b. Resolve sender display name so the agent knows who is speaking
+    # 6b. Resolve sender display name so the agent knows who is speaking.
+    #     Never pass a raw Slack user ID (U...) to the agent — always resolve
+    #     to a human-readable name. Fallback to "there" for greeting safety.
     sender_user_id: str = event.get("user", "")
-    sender_name = sender_user_id  # fallback
+    sender_name = "there"  # fallback — never expose raw user IDs
     if sender_user_id:
         try:
             user_info = await client.users_info(user=sender_user_id)
@@ -287,10 +289,9 @@ async def _handle_app_mention(event: dict) -> None:
             profile = user_data.get("profile", {})
             dn = (profile.get("display_name") or "").strip()
             rn = (user_data.get("real_name") or "").strip()
-            sender_name = dn or rn or sender_user_id
+            sender_name = dn or rn or "there"
         except Exception as e:
             logger.warning("Failed to resolve display name for %s: %s", sender_user_id, e)
-            sender_name = sender_user_id
 
     user_prompt = f"{sender_name}: {stripped_text}"
 
@@ -371,6 +372,7 @@ async def _handle_app_mention(event: dict) -> None:
             "slack_dispatch: agent error in _handle_app_mention channel=%s: %s",
             channel,
             type(exc).__name__,
+            exc_info=True,
         )
         try:
             await client.chat_postMessage(
@@ -464,9 +466,9 @@ async def _handle_dm(event: dict) -> None:
 
     workspace_id: str = workspace_row["id"]
 
-    # Resolve sender display name
+    # Resolve sender display name — never expose raw user IDs.
     sender_user_id: str = event.get("user", "")
-    sender_name = sender_user_id
+    sender_name = "there"
     if sender_user_id:
         try:
             user_info = await client.users_info(user=sender_user_id)
@@ -474,9 +476,9 @@ async def _handle_dm(event: dict) -> None:
             profile = user_data.get("profile", {})
             dn = (profile.get("display_name") or "").strip()
             rn = (user_data.get("real_name") or "").strip()
-            sender_name = dn or rn or sender_user_id
+            sender_name = dn or rn or "there"
         except Exception:
-            sender_name = sender_user_id
+            pass
 
     user_prompt = f"{sender_name}: {text}"
 
@@ -547,6 +549,7 @@ async def _handle_dm(event: dict) -> None:
             "slack_dispatch: agent error in _handle_dm channel=%s: %s",
             channel,
             type(exc).__name__,
+            exc_info=True,
         )
         try:
             await client.chat_postMessage(

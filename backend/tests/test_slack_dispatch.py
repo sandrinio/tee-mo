@@ -317,7 +317,8 @@ async def test_app_mention_bound_channel_happy_path(
     monkeypatch.setattr(agent_module, "build_agent", AsyncMock(return_value=(mock_agent, mock_deps)))
 
     # --- Mock fetch_thread_history ---
-    canned_history = [{"role": "user", "name": "Alice", "content": "prior message"}]
+    from pydantic_ai.messages import ModelRequest, UserPromptPart
+    canned_history = [ModelRequest(parts=[UserPromptPart(content="Alice: prior message")])]
     import app.services.slack_thread as thread_module
     monkeypatch.setattr(
         thread_module, "fetch_thread_history", AsyncMock(return_value=canned_history)

@@ -16,13 +16,13 @@
       "worktree": null
     },
     "STORY-006-08": {
-      "state": "Bouncing",
+      "state": "Done",
       "qa_bounces": 0,
       "arch_bounces": 0,
       "worktree": null
     },
     "STORY-006-10": {
-      "state": "Bouncing",
+      "state": "Done",
       "qa_bounces": 0,
       "arch_bounces": 0,
       "worktree": null
@@ -35,6 +35,6 @@
     }
   },
   "phase": "Phase 1",
-  "last_action": "STORY-006-10: Ready to Bounce → Bouncing",
-  "updated_at": "2026-04-13T12:01:18.266Z"
+  "last_action": "STORY-006-10 completed",
+  "updated_at": "2026-04-13T12:25:24.620Z"
 }

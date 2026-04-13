@@ -61,10 +61,13 @@ vi.mock('../../../hooks/useKey', () => ({
 
 vi.mock('../../../hooks/useKnowledge', () => ({
   useKnowledgeQuery: vi.fn(),
+  useAddKnowledgeMutation: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
+  useRemoveKnowledgeMutation: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
 }));
 
 vi.mock('../../../lib/api', () => ({
   validateKey: vi.fn(),
+  getPickerToken: vi.fn(),
 }));
 
 import * as useDriveModule from '../../../hooks/useDrive';

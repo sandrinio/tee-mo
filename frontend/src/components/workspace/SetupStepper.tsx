@@ -38,9 +38,12 @@
  *   - Connector lines: `h-0.5 flex-1` — complete: `bg-brand-500`, future: `bg-slate-200`
  *   - Labels: `text-xs font-medium` — active: `text-brand-600`, else: `text-slate-500`
  */
+import { useState, useCallback } from 'react';
 import { useDriveStatusQuery } from '../../hooks/useDrive';
 import { useKeyQuery } from '../../hooks/useKey';
-import { useKnowledgeQuery } from '../../hooks/useKnowledge';
+import { useKnowledgeQuery, useAddKnowledgeMutation, useRemoveKnowledgeMutation } from '../../hooks/useKnowledge';
+import { getPickerToken, type KnowledgeFile } from '../../lib/api';
+import { Card } from '../ui/Card';
 import { KeySection } from './KeySection';
 
 // ---------------------------------------------------------------------------
@@ -219,7 +222,7 @@ export function SetupStepper({
           </div>
         )}
 
-        {/* Step 3: Index files from Drive */}
+        {/* Step 3: Index files from Drive — real Picker + file list */}
         {activeStep === 3 && (
           <div data-testid="step-3-content">
             <FilesStepContent workspaceId={workspaceId} />
@@ -265,20 +268,125 @@ function DriveStepContent({ workspaceId }: { workspaceId: string }) {
   );
 }
 
+/** Max files per workspace (matches backend 15-file cap). */
+const MAX_FILES = 15;
+
+/** GAPI script URL for Google Picker. */
+const GAPI_SCRIPT_URL = 'https://apis.google.com/js/api.js';
+
+/** Load Google API script (idempotent). */
+function loadGapiScript(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof gapi !== 'undefined') { resolve(); return; }
+    const script = document.createElement('script');
+    script.src = GAPI_SCRIPT_URL;
+    script.onload = () => resolve();
+    document.head.appendChild(script);
+  });
+}
+
 /**
  * FilesStepContent — step 3 content.
- * Prompts the user to index at least one file from Drive.
- *
- * @param workspaceId - UUID of the workspace to index files for.
+ * Renders the Google Picker button and indexed file list directly within
+ * the guided setup flow so users can add files without leaving the wizard.
  */
-function FilesStepContent({ workspaceId: _workspaceId }: { workspaceId: string }) {
+function FilesStepContent({ workspaceId }: { workspaceId: string }) {
+  const { data: files, isLoading } = useKnowledgeQuery(workspaceId);
+  const addMutation = useAddKnowledgeMutation(workspaceId);
+  const removeMutation = useRemoveKnowledgeMutation(workspaceId);
+  const [indexing, setIndexing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fileCount = files?.length ?? 0;
+  const atCap = fileCount >= MAX_FILES;
+
+  const handleOpenPicker = useCallback(async () => {
+    setError(null);
+    try {
+      const { access_token, picker_api_key } = await getPickerToken(workspaceId);
+      await loadGapiScript();
+      gapi.load('picker', () => {
+        const picker = new google.picker.PickerBuilder()
+          .setOAuthToken(access_token)
+          .setDeveloperKey(picker_api_key)
+          .addView(google.picker.ViewId.DOCS)
+          .setCallback(async (data: google.picker.CallbackData) => {
+            if (data.action !== google.picker.Action.PICKED) return;
+            const doc = data.docs?.[0];
+            if (!doc) return;
+            setIndexing(true);
+            try {
+              await addMutation.mutateAsync({
+                drive_file_id: doc.id,
+                title: doc.name,
+                link: doc.url,
+                mime_type: doc.mimeType,
+                access_token,
+              });
+            } catch (err) {
+              setError(err instanceof Error ? err.message : 'Failed to index file.');
+            } finally {
+              setIndexing(false);
+            }
+          })
+          .build();
+        picker.setVisible(true);
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to open file picker.');
+    }
+  }, [workspaceId, addMutation]);
+
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-6">
-      <h2 className="text-base font-semibold text-slate-900 mb-3">Index Knowledge Files</h2>
-      <p className="text-sm text-slate-500">
-        Use the workspace detail page to open the Google Drive Picker and index your first file.
-        Once at least one file is indexed, setup is complete.
-      </p>
+    <div className="space-y-4">
+      <Card>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
+          <h2 className="text-base font-semibold text-slate-900">Knowledge Files</h2>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-slate-500">{fileCount}/{MAX_FILES} files</span>
+            <button
+              type="button"
+              onClick={handleOpenPicker}
+              disabled={atCap || indexing}
+              className="rounded-md bg-brand-500 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {indexing ? 'Indexing…' : 'Add File'}
+            </button>
+          </div>
+        </div>
+        {error && <p className="text-xs text-rose-600 mt-1" role="alert">{error}</p>}
+      </Card>
+
+      {/* File list */}
+      {isLoading ? (
+        <div className="animate-pulse h-20 bg-slate-100 rounded-lg" />
+      ) : files && files.length > 0 ? (
+        <Card>
+          <ul className="divide-y divide-slate-100">
+            {files.map((f) => (
+              <li key={f.id} className="py-3 flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <a href={f.link} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-brand-500 hover:underline truncate block">
+                    {f.title}
+                  </a>
+                  {f.ai_description && (
+                    <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{f.ai_description}</p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeMutation.mutate(f.id)}
+                  className="text-xs text-slate-400 hover:text-rose-500 shrink-0"
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ) : (
+        <p className="text-sm text-slate-400 text-center py-4">No files indexed yet. Use the picker above to add your first file.</p>
+      )}
     </div>
   );
 }

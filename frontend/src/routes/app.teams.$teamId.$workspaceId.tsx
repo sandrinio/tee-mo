@@ -40,6 +40,7 @@ import { useKeyQuery } from '../hooks/useKey';
 import { useDriveStatusQuery, useDisconnectDriveMutation } from '../hooks/useDrive';
 import { useKnowledgeQuery, useAddKnowledgeMutation, useRemoveKnowledgeMutation } from '../hooks/useKnowledge';
 import { getPickerToken, type KnowledgeFile } from '../lib/api';
+import { SetupStepper } from '../components/workspace/SetupStepper';
 
 // ---------------------------------------------------------------------------
 // Route declaration
@@ -513,6 +514,13 @@ function WorkspaceDetailPage() {
   const hasKey = keyData?.has_key === true;
 
   /**
+   * Whether all three setup prerequisites are met.
+   * When false, show the guided SetupStepper instead of the normal detail view.
+   * Step 4 (Channels) is NOT part of this check per STORY-008-01 R5.
+   */
+  const isSetupComplete = driveConnected && hasKey && files.length > 0;
+
+  /**
    * Handles the result of a successful file indexing operation.
    * Shows a truncation warning banner if the response includes a warning field.
    */
@@ -521,6 +529,11 @@ function WorkspaceDetailPage() {
       setTruncationWarning(file.warning);
     }
   }, []);
+
+  // Show guided setup mode when setup is incomplete (STORY-008-01)
+  if (!isSetupComplete) {
+    return <SetupStepper workspaceId={workspaceId} teamId={teamId} />;
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-8">

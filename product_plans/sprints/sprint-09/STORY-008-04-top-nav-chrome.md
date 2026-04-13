@@ -239,3 +239,4 @@ useEffect(() => {
 ## Token Usage
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| QA | 26 | 928 | 954 |

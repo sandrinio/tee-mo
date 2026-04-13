@@ -1,26 +1,20 @@
 /**
- * /app — Slack Teams dashboard (STORY-005A-06).
+ * /app — Layout route for all /app/* pages (STORY-005A-06, STORY-008-04).
  *
- * Replaces the Sprint 2 welcome-card placeholder with the real Slack Teams page.
- * This is the first screen a user sees after logging in; it shows all Slack
- * workspaces where Tee-Mo is installed for their account, plus an install button
- * to add new workspaces.
+ * This is a pure layout route. It:
+ *   1. Wraps all /app/* child routes in ProtectedRoute (auth guard).
+ *   2. Renders AppNav at the top with the logged-in user's email.
+ *   3. Wraps the child Outlet in a centered <main> container.
  *
- * Design decisions:
- *   - Install button is always an `<a href>` — NOT an onClick handler. The browser
- *     must perform a full-page navigation so the session cookie rides along to the
- *     backend's OAuth initiation endpoint, which then redirects to Slack.
- *   - Flash banners are driven by the `slack_install` search param set by the OAuth
- *     callback. BANNER_VARIANTS is the SINGLE source of banner copy — never spread
- *     strings across the component body.
- *   - All data fetching goes through TanStack Query + listSlackTeams() in lib/api.ts.
- *     No raw fetch() calls in this file.
- *   - validateSearch narrows the `slack_install` param to a union type so useSearch
- *     returns typed data without any runtime overhead.
+ * STORY-008-04: Added AppNav and main content wrapper.
+ * User email is sourced from the Zustand auth store (useAuth) — same store
+ * used by ProtectedRoute and AuthInitializer.
  */
 import { createFileRoute, Outlet } from '@tanstack/react-router';
 
 import { ProtectedRoute } from '../components/auth/ProtectedRoute';
+import { AppNav } from '../components/layout/AppNav';
+import { useAuth } from '../stores/authStore';
 
 // ---------------------------------------------------------------------------
 // Route declaration
@@ -39,12 +33,22 @@ export const Route = createFileRoute('/app')({
 });
 
 /**
- * AppLayout — wraps child routes in ProtectedRoute + Outlet.
+ * AppLayout — wraps child routes in ProtectedRoute + AppNav + Outlet.
+ *
+ * Reads the authenticated user's email from the Zustand auth store to pass
+ * to AppNav. Falls back to empty string during the 'unknown' auth init phase
+ * (ProtectedRoute shows a spinner in that case, so AppNav is not visible).
  */
 function AppLayout() {
+  const user = useAuth((s) => s.user);
+  const userEmail = user?.email ?? '';
+
   return (
     <ProtectedRoute>
-      <Outlet />
+      <AppNav userEmail={userEmail} />
+      <main className="px-6 lg:px-8 py-8 lg:py-12 max-w-7xl mx-auto">
+        <Outlet />
+      </main>
     </ProtectedRoute>
   );
 }

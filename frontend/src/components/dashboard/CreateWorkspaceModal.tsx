@@ -10,7 +10,7 @@
  *   - Renders the overlay when `open === true`; returns null when `open === false`.
  *   - Submitting a non-empty name calls the create mutation.
  *   - On mutation success the modal closes via `onClose()`.
- *   - On mutation error the `error.message` from the API is shown inline.
+ *   - On mutation error a toast.error is shown (STORY-008-04 — replaces inline error).
  *   - Clicking the backdrop closes the modal without creating a workspace.
  *   - "Cancel" button closes the modal without creating a workspace.
  *
@@ -20,6 +20,7 @@
  *   - No new `@theme` tokens — uses built-in Tailwind 4 classes.
  */
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { useCreateWorkspaceMutation } from '../../hooks/useWorkspaces';
 
 /** Props accepted by CreateWorkspaceModal. */
@@ -71,8 +72,10 @@ export function CreateWorkspaceModal({
       await mutation.mutateAsync(trimmed);
       setName('');
       onClose();
-    } catch {
-      // Error surfaces through mutation.error below — no additional handling needed.
+    } catch (err) {
+      // Show error as a toast — no inline error paragraph (STORY-008-04).
+      const message = err instanceof Error ? err.message : 'Failed to create workspace';
+      toast.error(message);
     }
   }
 
@@ -116,16 +119,6 @@ export function CreateWorkspaceModal({
               className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:border-[#E94560] focus:outline-none focus:ring-1 focus:ring-[#E94560]"
             />
           </div>
-
-          {/* Inline error from mutation */}
-          {mutation.error && (
-            <p
-              role="alert"
-              className="mb-3 text-sm text-rose-700"
-            >
-              {mutation.error.message}
-            </p>
-          )}
 
           {/* Action buttons */}
           <div className="flex justify-end gap-2">

@@ -23,8 +23,10 @@ Import notes (FLASHCARDS.md):
 """
 
 import asyncio
+import inspect
 import logging
 import uuid
+from datetime import datetime
 
 import httpx  # MUST be at module level — tests monkeypatch httpx.AsyncClient (FLASHCARDS.md)
 
@@ -425,3 +427,123 @@ async def get_picker_token(
         "access_token": access_token,
         "picker_api_key": s.google_picker_api_key,
     }
+
+
+# ---------------------------------------------------------------------------
+# POST /api/workspaces/{workspace_id}/knowledge/reindex — re-extract all files
+# ---------------------------------------------------------------------------
+
+
+@router.post("/api/workspaces/{workspace_id}/knowledge/reindex")
+async def reindex_knowledge(
+    workspace_id: str,
+    user_id: str = Depends(get_current_user_id),
+) -> dict:
+    """Re-extract content and regenerate AI descriptions for all indexed files.
+
+    Iterates all rows in ``teemo_knowledge_index`` for the workspace, re-fetches
+    each file from Google Drive, recomputes the content hash, regenerates the AI
+    description, and updates the row in Supabase (via ``.update()``, not
+    ``.upsert()`` — these are existing rows).
+
+    Per-file errors are caught and collected in the ``errors`` list so a single
+    failing file does not abort the entire re-index run.
+
+    Gate conditions (returns HTTP 400):
+      - No BYOK key stored for the workspace.
+      - No Google Drive OAuth token stored for the workspace.
+
+    Args:
+        workspace_id: Path parameter — target workspace UUID.
+        user_id: Injected by get_current_user_id; raises 401 if missing/invalid.
+
+    Returns:
+        JSON object with:
+          - ``reindexed``: Number of files successfully re-indexed.
+          - ``failed``: Number of files that failed during re-indexing.
+          - ``errors``: List of ``{"file_id": str, "error": str}`` dicts for failures.
+
+    Raises:
+        HTTPException(400): No BYOK key or no Drive connected.
+        HTTPException(401): No valid auth cookie/token.
+        HTTPException(404): Workspace not found or not owned by user.
+    """
+    workspace = await _assert_workspace_owner(workspace_id, user_id)
+
+    # Gate: BYOK key required
+    encrypted_api_key = workspace.get("encrypted_api_key")
+    if not encrypted_api_key:
+        raise HTTPException(status_code=400, detail="BYOK key required to re-index files")
+
+    # Gate: Drive must be connected
+    encrypted_refresh_token = workspace.get("encrypted_google_refresh_token")
+    if not encrypted_refresh_token:
+        raise HTTPException(status_code=400, detail="Google Drive not connected")
+
+    # Decrypt BYOK key once for all files
+    provider = workspace.get("ai_provider", "anthropic")
+    api_key_plaintext = _enc.decrypt(encrypted_api_key)
+
+    # Build the Drive client once for all files
+    drive_client = _drive_service.get_drive_client(encrypted_refresh_token)
+
+    # Fetch all indexed files for this workspace
+    list_result = (
+        _db.get_supabase()
+        .table("teemo_knowledge_index")
+        .select("*")
+        .eq("workspace_id", workspace_id)
+        .execute()
+    )
+    file_rows = list_result.data or []
+
+    reindexed = 0
+    failed = 0
+    errors: list[dict] = []
+
+    for file_row in file_rows:
+        file_id = file_row.get("drive_file_id", "")
+        try:
+            # Re-fetch content from Drive
+            # fetch_file_content returns _AwaitableStr — use inspect.isawaitable to handle both
+            # sync and async return values (FLASHCARDS.md / STORY-006-08 pattern).
+            _result = _drive_service.fetch_file_content(
+                drive_client,
+                file_row["drive_file_id"],
+                file_row["mime_type"],
+                provider=provider,
+                api_key=api_key_plaintext,
+            )
+            content = (await _result) if inspect.isawaitable(_result) else _result
+
+            # Recompute content hash
+            content_hash = _drive_service.compute_content_hash(content)
+
+            # Regenerate AI description
+            ai_description = await _scan_service.generate_ai_description(
+                content, provider, api_key_plaintext
+            )
+
+            # Update the existing row — use .update() not .upsert() (existing rows)
+            _db.get_supabase().table("teemo_knowledge_index").update(
+                {
+                    "cached_content": content,
+                    "content_hash": content_hash,
+                    "ai_description": ai_description,
+                    "last_scanned_at": datetime.utcnow().isoformat(),
+                }
+            ).eq("id", file_row["id"]).execute()
+
+            reindexed += 1
+
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "reindex_knowledge: failed to re-index file %s in workspace %s: %s",
+                file_id,
+                workspace_id,
+                exc,
+            )
+            failed += 1
+            errors.append({"file_id": file_id, "error": str(exc)})
+
+    return {"reindexed": reindexed, "failed": failed, "errors": errors}

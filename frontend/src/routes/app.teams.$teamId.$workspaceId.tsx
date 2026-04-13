@@ -39,7 +39,7 @@ import { Card } from '../components/ui/Card';
 import { useWorkspaceQuery } from '../hooks/useWorkspaces';
 import { useKeyQuery } from '../hooks/useKey';
 import { useDriveStatusQuery, useDisconnectDriveMutation } from '../hooks/useDrive';
-import { useKnowledgeQuery, useAddKnowledgeMutation, useRemoveKnowledgeMutation } from '../hooks/useKnowledge';
+import { useKnowledgeQuery, useAddKnowledgeMutation, useRemoveKnowledgeMutation, useReindexKnowledgeMutation } from '../hooks/useKnowledge';
 import { getPickerToken, deleteWorkspace, type KnowledgeFile } from '../lib/api';
 import { SetupStepper } from '../components/workspace/SetupStepper';
 import { ChannelSection } from '../components/workspace/ChannelSection';
@@ -206,6 +206,12 @@ interface PickerSectionProps {
   onIndexingChange?: (indexing: boolean) => void;
 }
 
+/** Result state for the reindex operation, shown inline after completion. */
+interface ReindexFeedback {
+  reindexed: number;
+  failed: number;
+}
+
 /**
  * PickerSection — "Add File" button with Google Picker integration.
  *
@@ -234,8 +240,10 @@ function PickerSection({
 }: PickerSectionProps) {
   const [indexing, setIndexing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reindexFeedback, setReindexFeedback] = useState<ReindexFeedback | null>(null);
 
   const addKnowledgeMutation = useAddKnowledgeMutation(workspaceId);
+  const reindexMutation = useReindexKnowledgeMutation(workspaceId);
 
   const atCap = fileCount >= MAX_FILES;
   const buttonDisabled = !driveConnected || !hasKey || atCap || indexing;
@@ -291,16 +299,49 @@ function PickerSection({
     }
   }, [workspaceId, addKnowledgeMutation, onFileIndexed]);
 
+  /** Handles the Re-index All Files button click. */
+  const handleReindex = useCallback(async () => {
+    setReindexFeedback(null);
+    try {
+      const result = await reindexMutation.mutateAsync();
+      setReindexFeedback({ reindexed: result.reindexed, failed: result.failed });
+    } catch {
+      // error surfaced via reindexMutation.error
+    }
+  }, [reindexMutation]);
+
+  /** Re-index button is disabled when there are no files, Drive/key missing, or pending. */
+  const reindexDisabled =
+    fileCount === 0 || !driveConnected || !hasKey || reindexMutation.isPending || indexing;
+
   return (
     <Card>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
         <h2 className="text-base font-semibold text-slate-900">Knowledge Files</h2>
 
-        {/* File count indicator + Add File button */}
+        {/* File count indicator + action buttons */}
         <div className="flex items-center gap-3">
           <span className="text-sm text-slate-500">
             {fileCount}/{MAX_FILES} files
           </span>
+          {/* Re-index All Files button — only shown when files exist */}
+          {fileCount > 0 && (
+            <button
+              type="button"
+              onClick={handleReindex}
+              disabled={reindexDisabled}
+              title={
+                !driveConnected
+                  ? 'Connect Drive first'
+                  : !hasKey
+                    ? 'Configure an API key first'
+                    : undefined
+              }
+              className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {reindexMutation.isPending ? 'Re-indexing…' : 'Re-index All Files'}
+            </button>
+          )}
           <button
             type="button"
             onClick={handleOpenPicker}
@@ -330,6 +371,26 @@ function PickerSection({
       {error && (
         <p className="text-xs text-rose-600 mt-1" role="alert">
           {error}
+        </p>
+      )}
+
+      {/* Re-index error */}
+      {reindexMutation.error && (
+        <p className="text-xs text-rose-600 mt-1" role="alert">
+          {reindexMutation.error instanceof Error
+            ? reindexMutation.error.message
+            : 'Re-index failed. Please try again.'}
+        </p>
+      )}
+
+      {/* Re-index success feedback */}
+      {reindexFeedback && (
+        <p className="text-xs text-slate-600 mt-1">
+          Re-indexed {reindexFeedback.reindexed} file
+          {reindexFeedback.reindexed !== 1 ? 's' : ''}
+          {reindexFeedback.failed > 0
+            ? ` (${reindexFeedback.failed} failed — check Drive permissions)`
+            : ' successfully.'}
         </p>
       )}
     </Card>

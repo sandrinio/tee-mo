@@ -1393,3 +1393,98 @@ class TestConcurrentIndexingSerialized:
             f"to implement R8 (sequential indexing queue). Found attrs: "
             f"{[a for a in dir(knowledge_module) if 'lock' in a.lower()]}"
         )
+
+
+# ---------------------------------------------------------------------------
+# STORY-006-10: cached_content column — Test 1
+# ---------------------------------------------------------------------------
+
+
+class TestIndexFileStoresCachedContent:
+    """STORY-006-10 Test 1: index_file endpoint must store cached_content in the inserted row.
+
+    When a file is successfully indexed the INSERT payload sent to Supabase must
+    include a ``cached_content`` key whose value equals the raw text fetched from
+    Drive at index time.
+
+    RED: Fails because knowledge.py does not yet include ``cached_content`` in the
+    insert row dict (line ~258 in the current implementation inserts a row without
+    that column).
+    """
+
+    def test_index_file_insert_payload_includes_cached_content(
+        self,
+        test_client: TestClient,
+        override_current_user: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """POST /api/workspaces/{id}/knowledge must include cached_content in the Supabase INSERT.
+
+        Strategy:
+          - Intercept the Supabase .insert() call on teemo_knowledge_index.
+          - Capture the payload passed to .insert().
+          - Assert that the payload dict contains ``cached_content`` equal to FAKE_FILE_CONTENT.
+
+        RED: The current insert row dict in knowledge.py omits ``cached_content``,
+        so this assertion will fail until the Green phase adds it.
+        """
+        inserted_payloads: list[dict] = []
+
+        # Build a customised _TableRouter that records insert payloads.
+        class _CapturingTableRouter(_TableRouter):
+            """Extends _TableRouter to record what is passed to .insert()."""
+
+            def _knowledge_table_mock(self) -> MagicMock:
+                base_mock = super()._knowledge_table_mock()
+
+                # Wrap the insert side to capture the payload.
+                original_insert = base_mock.insert
+
+                def _capture_insert(payload: dict) -> MagicMock:
+                    inserted_payloads.append(payload)
+                    return original_insert(payload)
+
+                base_mock.insert = _capture_insert
+                return base_mock
+
+        inserted_row = _make_knowledge_row(content_hash=FAKE_CONTENT_HASH)
+        # Build workspace row with Drive and BYOK configured.
+        workspace_row = _make_workspace_row()
+        router = _CapturingTableRouter(
+            workspace_row=workspace_row,
+            knowledge_rows=[],
+            file_count=0,
+            insert_result_row=inserted_row,
+        )
+        mock_sb = MagicMock()
+        mock_sb.table.side_effect = router
+        monkeypatch.setattr("app.core.db.get_supabase", lambda: mock_sb)
+
+        _patch_drive_services(monkeypatch, content=FAKE_FILE_CONTENT, content_hash=FAKE_CONTENT_HASH)
+        _patch_scan_service(monkeypatch, description=FAKE_AI_DESCRIPTION)
+        _patch_encryption(monkeypatch)
+
+        response = test_client.post(
+            f"/api/workspaces/{FAKE_WORKSPACE_ID}/knowledge",
+            json=VALID_PAYLOAD,
+        )
+
+        assert response.status_code in (200, 201), (
+            f"Expected 200 or 201, got {response.status_code}: {response.text}"
+        )
+
+        assert inserted_payloads, (
+            "No INSERT payload was captured — the Supabase .insert() was not called. "
+            "Check that the knowledge route is calling _db.get_supabase().table('teemo_knowledge_index').insert(...)."
+        )
+
+        payload = inserted_payloads[0]
+        assert "cached_content" in payload, (
+            f"INSERT payload is missing 'cached_content'. "
+            f"STORY-006-10 requires the fetched content to be stored at index time. "
+            f"Payload keys found: {list(payload.keys())}"
+        )
+        assert payload["cached_content"] == FAKE_FILE_CONTENT, (
+            f"INSERT payload 'cached_content' must equal the fetched file content. "
+            f"Expected: {FAKE_FILE_CONTENT!r}. Got: {payload['cached_content']!r}"
+        )

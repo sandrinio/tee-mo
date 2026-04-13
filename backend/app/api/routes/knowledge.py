@@ -256,6 +256,7 @@ async def index_file(
             "mime_type": payload.mime_type,
             "ai_description": ai_description,
             "content_hash": content_hash,
+            "cached_content": content,  # STORY-006-10: cache extracted content at index time
         }
         insert_result = (
             _db.get_supabase()

@@ -697,7 +697,7 @@ function WorkspaceDetailPage() {
    * When false, show the guided SetupStepper instead of the normal detail view.
    * Step 4 (Channels) is NOT part of this check per STORY-008-01 R5.
    */
-  const isSetupComplete = driveConnected && hasKey && files.length > 0;
+  const isSetupComplete = driveConnected && hasKey;
 
   /**
    * Handles the result of a successful file indexing operation.

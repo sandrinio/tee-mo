@@ -200,7 +200,7 @@ async def wiki_ingest_loop() -> None:
     """
     logger.info(
         "cron.wiki_ingest.init",
-        extra={"event": "cron.wiki_ingest.init", "message": "Wiki ingest cron task started"},
+        extra={"event": "cron.wiki_ingest.init", "detail": "Wiki ingest cron task started"},
     )
 
     while True:

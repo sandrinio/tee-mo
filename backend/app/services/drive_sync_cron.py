@@ -274,7 +274,7 @@ async def drive_sync_loop() -> None:
     """
     logger.info(
         "cron.drive_sync.init",
-        extra={"event": "cron.drive_sync.init", "message": "Drive sync cron task started"},
+        extra={"event": "cron.drive_sync.init", "detail": "Drive sync cron task started"},
     )
 
     while True:
@@ -329,7 +329,7 @@ async def drive_sync_loop() -> None:
         except asyncio.CancelledError:
             logger.info(
                 "cron.drive_sync.shutdown",
-                extra={"event": "cron.drive_sync.shutdown", "message": "Drive sync cron task cancelled"},
+                extra={"event": "cron.drive_sync.shutdown", "detail": "Drive sync cron task cancelled"},
             )
             raise
         except Exception as exc:  # noqa: BLE001

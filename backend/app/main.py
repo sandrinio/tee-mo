@@ -73,11 +73,11 @@ async def lifespan(app: FastAPI):
     """
     # Start Drive content sync cron as a background task.
     cron_task = asyncio.create_task(drive_sync_loop())
-    logger.info("lifespan.startup", extra={"event": "lifespan.startup", "message": "Drive sync cron registered"})
+    logger.info("lifespan.startup", extra={"event": "lifespan.startup", "detail": "Drive sync cron registered"})
 
     # Start Wiki Ingest Cron as a background task.
     wiki_cron_task = asyncio.create_task(wiki_ingest_loop())
-    logger.info("lifespan.startup", extra={"event": "lifespan.startup", "message": "Wiki ingest cron registered"})
+    logger.info("lifespan.startup", extra={"event": "lifespan.startup", "detail": "Wiki ingest cron registered"})
 
     yield
 
@@ -92,8 +92,8 @@ async def lifespan(app: FastAPI):
         await wiki_cron_task
     except asyncio.CancelledError:
         pass
-    logger.info("lifespan.shutdown", extra={"event": "lifespan.shutdown", "message": "Drive sync cron stopped"})
-    logger.info("lifespan.shutdown", extra={"event": "lifespan.shutdown", "message": "Wiki ingest cron stopped"})
+    logger.info("lifespan.shutdown", extra={"event": "lifespan.shutdown", "detail": "Drive sync cron stopped"})
+    logger.info("lifespan.shutdown", extra={"event": "lifespan.shutdown", "detail": "Wiki ingest cron stopped"})
 
 
 app = FastAPI(

@@ -669,14 +669,22 @@ async def build_agent(
                 return "Google Drive access has been revoked. Please reconnect Drive from the dashboard."
             return f"Drive access error: {e}"
 
-        content = fetch_file_content(drive_client, drive_file_id, file_row["mime_type"])
+        # Decrypt the BYOK API key so fetch_file_content can trigger multimodal
+        # fallback if the file is a scanned/image-only PDF (STORY-006-08).
+        from app.core.encryption import decrypt as _decrypt_key
+        api_key_plain = _decrypt_key(ws_row["encrypted_api_key"])
+        content = await fetch_file_content(
+            drive_client,
+            drive_file_id,
+            file_row["mime_type"],
+            provider=ws_row["ai_provider"],
+            api_key=api_key_plain,
+        )
 
         # 4. Self-healing: if content hash has changed, re-generate the AI
         #    description and update teemo_knowledge_index (ADR-006).
         new_hash = compute_content_hash(content)
         if new_hash != file_row.get("content_hash"):
-            from app.core.encryption import decrypt as _decrypt_key
-            api_key_plain = _decrypt_key(ws_row["encrypted_api_key"])
             new_description = await generate_ai_description(
                 content, ws_row["ai_provider"], api_key_plain
             )

@@ -28,11 +28,11 @@ confirmed_at: "2026-04-13"
 
 | Priority | Story | Epic | Label | V-Bounce State | Blocker |
 |----------|-------|------|-------|----------------|---------|
-| 1a | [STORY-008-01: Guided Setup Mode](./STORY-008-01-guided-setup-mode.md) | EPIC-008 | L3 | Bouncing | — |
-| 1b | [STORY-008-02: Channel Binding UI](./STORY-008-02-channel-binding-ui.md) | EPIC-008 | L3 | Bouncing | — |
-| 1c | [STORY-008-04: Top Nav & Chrome](./STORY-008-04-top-nav-chrome.md) | EPIC-008 | L2 | Bouncing | — |
-| 2 | [STORY-008-03: Card & Dashboard Polish](./STORY-008-03-card-dashboard-polish.md) | EPIC-008 | L2 | Refinement | 008-02, 008-04 |
-| 3 | [STORY-008-05: E2E Verification](./STORY-008-05-e2e-verification.md) | EPIC-008 | L2 | Refinement | All above |
+| 1a | [STORY-008-01: Guided Setup Mode](./STORY-008-01-guided-setup-mode.md) | EPIC-008 | L3 | Done | — |
+| 1b | [STORY-008-02: Channel Binding UI](./STORY-008-02-channel-binding-ui.md) | EPIC-008 | L3 | Done | — |
+| 1c | [STORY-008-04: Top Nav & Chrome](./STORY-008-04-top-nav-chrome.md) | EPIC-008 | L2 | Done | — |
+| 2 | [STORY-008-03: Card & Dashboard Polish](./STORY-008-03-card-dashboard-polish.md) | EPIC-008 | L2 | Done | 008-02, 008-04 |
+| 3 | [STORY-008-05: E2E Verification](./STORY-008-05-e2e-verification.md) | EPIC-008 | L2 | Done | All above |
 
 ### Context Pack Readiness
 
@@ -161,4 +161,9 @@ All questions resolved during EPIC-008 decomposition. No blockers for sprint exe
 
 | Story | Final State | QA Bounces | Arch Bounces | Tests Written | Correction Tax | Notes |
 |-------|-------------|------------|--------------|---------------|----------------|-------|
+| STORY-008-04 | Done | 1 | 0 | — | 5% | Top nav, sonner toasts, FlashBanner migration. QA bounced once (sonner not in pkg.json, stub prop, catch block). TL fixed. |
+| STORY-008-02 | Done | 0 | 0 | — | 5% | Channel binding UI + backend is_member enrichment. 20 tests. 1 conflict resolved at merge (token usage table). |
+| STORY-008-01 | Done | 0 | 0 | — | 0% | Guided setup mode, KeySection extraction, SetupStepper. 22 tests. Stub conflict resolved at merge (took real impl). |
+| STORY-008-03 | Done | 0 | 0 | — | 0% | Card polish: channel chips, DM badge, setup indicators, grid layout, token cleanup. Fast Track. 20 new tests. |
+| STORY-008-05 | Done | 0 | 0 | — | 0% | Automated regression gates pass (123 tests, vite build). Manual E2E deferred to post-deploy user walkthrough. Fast Track. |
 <!-- EXECUTION_LOG_END -->

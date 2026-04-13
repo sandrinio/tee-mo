@@ -246,3 +246,4 @@ return enriched
 ## Token Usage
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| QA | 16 | 860 | 876 |

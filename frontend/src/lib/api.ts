@@ -510,6 +510,107 @@ export function indexKnowledgeFile(workspaceId: string, body: IndexFileRequest):
   );
 }
 
+// ---------------------------------------------------------------------------
+// Channel Binding wrappers (STORY-008-02)
+// ---------------------------------------------------------------------------
+
+/**
+ * A Slack channel returned by GET /api/slack/teams/{teamId}/channels.
+ * Mirrors the Slack conversations.list response shape (id, name, is_private).
+ */
+export interface SlackChannel {
+  /** Slack-assigned channel identifier, e.g. "C001". */
+  id: string;
+  /** Human-readable channel name without the "#" prefix. */
+  name: string;
+  /** Whether the channel is private (true) or public (false). */
+  is_private: boolean;
+}
+
+/**
+ * A channel binding record returned by GET /api/workspaces/{workspaceId}/channels.
+ * Enriched server-side with channel_name and is_member from the Slack API.
+ */
+export interface ChannelBinding {
+  /** Slack channel ID bound to this workspace. */
+  slack_channel_id: string;
+  /** UUID of the workspace this binding belongs to. */
+  workspace_id: string;
+  /** ISO 8601 timestamp when the channel was bound. */
+  bound_at: string;
+  /** Human-readable channel name (from Slack API enrichment). */
+  channel_name?: string;
+  /** Whether the Tee-Mo bot is a member of the channel (from conversations.info). */
+  is_member?: boolean;
+}
+
+/**
+ * GET /api/slack/teams/{teamId}/channels — lists all Slack channels in a team.
+ *
+ * Returns channels the bot token can see (public + private where bot is member).
+ * Requires a valid session cookie and ownership of the Slack team.
+ *
+ * @param teamId - The Slack team ID (e.g. "T0123ABCDEF").
+ * @returns Array of Slack channel records.
+ */
+export function listSlackTeamChannels(teamId: string): Promise<SlackChannel[]> {
+  return apiGet<SlackChannel[]>(`/api/slack/teams/${encodeURIComponent(teamId)}/channels`);
+}
+
+/**
+ * GET /api/workspaces/{workspaceId}/channels — lists all channel bindings for a workspace.
+ *
+ * Results are enriched server-side with channel_name and is_member fields
+ * via Slack conversations.info calls.
+ *
+ * @param workspaceId - UUID of the workspace to list channel bindings for.
+ * @returns Array of enriched channel binding records.
+ */
+export function listChannelBindings(workspaceId: string): Promise<ChannelBinding[]> {
+  return apiGet<ChannelBinding[]>(`/api/workspaces/${encodeURIComponent(workspaceId)}/channels`);
+}
+
+/**
+ * POST /api/workspaces/{workspaceId}/channels — binds a Slack channel to a workspace.
+ *
+ * The bot must be invited to the channel separately (hence is_member may be false
+ * immediately after binding). Throws a 409 error if the channel is already bound.
+ *
+ * @param workspaceId - UUID of the workspace to bind the channel to.
+ * @param channelId   - The Slack channel ID to bind (e.g. "C001").
+ * @returns The created channel binding record.
+ */
+export function bindChannel(workspaceId: string, channelId: string): Promise<ChannelBinding> {
+  return apiPost<{ slack_channel_id: string }, ChannelBinding>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/channels`,
+    { slack_channel_id: channelId },
+  );
+}
+
+/**
+ * DELETE /api/workspaces/{workspaceId}/channels/{channelId} — unbinds a Slack channel.
+ *
+ * Uses raw fetch (no apiDelete helper) to match existing delete pattern.
+ * Throws an Error with the backend `detail` message on non-2xx responses.
+ *
+ * @param workspaceId - UUID of the workspace the channel is bound to.
+ * @param channelId   - The Slack channel ID to unbind (e.g. "C001").
+ * @returns void (HTTP 204 No Content).
+ */
+export async function unbindChannel(workspaceId: string, channelId: string): Promise<void> {
+  const r = await fetch(
+    `${API_URL}/api/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(channelId)}`,
+    {
+      method: 'DELETE',
+      credentials: 'include',
+    },
+  );
+  if (!r.ok) {
+    const payload = await r.json().catch(() => ({}));
+    throw new Error(payload?.detail ?? `HTTP ${r.status}`);
+  }
+}
+
 /**
  * DELETE /api/workspaces/{workspaceId}/knowledge/{knowledgeId}
  * Removes an indexed knowledge file from the workspace knowledge base.

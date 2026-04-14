@@ -283,7 +283,11 @@ def _build_system_prompt(
         "- Never reveal internal workspace IDs, API keys, or stack traces.\n"
         "- When a skill is available that fits the request, load it first with load_skill.\n"
         "- Always confirm destructive actions before executing them.\n"
-        "- Always identify who you're responding to by name when the thread has multiple participants.\n\n"
+        "- Always identify who you're responding to by name when the thread has multiple participants.\n"
+        "- CRITICAL: When users ask what documents or wiki pages are available, "
+        "ONLY list items from the ## Available Documents and ## Wiki Index sections below. "
+        "NEVER invent, fabricate, or guess document titles, IDs, or slugs. "
+        "If no documents/wiki pages exist in the catalog, say so directly.\n\n"
         "Slack formatting (CRITICAL — you are writing Slack mrkdwn, NOT Markdown):\n"
         "- Bold: *text* (single asterisk, NOT double **text**)\n"
         "- Italic: _text_ (underscore)\n"
@@ -316,13 +320,18 @@ def _build_system_prompt(
         prompt += f"\n\n## Available Skills\n{skill_lines}"
 
     if wiki_pages:
-        # Wiki index is present — render it as the primary knowledge catalog.
-        # STORY-013-01 R3: format is "- [{slug}] {title} — {tldr}"
+        # Wiki index — one line per page with truncated TLDR to keep prompt compact.
+        # Full TLDR is only available inside each page's content (via read_wiki_page).
+        # Long prompts degrade LLM instruction-following; cap the index at ~120 chars/entry.
+        def _trim(text: str, max_len: int = 120) -> str:
+            text = (text or "").strip().replace("\n", " ")
+            return text if len(text) <= max_len else text[: max_len - 1] + "…"
+
         wiki_lines = "\n".join(
-            f"- [{p['slug']}] {p['title']} — {p.get('tldr', '')}"
+            f"- [{p['slug']}] {p['title']} — {_trim(p.get('tldr', ''))}"
             for p in wiki_pages
         )
-        prompt += f"\n\n## Wiki Index\n{wiki_lines}"
+        prompt += f"\n\n## Wiki Index ({len(wiki_pages)} pages)\n{wiki_lines}"
 
     if documents:
         doc_lines = "\n".join(

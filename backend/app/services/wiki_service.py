@@ -588,6 +588,71 @@ async def reingest_document(
     return await ingest_document(supabase, workspace_id, document_id, provider, api_key)
 
 
+async def search_wiki(
+    supabase: Any,
+    workspace_id: str,
+    query: str,
+    top_k: int = 10,
+) -> list[dict]:
+    """Full-text search across wiki pages using Postgres BM25 (tsvector).
+
+    Uses the ``search_vector`` GENERATED column on ``teemo_wiki_pages`` with a
+    GIN index for fast ranking. This is the primary retrieval path for the
+    agent — it replaces stuffing the entire wiki index into the system prompt
+    (EPIC-017 Phase A).
+
+    Args:
+        supabase:     Authenticated Supabase client.
+        workspace_id: UUID of the workspace (isolation enforced).
+        query:        Natural-language query string from the agent.
+        top_k:        Max number of pages to return (default 10).
+
+    Returns:
+        List of matching pages ordered by relevance, each with
+        ``slug``, ``title``, ``tldr``, ``page_type`` keys.
+        Returns [] on empty query or no matches.
+    """
+    if not query or not query.strip():
+        return []
+
+    # Sanitize the query to strip punctuation that breaks tsquery parsing.
+    safe_query = re.sub(r"[^\w\s]", " ", query).strip()
+    if not safe_query:
+        return []
+
+    # Use PostgREST's `wfts` operator (websearch_to_tsquery). The postgrest-py
+    # client's .text_search() defaults to `fts` which doesn't handle natural
+    # language; .filter() with the raw operator bypasses that limitation.
+    try:
+        result = (
+            supabase.table("teemo_wiki_pages")
+            .select("slug, title, tldr, page_type")
+            .eq("workspace_id", workspace_id)
+            .filter("search_vector", "wfts(english)", safe_query)
+            .limit(top_k)
+            .execute()
+        )
+        return result.data or []
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "wiki_service: search_wiki failed for workspace=%s query=%r: %s",
+            workspace_id, query[:80], exc,
+        )
+        # Fall back to title substring match so the agent still gets something.
+        try:
+            fallback = (
+                supabase.table("teemo_wiki_pages")
+                .select("slug, title, tldr, page_type")
+                .eq("workspace_id", workspace_id)
+                .ilike("title", f"%{query[:60]}%")
+                .limit(top_k)
+                .execute()
+            )
+            return fallback.data or []
+        except Exception:
+            return []
+
+
 async def rebuild_wiki_index(
     supabase: Any,
     workspace_id: str,

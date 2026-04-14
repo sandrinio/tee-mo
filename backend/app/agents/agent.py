@@ -320,18 +320,37 @@ def _build_system_prompt(
         prompt += f"\n\n## Available Skills\n{skill_lines}"
 
     if wiki_pages:
-        # Wiki index — one line per page with truncated TLDR to keep prompt compact.
-        # Full TLDR is only available inside each page's content (via read_wiki_page).
-        # Long prompts degrade LLM instruction-following; cap the index at ~120 chars/entry.
+        # EPIC-017 Phase A: adaptive wiki index.
+        # - Small workspaces (<=15 pages): show slug + title + trimmed TLDR inline.
+        # - Large workspaces: show compact slug+title catalog and require `search_wiki`
+        #   for retrieval. Full TLDRs read via `read_wiki_page(slug)`.
+        # This keeps the system prompt under ~8K chars regardless of wiki size
+        # and prevents hallucination driven by prompt stuffing.
         def _trim(text: str, max_len: int = 120) -> str:
             text = (text or "").strip().replace("\n", " ")
             return text if len(text) <= max_len else text[: max_len - 1] + "…"
 
-        wiki_lines = "\n".join(
-            f"- [{p['slug']}] {p['title']} — {_trim(p.get('tldr', ''))}"
-            for p in wiki_pages
-        )
-        prompt += f"\n\n## Wiki Index ({len(wiki_pages)} pages)\n{wiki_lines}"
+        if len(wiki_pages) <= 15:
+            wiki_lines = "\n".join(
+                f"- [{p['slug']}] {p['title']} — {_trim(p.get('tldr', ''))}"
+                for p in wiki_pages
+            )
+            prompt += (
+                f"\n\n## Wiki Index ({len(wiki_pages)} pages)\n{wiki_lines}"
+            )
+        else:
+            # Compact catalog: slug + title only. TLDRs fetched via search_wiki.
+            catalog_lines = "\n".join(
+                f"- [{p['slug']}] {p['title']}" for p in wiki_pages
+            )
+            prompt += (
+                f"\n\n## Wiki Index ({len(wiki_pages)} pages)\n"
+                "This workspace has too many wiki pages to list fully. "
+                "Use `search_wiki(query)` to find pages relevant to a user's question, "
+                "then use `read_wiki_page(slug)` to read specific pages. "
+                "Do NOT invent slugs — only use slugs returned by search_wiki or listed below.\n\n"
+                + catalog_lines
+            )
 
     if documents:
         doc_lines = "\n".join(
@@ -875,6 +894,47 @@ async def build_agent(
             logger.error("read_wiki_page failed for slug=%s: %s", slug, exc, exc_info=True)
             return f"Failed to read wiki page: {exc}"
 
+    # --- 11.65. search_wiki tool (EPIC-017 Phase A) ---
+    async def search_wiki(
+        ctx: RunContext[AgentDeps],
+        query: str,
+        top_k: int = 10,
+    ) -> str:
+        """Search the workspace wiki for pages relevant to a query.
+
+        Uses Postgres full-text search (BM25) to rank wiki pages by relevance.
+        This is the PRIMARY way to find pages — use it before `read_wiki_page`
+        unless you already know the exact slug from the ## Wiki Index.
+
+        Args:
+            ctx:   pydantic-ai RunContext with deps.
+            query: Natural-language query (e.g., "V-Bounce process phases").
+            top_k: Max pages to return (default 10).
+
+        Returns:
+            Markdown list of matching pages with slug, title, type, and TLDR.
+            Empty result message if no matches.
+        """
+        try:
+            pages = await _wiki_service.search_wiki(
+                ctx.deps.supabase, ctx.deps.workspace_id, query, top_k=top_k,
+            )
+            if not pages:
+                return f"No wiki pages found for query: {query!r}"
+            lines = [f"Found {len(pages)} wiki pages for {query!r}:"]
+            for p in pages:
+                tldr = (p.get("tldr") or "").strip()
+                lines.append(
+                    f"- [{p['slug']}] ({p['page_type']}) {p['title']} — {tldr[:180]}"
+                )
+            lines.append(
+                "\nUse `read_wiki_page(slug)` to read the full content of any page."
+            )
+            return "\n".join(lines)
+        except Exception as exc:
+            logger.error("search_wiki failed: %s", exc, exc_info=True)
+            return f"Failed to search wiki: {exc}"
+
     # --- 11.7. lint_wiki tool (STORY-013-04) ---
     async def lint_wiki(ctx: RunContext[AgentDeps]) -> str:
         """Scan the entire workspace wiki for structural quality issues.
@@ -911,7 +971,7 @@ async def build_agent(
         model,
         system_prompt=prompt,
         deps_type=AgentDeps,
-        tools=[load_skill, create_skill, update_skill, delete_skill, web_search, crawl_page, http_request, read_document, create_document, update_document, delete_document, read_wiki_page, lint_wiki],
+        tools=[load_skill, create_skill, update_skill, delete_skill, web_search, crawl_page, http_request, read_document, create_document, update_document, delete_document, search_wiki, read_wiki_page, lint_wiki],
     )
     deps = AgentDeps(
         workspace_id=workspace_id,

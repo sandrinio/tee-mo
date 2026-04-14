@@ -154,10 +154,11 @@ async def test_build_agent_registers_four_skill_tools(monkeypatch: Any) -> None:
     call_kwargs = mock_agent_cls.call_args[1]  # keyword args
     tools_arg = call_kwargs.get("tools")
     assert tools_arg is not None, "Agent() must be called with tools= keyword argument"
-    assert len(tools_arg) == 13, (
-        f"Expected 13 tools, got {len(tools_arg)}. "
+    assert len(tools_arg) == 14, (
+        f"Expected 14 tools, got {len(tools_arg)}. "
         "Required: load_skill, create_skill, update_skill, delete_skill, web_search, crawl_page, "
-        "http_request, read_document, create_document, update_document, delete_document, read_wiki_page, lint_wiki"
+        "http_request, read_document, create_document, update_document, delete_document, "
+        "search_wiki, read_wiki_page, lint_wiki"
     )
 
 

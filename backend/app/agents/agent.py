@@ -265,8 +265,10 @@ def _build_system_prompt(
         skills:     List of skill dicts with ``name`` and ``summary`` keys,
                     as returned by skill_service.list_skills(). May be empty.
         documents:  Optional list of document dicts with ``id``, ``title``,
-                    and ``ai_description`` keys, as returned from
-                    teemo_documents. May be None or empty.
+                    ``ai_description``, and ``sync_status`` keys, as returned
+                    from teemo_documents. Non-synced docs are annotated with a
+                    ⏳ marker so the agent does not quote their raw content
+                    before wiki ingest lands. May be None or empty.
         wiki_pages: Optional list of wiki page dicts with ``slug``, ``title``,
                     and ``tldr`` keys, as returned from teemo_wiki_pages. When
                     non-empty, the wiki index section is rendered above the
@@ -287,33 +289,33 @@ def _build_system_prompt(
         "- CRITICAL: When users ask what documents or wiki pages are available, "
         "ONLY list items from the ## Available Documents and ## Wiki Index sections below. "
         "NEVER invent, fabricate, or guess document titles, IDs, or slugs. "
-        "If no documents/wiki pages exist in the catalog, say so directly.\n\n"
-        "Slack formatting (CRITICAL — you are writing Slack mrkdwn, NOT Markdown):\n"
-        "- Bold: *text* (single asterisk, NOT double **text**)\n"
-        "- Italic: _text_ (underscore)\n"
-        "- Strikethrough: ~text~\n"
-        "- Code inline: `code`\n"
-        "- Code block: ```code```\n"
-        "- Bullet lists: use • or - at line start (NOT * which renders as bold)\n"
-        "- Links: <https://url|display text>\n"
-        "- Blockquote: > text\n"
-        "- NEVER use Markdown syntax like **bold**, ## headers, or [text](url) — Slack does not render them.\n\n"
+        "If no documents/wiki pages exist in the catalog, say so directly.\n"
+        "- CRITICAL: When listing people, projects, or other items from a source, "
+        "include ONLY names you literally read in a tool result. Do not add summary "
+        "buckets like \"Other team members\", \"India\", or \"etc.\". If a section "
+        "has no verified entries, omit it entirely.\n\n"
+        "Output formatting:\n"
+        "Write standard Markdown — **bold**, _italic_, `inline code`, ```fenced``` code "
+        "blocks, `-` or `*` bullets, `[text](url)` links, `> blockquote`. The backend "
+        "converts Markdown to Slack's mrkdwn before posting, so do NOT try to write "
+        "Slack's native syntax (no single-asterisk bold, no `<url|text>` links, no `•` "
+        "bullets). Headers (`#`, `##`) render as bold in Slack — fine to use.\n\n"
         "Tools — when to use which:\n"
-        "- *web_search(query)*: Search the internet for general information.\n"
-        "- *crawl_page(url)*: Fetch a public web page and return its content as readable text. "
+        "- `web_search(query)`: Search the internet for general information.\n"
+        "- `crawl_page(url)`: Fetch a public web page and return its content as readable text. "
         "Best for reading articles, docs, and web pages.\n"
-        "- *http_request(method, url, ...)*: Make raw HTTP requests to APIs. Use this when you need "
+        "- `http_request(method, url, ...)`: Make raw HTTP requests to APIs. Use this when you need "
         "custom headers (e.g. Authorization tokens), non-GET methods (POST, PUT, DELETE), "
         "or need to work with structured API responses (JSON). Best for authenticated API calls, "
         "webhooks, and data retrieval from REST endpoints.\n"
-        "- *search_wiki(query, top_k)*: Full-text search across wiki pages. "
+        "- `search_wiki(query, top_k)`: Full-text search across wiki pages. "
         "Use this FIRST when the user asks about a topic — it returns the most relevant "
         "pages ranked by BM25. Do not guess slugs; search for them.\n"
-        "- *read_wiki_page(slug)*: Retrieve the full content of a wiki page by its slug. "
+        "- `read_wiki_page(slug)`: Retrieve the full content of a wiki page by its slug. "
         "Use this AFTER search_wiki to read the most relevant pages.\n\n"
         "Knowledge-routing strategy (follow this to answer efficiently):\n"
         "1. For broad questions (\"list X\", \"overview of Y\", \"what projects do we have\"): "
-        "read the matching *source-summary* page first. One summary page usually has the full "
+        "read the matching `source-summary` page first. One summary page usually has the full "
         "list — no need to read individual entity pages.\n"
         "2. For specific facts about one thing: read one entity or concept page directly.\n"
         "3. For comparisons or synthesis: read 2-3 relevant pages, then synthesize.\n"
@@ -364,10 +366,13 @@ def _build_system_prompt(
             )
 
     if documents:
-        doc_lines = "\n".join(
-            f"- [{d['id']}] \"{d['title']}\" — {d.get('ai_description') or 'No description available.'}"
-            for d in documents
-        )
+        def _doc_line(d: dict) -> str:
+            status = d.get("sync_status")
+            marker = "" if status == "synced" else f" ⏳ [{status}: wiki not ready — do not quote this doc yet]"
+            desc = d.get("ai_description") or "No description available."
+            return f"- [{d['id']}] \"{d['title']}\" — {desc}{marker}"
+
+        doc_lines = "\n".join(_doc_line(d) for d in documents)
         prompt += (
             f"\n\n## Available Documents ({len(documents)} total)\n"
             "When users ask what documents are available, list these documents by title and description. "
@@ -375,7 +380,9 @@ def _build_system_prompt(
             + doc_lines
             + "\n\nPrefer wiki pages (`read_wiki_page`) for answering questions when available. "
             "Use `read_document` when you need exact quotes, specific data points, or the wiki "
-            "doesn't cover the topic yet. Only create documents when the user explicitly asks you to."
+            "doesn't cover the topic yet. For documents marked ⏳ (still indexing), tell the user "
+            "the doc is being processed and ask them to retry in a minute — do NOT summarize raw "
+            "content from an un-indexed doc. Only create documents when the user explicitly asks you to."
         )
 
     return prompt
@@ -485,9 +492,11 @@ async def build_agent(
 
     # Query teemo_documents for the document catalog.
     # STORY-015-03: replaces legacy teemo_knowledge_index query.
+    # Also pull sync_status so we can annotate not-yet-indexed docs — they have
+    # content but no wiki pages, which is a known hallucination vector.
     docs_result = (
         supabase.table("teemo_documents")
-        .select("id, title, ai_description")
+        .select("id, title, ai_description, sync_status")
         .eq("workspace_id", workspace_id)
         .execute()
     )

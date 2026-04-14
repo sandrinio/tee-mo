@@ -306,9 +306,20 @@ def _build_system_prompt(
         "custom headers (e.g. Authorization tokens), non-GET methods (POST, PUT, DELETE), "
         "or need to work with structured API responses (JSON). Best for authenticated API calls, "
         "webhooks, and data retrieval from REST endpoints.\n"
+        "- *search_wiki(query, top_k)*: Full-text search across wiki pages. "
+        "Use this FIRST when the user asks about a topic — it returns the most relevant "
+        "pages ranked by BM25. Do not guess slugs; search for them.\n"
         "- *read_wiki_page(slug)*: Retrieve the full content of a wiki page by its slug. "
-        "Use this to answer questions using your workspace knowledge base. "
-        "Available slugs are listed in the Wiki Index section (when present)."
+        "Use this AFTER search_wiki to read the most relevant pages.\n\n"
+        "Knowledge-routing strategy (follow this to answer efficiently):\n"
+        "1. For broad questions (\"list X\", \"overview of Y\", \"what projects do we have\"): "
+        "read the matching *source-summary* page first. One summary page usually has the full "
+        "list — no need to read individual entity pages.\n"
+        "2. For specific facts about one thing: read one entity or concept page directly.\n"
+        "3. For comparisons or synthesis: read 2-3 relevant pages, then synthesize.\n"
+        "4. STOP after at most 2 search_wiki calls with no relevant results — tell the user the "
+        "information isn't in the workspace rather than searching indefinitely.\n"
+        "5. Never read more than 5 wiki pages in a single turn — pick the best ones.\n"
     )
 
     prompt = preamble

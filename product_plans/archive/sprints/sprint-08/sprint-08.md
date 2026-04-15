@@ -2,7 +2,7 @@
 sprint_id: "sprint-08"
 sprint_goal: "Ship EPIC-006 — Google Drive OAuth, file indexing with AI descriptions, read_drive_file agent tool, and frontend Picker. Complete the demo pipeline: register → workspace → Slack → Drive → @mention → answer from file."
 dates: "2026-04-13"
-status: "Active"
+status: "Done"
 delivery: "D-04"
 confirmed_by: "sandrinio"
 confirmed_at: "2026-04-12"

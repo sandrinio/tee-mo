@@ -2,7 +2,7 @@
 sprint_id: "sprint-09"
 sprint_goal: "Ship EPIC-008 — Guided setup wizard, channel binding UI, dashboard polish, top nav. First-time user can go from 'New Workspace' to fully configured workspace with bound channels in one guided flow."
 dates: "2026-04-13"
-status: "Active"
+status: "Done"
 delivery: "D-05"
 confirmed_by: "sandrinio"
 confirmed_at: "2026-04-13"

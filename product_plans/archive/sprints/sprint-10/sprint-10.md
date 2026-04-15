@@ -2,7 +2,7 @@
 sprint_id: "sprint-10"
 sprint_goal: "Upgrade Drive file extraction to produce structured markdown, cache content for fast reads, add re-index and workspace deletion. Agent answers from tabular data accurately without hitting Drive API on every query."
 dates: "2026-04-13"
-status: "Active"
+status: "Done"
 delivery: "D-06"
 confirmed_by: "sandrinio"
 confirmed_at: "2026-04-13"

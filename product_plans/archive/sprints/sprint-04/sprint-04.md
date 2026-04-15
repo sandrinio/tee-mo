@@ -2,7 +2,7 @@
 sprint_id: "sprint-04"
 sprint_goal: "Real Slack OAuth install — a logged-in user clicks Install Slack on /app, completes the consent flow, and lands back on /app with a teemo_slack_teams row owned by them and visible in the team list. Closes the S-03 events stub TODO with real signing-secret verification."
 dates: "2026-04-12 → 2026-04-13"
-status: "Active"
+status: "Done"
 delivery: "Release 1 (~85% → ~92% delivered after S-04; S-05 closes Release 1)"
 confirmed_by: "sandrinio"
 confirmed_at: "2026-04-12"

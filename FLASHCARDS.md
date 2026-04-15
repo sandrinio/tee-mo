@@ -273,3 +273,29 @@ vi.mock('../../main', () => ({ queryClient: { clear: clearMock } }));
 **What happened:** Git worktrees check out a clean copy of the repo but `node_modules/` is gitignored. The Developer agent tried to run `vite build` in the worktree and it failed because no dependencies were installed. `npm install` must be run first.
 **Rule:** When creating a worktree for a frontend story, run `cd .worktrees/STORY-{ID}/frontend && npm install` before any build or test commands.
 **How to apply:** Add to the Team Lead's worktree setup checklist: after `git worktree add` and `cp .env`, run `npm install` in the frontend directory if the story touches frontend code.
+
+---
+
+## V-Bounce Execution (S-11)
+
+### [2026-04-15] Subagent timeouts on wide stories — Team Lead steps in after 2 failures
+**Seen in:** STORY-015-03 (30% correction tax — 2 consecutive Dev agent timeouts)
+**What happened:** The agent refactor + 4 new CRUD tools + system prompt update + 13 tests all in one story caused 2 consecutive Dev agent timeouts. Team Lead implemented directly on the third attempt.
+**Rule:** When a story requires changes to 4+ files AND introduces 4+ new functions (combined count ≥ 7), split it before bouncing. If the Dev agent times out twice on the same story, Team Lead implements directly rather than spawning a third subagent.
+**How to apply:** During sprint planning, flag stories where file-count + new-function-count ≥ 7 for pre-split review. Add an explicit note to the story's §3 Implementation Guide. In execution, two timeout failures = immediate Team Lead direct implementation — do not spawn a third Dev agent.
+
+---
+
+### [2026-04-15] `agent.py` is a red-zone surface when 3+ stories touch it
+**Seen in:** STORY-013-01 (15% correction tax — merge conflict on agent.py docstring despite strict merge ordering)
+**What happened:** 3 stories in S-11 modified `agent.py`. The sprint execution strategy documented merge ordering, but a docstring conflict still required Team Lead resolution at merge time.
+**Rule:** Any sprint plan with 3+ stories modifying `agent.py` must mark it as a **red-zone surface** in §2 Shared Surface Warnings. Each affected story's merge requires Team Lead review (not automated merge). Document exact diff regions each story owns (e.g., "STORY-013-01 owns the wiki tool block, STORY-015-03 owns the CRUD tools block").
+**How to apply:** When writing the sprint execution strategy, grep for `agent.py` across all story implementation guides. If ≥3 hits, add a red-zone flag. At merge time, Team Lead diffs each story branch against the current sprint branch before merging — never let two agent.py changes land without inspection.
+
+---
+
+### [2026-04-15] AI judge loop is the correct evaluation pattern for L3 LLM prompt stories
+**Seen in:** STORY-013-02 (L3 wiki ingest pipeline — shipped in one pass with 0% correction tax)
+**What happened:** Instead of subjective review, we ran a conversation-tier AI judge against 8 fixture files (PDFs, DOCX, XLSX) using 5 criteria scored 1-5, with a ≥3.5 average pass threshold. The judge produced objective pass/fail signals that eliminated iteration guessing and made the L3 story behave like a Fast Track.
+**Rule:** Any L3 story involving LLM prompt tuning (ingest, synthesis, extraction, scoring) MUST define an AI judge evaluation harness in §3 Implementation Guide before entering sprint scope. Required harness elements: eval dataset (≥5 diverse files), evaluation criteria (3-7 dimensions), scoring scale, pass threshold, and failure action (re-tune prompt, retry).
+**How to apply:** When decomposing epics with LLM output quality requirements, add an "AI Judge Spec" subsection to the story's §3. Treat judge pass as the QA gate — not human eyeball review. The judge prompt should use the conversation tier (not scan tier) for evaluation accuracy.

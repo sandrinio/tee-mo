@@ -2,7 +2,7 @@
 sprint_id: "sprint-03"
 sprint_goal: "Land https://teemo.soula.ge as a live Coolify auto-deploy, apply the 3 ADR-024 schema migrations, fix BUG-20260411 (PyJWT test-order flake), and ship the minimal Slack events verification endpoint so EPIC-005 Phase A can start in S-04."
 dates: "2026-04-12"
-status: "Active"
+status: "Done"
 delivery: "D-01 (Release 1: Foundation + Deploy + Slack Install)"
 confirmed_by: "Solo dev (user)"
 confirmed_at: "2026-04-12"

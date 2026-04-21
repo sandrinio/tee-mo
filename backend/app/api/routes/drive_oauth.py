@@ -170,10 +170,12 @@ async def drive_oauth_callback(
         HTTPException(400): Missing params or invalid/tampered state.
     """
     # Resolve frontend base URL for post-OAuth redirects.
-    # In production (same-origin), cors_origins is the app origin.
-    # In dev (split ports), it points to the Vite dev server (e.g. http://localhost:5173).
+    # Empty string → relative redirect, which resolves to the request host
+    # (correct for same-origin production — e.g. teemo.soula.ge serves both API
+    # and SPA). In split-port dev set FRONTEND_URL=http://localhost:5173 so the
+    # browser lands on the Vite dev server, not the API port.
     s = get_settings()
-    frontend = s.cors_origins_list()[0] if s.cors_origins_list() else ""
+    frontend = s.frontend_url.rstrip("/")
 
     # --- 1. Cancellation branch — no API calls, no DB writes ---
     if error == "access_denied":

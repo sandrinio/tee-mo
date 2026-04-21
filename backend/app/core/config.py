@@ -58,6 +58,12 @@ class Settings(BaseSettings):
         Optional Google Picker API key. Defaults to empty string.
     google_oauth_redirect_uri : str
         Redirect URI registered in Google Cloud Console for the Drive OAuth flow.
+    frontend_url : str
+        Absolute base URL of the SPA used to build post-OAuth redirect targets
+        (e.g. ``https://teemo.soula.ge`` in prod, ``http://localhost:5173`` in
+        split-port dev). Leave empty for same-origin deployments — the callback
+        will then emit a relative ``/app?...`` redirect that resolves to the
+        request host automatically.
     """
 
     model_config = SettingsConfigDict(
@@ -105,6 +111,13 @@ class Settings(BaseSettings):
     google_api_secret: str
     google_picker_api_key: str = ""
     google_oauth_redirect_uri: str
+
+    # SPA base URL for post-OAuth redirects. Empty string → relative redirect
+    # (correct for same-origin production). Set to the Vite dev server
+    # (e.g. http://localhost:5173) when running API and SPA on different ports.
+    # Decoupled from cors_origins so that tightening CORS doesn't break the
+    # Drive-connect callback redirect target.
+    frontend_url: str = ""
 
     @model_validator(mode="after")
     def _validate_encryption_key(self) -> "Settings":

@@ -31,6 +31,7 @@ import ipaddress
 import logging
 import socket
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
 
@@ -277,8 +278,21 @@ def _build_system_prompt(
     Returns:
         A fully assembled system prompt string.
     """
+    # Inject current UTC date/time so the agent has a temporal anchor for
+    # "today", "this week", "recent", etc. Computed fresh on each build (build
+    # is per-message, not per-process), so there's no staleness window worth
+    # caching around. UTC only for now — workspace-local tz can be layered in
+    # once we pass sender tz through from slack_dispatch.
+    now = datetime.now(timezone.utc)
+    current_time_line = (
+        f"Current date: {now.strftime('%A, %Y-%m-%d')} "
+        f"(UTC time {now.strftime('%H:%M')}). "
+        "Use this whenever the user references 'today', 'this week', 'recent', "
+        "or any other relative date — do not guess.\n\n"
+    )
     preamble = (
-        "You are Tee-Mo, an AI assistant embedded in your team's Slack workspace.\n"
+        current_time_line
+        + "You are Tee-Mo, an AI assistant embedded in your team's Slack workspace.\n"
         "You help teams with standups, reports, analysis, and workflow automation.\n\n"
         "Rules:\n"
         "- Be concise and helpful.\n"

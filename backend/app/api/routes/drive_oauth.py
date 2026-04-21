@@ -20,7 +20,7 @@ ADR compliance:
 Import note on get_supabase:
   ``app.core.db`` is imported as a module (not via ``from ... import get_supabase``) so that
   ``monkeypatch.setattr("app.core.db.get_supabase", ...)`` in unit tests correctly replaces the
-  function that this module calls. A direct ``from app.core.db import get_supabase`` binds a
+  function that this module calls. A direct ``from app.core.db import get_supabase, execute_async`` binds a
   local reference at import time that is not affected by module-level monkeypatching.
 """
 

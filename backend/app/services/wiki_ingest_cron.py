@@ -214,9 +214,7 @@ async def wiki_ingest_loop() -> None:
 
             # Query all documents with sync_status='pending' across all workspaces.
             pending_result = (
-                supabase.table("teemo_documents")
-                .select("*")
-                .eq("sync_status", "pending")
+                supabase.rpc("claim_pending_documents", {"batch_size": 20})
                 .execute()
             )
             pending_docs: list[dict] = pending_result.data or []

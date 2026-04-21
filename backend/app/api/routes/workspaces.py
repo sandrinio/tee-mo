@@ -35,7 +35,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import get_current_user_id
-from app.core.db import get_supabase
+from app.core.db import get_supabase, execute_async
 from app.models.workspace import WorkspaceCreate, WorkspaceResponse, WorkspaceUpdate
 
 logger = logging.getLogger(__name__)
@@ -48,7 +48,7 @@ router = APIRouter(prefix="/api", tags=["workspaces"])
 # ---------------------------------------------------------------------------
 
 
-def assert_team_owner(team_id: str, user_id: str) -> None:
+async def assert_team_owner(team_id: str, user_id: str) -> None:
     """Verify that the authenticated user owns the given Slack team.
 
     Queries ``teemo_slack_teams`` for a row matching both ``slack_team_id``
@@ -65,12 +65,12 @@ def assert_team_owner(team_id: str, user_id: str) -> None:
     """
     sb = get_supabase()
     result = (
-        sb.table("teemo_slack_teams")
+        await execute_async(sb.table("teemo_slack_teams")
         .select("slack_team_id")
         .eq("slack_team_id", team_id)
         .eq("owner_user_id", user_id)
         .limit(1)
-        .execute()
+        )
     )
     if not result.data:
         raise HTTPException(
@@ -140,15 +140,15 @@ async def list_workspaces(
         HTTPException(401): No or invalid auth token.
         HTTPException(403): Authenticated user does not own this Slack team.
     """
-    assert_team_owner(team_id, user_id)
+    await assert_team_owner(team_id, user_id)
     sb = get_supabase()
     result = (
-        sb.table("teemo_workspaces")
+        await execute_async(sb.table("teemo_workspaces")
         .select("*")
         .eq("slack_team_id", team_id)
         .eq("user_id", user_id)
         .order("created_at", desc=False)
-        .execute()
+        )
     )
     return [_to_response(row) for row in (result.data or [])]
 
@@ -189,18 +189,18 @@ async def create_workspace(
         HTTPException(401): No or invalid auth token.
         HTTPException(403): Authenticated user does not own this Slack team.
     """
-    assert_team_owner(team_id, user_id)
+    await assert_team_owner(team_id, user_id)
 
     sb = get_supabase()
 
     # Determine if this is the first workspace for this (user, team) pair.
     existing = (
-        sb.table("teemo_workspaces")
+        await execute_async(sb.table("teemo_workspaces")
         .select("id")
         .eq("slack_team_id", team_id)
         .eq("user_id", user_id)
         .limit(1)
-        .execute()
+        )
     )
     is_first = not existing.data
 
@@ -212,7 +212,7 @@ async def create_workspace(
     }
     # created_at and updated_at intentionally excluded — DEFAULT NOW() on the DB side.
 
-    result = sb.table("teemo_workspaces").insert(payload).execute()
+    result = await execute_async(sb.table("teemo_workspaces").insert(payload))
     if not result.data:
         raise HTTPException(status_code=500, detail="Failed to create workspace.")
 
@@ -250,12 +250,12 @@ async def get_workspace(
     """
     sb = get_supabase()
     result = (
-        sb.table("teemo_workspaces")
+        await execute_async(sb.table("teemo_workspaces")
         .select("*")
         .eq("id", str(workspace_id))
         .eq("user_id", user_id)
         .limit(1)
-        .execute()
+        )
     )
     if not result.data:
         raise HTTPException(status_code=404, detail="Workspace not found.")
@@ -301,11 +301,11 @@ async def rename_workspace(
     """
     sb = get_supabase()
     result = (
-        sb.table("teemo_workspaces")
+        await execute_async(sb.table("teemo_workspaces")
         .update({"name": body.name})
         .eq("id", str(workspace_id))
         .eq("user_id", user_id)
-        .execute()
+        )
     )
     if not result.data:
         raise HTTPException(status_code=404, detail="Workspace not found.")
@@ -352,12 +352,12 @@ async def make_workspace_default(
 
     # First: confirm the workspace exists and belongs to this user, and get its team.
     existing = (
-        sb.table("teemo_workspaces")
+        await execute_async(sb.table("teemo_workspaces")
         .select("*")
         .eq("id", str(workspace_id))
         .eq("user_id", user_id)
         .limit(1)
-        .execute()
+        )
     )
     if not existing.data:
         raise HTTPException(status_code=404, detail="Workspace not found.")
@@ -366,17 +366,17 @@ async def make_workspace_default(
     team_id = workspace_row.get("slack_team_id")
 
     # Step 1: Reset all existing defaults for this user+team.
-    sb.table("teemo_workspaces").update({"is_default_for_team": False}).eq(
+    await execute_async(sb.table("teemo_workspaces").update({"is_default_for_team": False}).eq(
         "user_id", user_id
-    ).eq("slack_team_id", team_id).eq("is_default_for_team", True).execute()
+    ).eq("slack_team_id", team_id).eq("is_default_for_team", True))
 
     # Step 2: Mark the target workspace as the new default.
     result = (
-        sb.table("teemo_workspaces")
+        await execute_async(sb.table("teemo_workspaces")
         .update({"is_default_for_team": True})
         .eq("id", str(workspace_id))
         .eq("user_id", user_id)
-        .execute()
+        )
     )
     if not result.data:
         raise HTTPException(status_code=500, detail="Failed to set default workspace.")
@@ -418,11 +418,11 @@ async def delete_workspace(
     """
     sb = get_supabase()
     result = (
-        sb.table("teemo_workspaces")
+        await execute_async(sb.table("teemo_workspaces")
         .delete()
         .eq("id", str(workspace_id))
         .eq("user_id", user_id)
-        .execute()
+        )
     )
     if not result.data:
         raise HTTPException(status_code=404, detail="Workspace not found.")
@@ -467,12 +467,12 @@ async def list_workspace_skills(
 
     # Confirm workspace ownership before exposing skill data.
     ownership_check = (
-        sb.table("teemo_workspaces")
+        await execute_async(sb.table("teemo_workspaces")
         .select("id")
         .eq("id", str(workspace_id))
         .eq("user_id", user_id)
         .limit(1)
-        .execute()
+        )
     )
     if not ownership_check.data:
         raise HTTPException(status_code=404, detail="Workspace not found.")

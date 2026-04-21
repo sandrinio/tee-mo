@@ -41,7 +41,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import get_current_user_id
-from app.core.db import get_supabase
+from app.core.db import get_supabase, execute_async
 from app.core.encryption import encrypt
 from app.models.key import KeyCreate, KeyResponse, KeyValidateRequest, KeyValidateResponse
 from app.services.key_validator import validate_key
@@ -84,7 +84,7 @@ def _make_key_mask(key: str) -> str:
     return key[:2] + "..." + key[-2:]
 
 
-def _assert_workspace_owner(workspace_id: str, user_id: str) -> dict:
+async def _assert_workspace_owner(workspace_id: str, user_id: str) -> dict:
     """Assert that user_id owns workspace_id and return the workspace row.
 
     Queries ``teemo_workspaces`` for a row matching both ``id`` and
@@ -110,12 +110,12 @@ def _assert_workspace_owner(workspace_id: str, user_id: str) -> dict:
     """
     sb = get_supabase()
     result = (
-        sb.table("teemo_workspaces")
+        await execute_async(sb.table("teemo_workspaces")
         .select("id, ai_provider, key_mask, ai_model, encrypted_api_key")
         .eq("id", workspace_id)
         .eq("user_id", user_id)
         .maybe_single()
-        .execute()
+        )
     )
     if not result or not result.data:
         raise HTTPException(status_code=404, detail="Workspace not found")
@@ -210,7 +210,7 @@ async def save_key(
         Workspace not found or not owned by the caller.
     """
     # 1. Ownership check — raises 404 if not found
-    _assert_workspace_owner(workspace_id, user_id)
+    await _assert_workspace_owner(workspace_id, user_id)
 
     # 2. Compute mask BEFORE encrypting (we need plaintext for mask computation).
     #    The mask is the only representation of the key that persists in clear.
@@ -226,7 +226,7 @@ async def save_key(
     # 5. PATCH the workspace row.
     sb = get_supabase()
     result = (
-        sb.table("teemo_workspaces")
+        await execute_async(sb.table("teemo_workspaces")
         .update(
             {
                 "encrypted_api_key": encrypted,
@@ -237,7 +237,7 @@ async def save_key(
         )
         .eq("id", workspace_id)
         .eq("user_id", user_id)
-        .execute()
+        )
     )
     if not result.data:
         raise HTTPException(status_code=500, detail="Failed to save key")
@@ -288,7 +288,7 @@ async def get_key(
     HTTPException(404)
         Workspace not found or not owned by the caller.
     """
-    row = _assert_workspace_owner(workspace_id, user_id)
+    row = await _assert_workspace_owner(workspace_id, user_id)
 
     has_key = row.get("encrypted_api_key") is not None
     return KeyResponse(
@@ -335,16 +335,16 @@ async def delete_key(
         Workspace not found or not owned by the caller.
     """
     # Verify ownership first — raises 404 if not found
-    _assert_workspace_owner(workspace_id, user_id)
+    await _assert_workspace_owner(workspace_id, user_id)
 
     sb = get_supabase()
-    sb.table("teemo_workspaces").update(
+    await execute_async(sb.table("teemo_workspaces").update(
         {
             "encrypted_api_key": None,
             "ai_provider": None,
             "ai_model": None,
             "key_mask": None,
         }
-    ).eq("id", workspace_id).eq("user_id", user_id).execute()
+    ).eq("id", workspace_id).eq("user_id", user_id))
 
     return {"message": "Key deleted"}

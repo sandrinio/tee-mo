@@ -23,7 +23,7 @@ from fastapi.responses import RedirectResponse
 
 from app.api.deps import get_current_user_id, get_current_user_id_optional
 from app.core.config import get_settings
-from app.core.db import get_supabase
+from app.core.db import get_supabase, execute_async
 from app.core.encryption import encrypt
 from app.core.security import create_slack_state_token, verify_slack_state_token
 from app.models.slack import SlackTeamResponse
@@ -183,11 +183,11 @@ async def slack_oauth_callback(
     # --- 6. Check if team already exists ---
     sb = get_supabase()
     existing = (
-        sb.table("teemo_slack_teams")
+        await execute_async(sb.table("teemo_slack_teams")
         .select("owner_user_id")
         .eq("slack_team_id", team_id)
         .limit(1)
-        .execute()
+        )
     )
     is_new_team = not existing.data
     is_owner = is_new_team or existing.data[0]["owner_user_id"] == user_id
@@ -206,18 +206,18 @@ async def slack_oauth_callback(
         }
         if team_name:
             upsert_data["slack_team_name"] = team_name
-        sb.table("teemo_slack_teams").upsert(upsert_data).execute()
+        await execute_async(sb.table("teemo_slack_teams").upsert(upsert_data))
 
     # --- 8. Upsert membership row ---
     # Owner gets 'owner' role, other users get 'member'.
     # joined_at excluded so DEFAULT NOW() is preserved on re-install.
-    sb.table("teemo_slack_team_members").upsert(
+    await execute_async(sb.table("teemo_slack_team_members").upsert(
         {
             "slack_team_id": team_id,
             "user_id": user_id,
             "role": "owner" if is_owner else "member",
         }
-    ).execute()
+    ))
 
     return RedirectResponse("/app?slack_install=ok", status_code=302)
 
@@ -237,10 +237,10 @@ async def list_slack_teams(user_id: str = Depends(get_current_user_id)) -> dict:
 
     # Fetch memberships for this user
     memberships = (
-        sb.table("teemo_slack_team_members")
+        await execute_async(sb.table("teemo_slack_team_members")
         .select("slack_team_id, role")
         .eq("user_id", user_id)
-        .execute()
+        )
     )
     if not memberships.data:
         return {"teams": []}
@@ -251,11 +251,11 @@ async def list_slack_teams(user_id: str = Depends(get_current_user_id)) -> dict:
 
     # Fetch team details (safe columns only)
     teams = (
-        sb.table("teemo_slack_teams")
+        await execute_async(sb.table("teemo_slack_teams")
         .select("slack_team_id, slack_team_name, slack_bot_user_id, installed_at")
         .in_("slack_team_id", team_ids)
         .order("installed_at", desc=True)
-        .execute()
+        )
     )
 
     return {
@@ -283,17 +283,17 @@ async def delete_slack_team(
 
     # Verify caller is the team owner
     membership = (
-        sb.table("teemo_slack_team_members")
+        await execute_async(sb.table("teemo_slack_team_members")
         .select("role")
         .eq("slack_team_id", team_id)
         .eq("user_id", user_id)
         .limit(1)
-        .execute()
+        )
     )
     if not membership.data or membership.data[0]["role"] != "owner":
         raise HTTPException(status_code=403, detail="Only the team owner can delete a team.")
 
     # Delete the team row — ON DELETE CASCADE handles everything else
-    sb.table("teemo_slack_teams").delete().eq("slack_team_id", team_id).execute()
+    await execute_async(sb.table("teemo_slack_teams").delete().eq("slack_team_id", team_id))
 
     return {"message": f"Team {team_id} and all related data deleted."}

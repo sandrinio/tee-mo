@@ -45,7 +45,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 
 from app.api.deps import get_current_user_id
 from app.core import encryption as encryption_module
-from app.core.db import get_supabase
+from app.core.db import get_supabase, execute_async
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ class ChannelBindRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _assert_workspace_owner(workspace_id: str, user_id: str) -> dict[str, Any]:
+async def _assert_workspace_owner(workspace_id: str, user_id: str) -> dict[str, Any]:
     """Verify that the authenticated user owns the given workspace.
 
     Queries ``teemo_workspaces`` for a row matching both ``id`` and ``user_id``.
@@ -99,19 +99,19 @@ def _assert_workspace_owner(workspace_id: str, user_id: str) -> dict[str, Any]:
     """
     sb = get_supabase()
     result = (
-        sb.table("teemo_workspaces")
+        await execute_async(sb.table("teemo_workspaces")
         .select("*")
         .eq("id", workspace_id)
         .eq("user_id", user_id)
         .limit(1)
-        .execute()
+        )
     )
     if not result.data:
         raise HTTPException(status_code=403, detail="Forbidden")
     return result.data[0]
 
 
-def _assert_slack_team_owner(team_id: str, user_id: str) -> dict[str, Any]:
+async def _assert_slack_team_owner(team_id: str, user_id: str) -> dict[str, Any]:
     """Verify that the authenticated user owns the given Slack team.
 
     Queries ``teemo_slack_teams`` for a row matching both ``slack_team_id``
@@ -137,12 +137,12 @@ def _assert_slack_team_owner(team_id: str, user_id: str) -> dict[str, Any]:
     """
     sb = get_supabase()
     result = (
-        sb.table("teemo_slack_teams")
+        await execute_async(sb.table("teemo_slack_teams")
         .select("*")
         .eq("slack_team_id", team_id)
         .eq("owner_user_id", user_id)
         .limit(1)
-        .execute()
+        )
     )
     if not result.data:
         raise HTTPException(status_code=403, detail="Forbidden")
@@ -196,17 +196,17 @@ async def bind_channel(
         The channel is already bound to this workspace (``detail="channel_already_bound"``).
     """
     # 1. Verify workspace ownership — raises 403 for non-owners.
-    workspace_row = _assert_workspace_owner(workspace_id, user_id)
+    workspace_row = await _assert_workspace_owner(workspace_id, user_id)
 
     sb = get_supabase()
 
     # 2. Check for existing binding in ANY workspace (PK is slack_channel_id).
     existing = (
-        sb.table("teemo_workspace_channels")
+        await execute_async(sb.table("teemo_workspace_channels")
         .select("*")
         .eq("slack_channel_id", body.slack_channel_id)
         .limit(1)
-        .execute()
+        )
     )
     if existing.data:
         raise HTTPException(status_code=409, detail="channel_already_bound")
@@ -218,7 +218,7 @@ async def bind_channel(
         "workspace_id": workspace_id,
         "slack_team_id": workspace_row.get("slack_team_id", ""),
     }
-    result = sb.table("teemo_workspace_channels").insert(payload).execute()
+    result = await execute_async(sb.table("teemo_workspace_channels").insert(payload))
     if not result.data:
         raise HTTPException(status_code=500, detail="Failed to bind channel.")
 
@@ -265,17 +265,17 @@ async def unbind_channel(
         Authenticated user does not own the workspace.
     """
     # 1. Verify workspace ownership — raises 403 for non-owners.
-    _assert_workspace_owner(workspace_id, user_id)
+    await _assert_workspace_owner(workspace_id, user_id)
 
     sb = get_supabase()
 
     # 2. Delete the binding row by both channel_id and workspace_id.
     (
-        sb.table("teemo_workspace_channels")
+        await execute_async(sb.table("teemo_workspace_channels")
         .delete()
         .eq("slack_channel_id", channel_id)
         .eq("workspace_id", workspace_id)
-        .execute()
+        )
     )
 
     return Response(status_code=204)
@@ -330,17 +330,17 @@ async def list_channel_bindings(
         Authenticated user does not own the workspace.
     """
     # 1. Verify workspace ownership — raises 403 for non-owners.
-    workspace_row = _assert_workspace_owner(workspace_id, user_id)
+    workspace_row = await _assert_workspace_owner(workspace_id, user_id)
 
     sb = get_supabase()
 
     # 2. Fetch all bindings for this workspace.
     result = (
-        sb.table("teemo_workspace_channels")
+        await execute_async(sb.table("teemo_workspace_channels")
         .select("*")
         .eq("workspace_id", workspace_id)
         .order("bound_at", desc=False)
-        .execute()
+        )
     )
     bindings: list[dict[str, Any]] = result.data or []
 
@@ -352,11 +352,11 @@ async def list_channel_bindings(
 
     # 4. Fetch the encrypted bot token from teemo_slack_teams.
     team_result = (
-        sb.table("teemo_slack_teams")
+        await execute_async(sb.table("teemo_slack_teams")
         .select("*")
         .eq("slack_team_id", slack_team_id)
         .limit(1)
-        .execute()
+        )
     )
     if not team_result.data:
         # No team row means we cannot enrich — return bindings with fallback values.
@@ -443,7 +443,7 @@ async def list_slack_team_channels(
         Slack API call failed or returned ``ok: false``.
     """
     # 1. Verify team ownership — raises 403 for non-owners.
-    team_row = _assert_slack_team_owner(team_id, user_id)
+    team_row = await _assert_slack_team_owner(team_id, user_id)
 
     # 2. Decrypt the bot token stored in teemo_slack_teams.
     #    Called via encryption_module.decrypt (not a direct binding) so that
@@ -470,10 +470,10 @@ async def list_slack_team_channels(
     channel_ids = [ch["id"] for ch in channels]
     if channel_ids:
         bindings = (
-            sb.table("teemo_workspace_channels")
+            await execute_async(sb.table("teemo_workspace_channels")
             .select("slack_channel_id, workspace_id")
             .in_("slack_channel_id", channel_ids)
-            .execute()
+            )
         )
         bound_map = {
             row["slack_channel_id"]: row["workspace_id"]

@@ -22,6 +22,8 @@ from functools import lru_cache
 from supabase import Client, create_client
 
 from app.core.config import settings
+from starlette.concurrency import run_in_threadpool
+from typing import Any
 
 
 @lru_cache(maxsize=1)
@@ -44,3 +46,10 @@ def get_supabase() -> Client:
         and authenticated with ``settings.supabase_service_role_key``.
     """
     return create_client(settings.supabase_url, settings.supabase_service_role_key)
+
+async def execute_async(query_builder: Any) -> Any:
+    """
+    Executes a Supabase query builder inside Starlette's non-blocking ThreadPool.
+    Prevents synchronous HTTP calls (supabase-py v2.x) from blocking the FastAPI asyncio loop.
+    """
+    return await run_in_threadpool(query_builder.execute)

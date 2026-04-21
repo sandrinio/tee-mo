@@ -26,7 +26,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from app.api.deps import get_current_user_id
 from app.core.config import settings
-from app.core.db import get_supabase
+from app.core.db import get_supabase, execute_async
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -110,18 +110,18 @@ async def register(body: UserRegister, response: Response) -> dict:
     supabase = get_supabase()
 
     existing = (
-        supabase.table("teemo_users")
+        await execute_async(supabase.table("teemo_users")
         .select("id")
         .eq("email", body.email)
         .limit(1)
-        .execute()
+        )
     )
     if existing.data:
         raise HTTPException(status_code=409, detail="Email already registered")
 
     new_id = uuid.uuid4()
     insert_result = (
-        supabase.table("teemo_users")
+        await execute_async(supabase.table("teemo_users")
         .insert(
             {
                 "id": str(new_id),
@@ -129,7 +129,7 @@ async def register(body: UserRegister, response: Response) -> dict:
                 "password_hash": hash_password(body.password),
             }
         )
-        .execute()
+        )
     )
 
     if not insert_result.data:
@@ -155,11 +155,11 @@ async def login(body: UserLogin, response: Response) -> dict:
     supabase = get_supabase()
 
     result = (
-        supabase.table("teemo_users")
+        await execute_async(supabase.table("teemo_users")
         .select("*")
         .eq("email", body.email)
         .limit(1)
-        .execute()
+        )
     )
 
     if not result.data:
@@ -230,11 +230,11 @@ async def me(user_id: str = Depends(get_current_user_id)) -> UserResponse:
     """Return the authenticated user's profile (id, email, created_at)."""
     supabase = get_supabase()
     result = (
-        supabase.table("teemo_users")
+        await execute_async(supabase.table("teemo_users")
         .select("*")
         .eq("id", user_id)
         .limit(1)
-        .execute()
+        )
     )
     if not result.data:
         raise HTTPException(status_code=404, detail="User not found")

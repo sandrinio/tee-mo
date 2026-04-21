@@ -1,6 +1,6 @@
 ---
 epic_id: "EPIC-017"
-status: "Draft"
+status: "In Progress — Phase A live via direct commit 89f81d0 (search_wiki tool + compact system prompt). Phases B (synthesis), C (cascade), D (ingest prompt tuning), E (curation + LLM lint) pending; no STORY-017-* specs drafted yet."
 ambiguity: "🟡 Medium"
 context_source: "Karpathy LLM Wiki gist (https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) / S-11 post-mortem / Live agent evaluation (production hallucination)"
 release: "v2.1 (post-hackathon)"
@@ -192,8 +192,9 @@ EPIC-016 (structured logging)     ─┘
 | STORY-017-06 | Ingest prompt tuning for comparison detection | L2 | D | 3-4h |
 | STORY-017-07 | Dashboard wiki viewer (list + delete) | L2 | E | 3-4h |
 | STORY-017-08 | LLM-powered lint mode (opt-in contradiction detection) | L2 | E | 2-3h |
+| STORY-017-09 | Slack citation blocks — sources footer on grounded replies | L3 | F | 5-7h |
 
-**Estimated total: 19-27 hours (~2 sprints at 10-12h/sprint).**
+**Estimated total: 24-34 hours (~2-3 sprints at 10-12h/sprint).**
 
 **Suggested split:**
 - **Sprint S-12**: Phase A + B (retrieval + synthesis) — fixes hallucination + compounding knowledge. ~9-12h.
@@ -227,3 +228,5 @@ EPIC-016 (structured logging)     ─┘
 | Date | Author | Change |
 |---|---|---|
 | 2026-04-14 | Claude (doc-manager) | Initial draft. Based on S-11 production post-mortem + Karpathy gist review. Addresses: hallucination from prompt stuffing, missing synthesis creation, no re-ingest cascade, missing page types, no human curation. |
+| 2026-04-20 | Team Lead (status audit) | Status Draft → In Progress. Phase A (STORY-017-01 search_wiki + 017-02 compact prompt) shipped via direct commit 89f81d0 after S-11 close — verified in backend/app/agents/agent.py + wiki_service.py. Phases B/C/D/E remain; `comparison` page type, `create_wiki_page` tool, cascade logic, wiki viewer route, LLM lint all confirmed absent in code. |
+| 2026-04-21 | Claude (doc-manager) | Added STORY-017-09 (Slack citation blocks) under new Phase F. Triggered by user request with UX reference screenshot (SOURCES footer + document chips). L3 cross-cutting: touches source-tool return contracts, new citation collector on AgentDeps, Block Kit upgrade in slack_dispatch. Depends on FRONTEND_URL setting landed on main 2026-04-21 (commit 02b2864). |

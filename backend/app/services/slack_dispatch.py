@@ -126,21 +126,45 @@ async def _stream_agent_to_slack(
                 # Fallback: stream produced no text chunks (tool-only response)
                 result = stream.get_output()
                 final_text = str(result)
+            final_mrkdwn = markdown_to_mrkdwn(final_text)
+            final_kwargs = _final_update_kwargs(final_mrkdwn, deps)
             await client.chat_update(
                 channel=channel,
                 ts=msg_ts,
-                text=markdown_to_mrkdwn(final_text),
+                **final_kwargs,
             )
     except Exception:
         # If streaming fails, fall back to the accumulated text or error
         if accumulated.strip():
+            fallback_mrkdwn = markdown_to_mrkdwn(accumulated.strip())
+            fallback_kwargs = _final_update_kwargs(fallback_mrkdwn, deps)
             await client.chat_update(
                 channel=channel,
                 ts=msg_ts,
-                text=markdown_to_mrkdwn(accumulated.strip()),
+                **fallback_kwargs,
             )
         else:
             raise  # Re-raise so the caller's error handling kicks in
+
+
+def _final_update_kwargs(reply_mrkdwn: str, deps: object) -> dict:
+    """Assemble the kwargs for the final chat_update posting the agent reply.
+
+    Returns ``{"text": ..., "blocks": ...}`` when ``deps.citations`` is
+    non-empty, or ``{"text": ...}`` otherwise. ``text=`` is always
+    populated so Slack notifications and clients that don't render
+    blocks still show the reply content.
+
+    Isolated into a helper so the success path and the streaming-failure
+    fallback path apply citation blocks the same way.
+    """
+    from app.services.slack_blocks import build_reply_blocks
+
+    citations = getattr(deps, "citations", None) or []
+    blocks = build_reply_blocks(reply_mrkdwn, citations)
+    if blocks is None:
+        return {"text": reply_mrkdwn}
+    return {"text": reply_mrkdwn, "blocks": blocks}
 
 
 # ---------------------------------------------------------------------------

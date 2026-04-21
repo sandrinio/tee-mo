@@ -30,12 +30,14 @@ from __future__ import annotations
 import ipaddress
 import logging
 import socket
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+
+from app.services.citation_collector import Citation
 
 from pydantic_ai import RunContext
 
@@ -109,6 +111,42 @@ OpenAIProvider = None
 
 
 # ---------------------------------------------------------------------------
+# Citation helpers (STORY-017-09)
+# ---------------------------------------------------------------------------
+
+
+def _add_citation(ctx: "RunContext", citation: Citation) -> None:
+    """Append a Citation to the run's collector, tolerant of a missing field.
+
+    Production ``AgentDeps`` always carries ``citations: list[Citation]``
+    as defined on the dataclass, but several pre-existing test suites
+    build bare-bones fake deps that only expose ``workspace_id`` /
+    ``supabase`` / ``user_id``. Skipping the append when the attribute is
+    absent keeps those tests working without requiring every fixture to
+    opt in to the new field.
+    """
+    bucket = getattr(ctx.deps, "citations", None)
+    if bucket is None:
+        return
+    bucket.append(citation)
+
+
+def _wiki_page_url(workspace_id: str, slug: str) -> str | None:
+    """Build a deep-link to the dashboard wiki viewer for a given wiki page.
+
+    Returns None when ``settings.frontend_url`` is empty — citations then
+    render as plain-label chips. The viewer route itself is built by
+    STORY-017-07; this helper only constructs the URL shape so the chip
+    works the day the route lands.
+    """
+    from app.core.config import get_settings
+    base = get_settings().frontend_url.rstrip("/")
+    if not base:
+        return None
+    return f"{base}/app/workspaces/{workspace_id}/wiki/{slug}"
+
+
+# ---------------------------------------------------------------------------
 # Dependency container
 # ---------------------------------------------------------------------------
 
@@ -126,11 +164,18 @@ class AgentDeps:
         workspace_id: String UUID of the workspace making the request.
         supabase:     Supabase service-role client for direct DB access.
         user_id:      String UUID of the authenticated user.
+        citations:    Accumulator for Citation records appended by source-
+                      producing tools during the run (STORY-017-09).
+                      ``slack_dispatch`` reads this after the agent
+                      completes to build the Block Kit SOURCES footer.
+                      Tools append on success only; errors and empty
+                      results contribute nothing.
     """
 
     workspace_id: str
     supabase: Any
     user_id: str
+    citations: list[Citation] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -314,6 +359,10 @@ def _build_system_prompt(
         "converts Markdown to Slack's mrkdwn before posting, so do NOT try to write "
         "Slack's native syntax (no single-asterisk bold, no `<url|text>` links, no `•` "
         "bullets). Headers (`#`, `##`) render as bold in Slack — fine to use.\n\n"
+        "Citations: sources you consulted via search_wiki, read_wiki_page, "
+        "read_document, web_search, crawl_page, or http_request are attached "
+        "automatically as a SOURCES footer under your reply. Do NOT add a manual "
+        "'Sources:' section in the reply text.\n\n"
         "Tools — when to use which:\n"
         "- `web_search(query)`: Search the internet for general information.\n"
         "- `crawl_page(url)`: Fetch a public web page and return its content as readable text. "
@@ -649,7 +698,21 @@ async def build_agent(
                     return "No search results found."
                 lines = []
                 for i, r in enumerate(results, 1):
-                    lines.append(f"{i}. **{r['title']}**\n   {r['url']}\n   {r.get('content', '')}\n")
+                    url = r.get("url", "")
+                    title = r.get("title", "") or url
+                    if url:
+                        host = urlparse(url).hostname or "web"
+                        _add_citation(
+                            ctx,
+                            Citation(
+                                kind="web",
+                                title=title,
+                                url=url,
+                                category=host,
+                                source_id=url,
+                            ),
+                        )
+                    lines.append(f"{i}. **{title}**\n   {url}\n   {r.get('content', '')}\n")
                 return "\n".join(lines)
         except (httpx.TimeoutException, httpx.ConnectError) as e:
             return f"Search service unavailable: {e}"
@@ -676,6 +739,17 @@ async def build_agent(
                 if len(markdown) > 15_000:
                     total = len(markdown)
                     markdown = markdown[:15_000] + f"\n\n[Content truncated — {total} chars total]"
+                host = urlparse(url).hostname or "web"
+                _add_citation(
+                    ctx,
+                    Citation(
+                        kind="web",
+                        title=host,
+                        url=url,
+                        category=host,
+                        source_id=url,
+                    ),
+                )
                 return markdown
         except (httpx.TimeoutException, httpx.ConnectError) as e:
             return f"Crawl service unavailable: {e}"
@@ -721,6 +795,18 @@ async def build_agent(
                 body_text = resp.text
                 if len(body_text) > 8000:
                     body_text = body_text[:8000] + f"\n\n[Truncated — {len(resp.text)} chars total]"
+                if 200 <= resp.status_code < 400:
+                    host = urlparse(url).hostname or "web"
+                    _add_citation(
+                        ctx,
+                        Citation(
+                            kind="web",
+                            title=host,
+                            url=url,
+                            category=host,
+                            source_id=url,
+                        ),
+                    )
                 return status_line + body_text
         except httpx.TimeoutException:
             return f"Request timed out after 15 seconds: {url}"
@@ -757,6 +843,35 @@ async def build_agent(
         )
         if content is None:
             return "Document not found."
+
+        # Side-band metadata fetch for the citation chip — title + Drive link.
+        # Kept as a separate query rather than changing read_document_content()
+        # so other callers (wiki ingest, etc.) aren't impacted.
+        try:
+            meta_result = (
+                ctx.deps.supabase.table("teemo_documents")
+                .select("title, external_link, source")
+                .eq("id", document_id)
+                .eq("workspace_id", ctx.deps.workspace_id)
+                .maybe_single()
+                .execute()
+            )
+            meta = meta_result.data if meta_result else None
+            if meta:
+                title = meta.get("title") or "Document"
+                _add_citation(
+                    ctx,
+                    Citation(
+                        kind="document",
+                        title=title,
+                        url=meta.get("external_link"),
+                        category=meta.get("source"),
+                        source_id=document_id,
+                    ),
+                )
+        except Exception as exc:  # noqa: BLE001 — citation metadata is best-effort
+            logger.debug("[AGENT] read_document citation lookup failed: %s", exc)
+
         return content
 
     async def create_document(ctx: RunContext[AgentDeps], title: str, content: str) -> str:
@@ -912,14 +1027,25 @@ async def build_agent(
         try:
             result = (
                 ctx.deps.supabase.table("teemo_wiki_pages")
-                .select("content")
+                .select("title, content, page_type")
                 .eq("workspace_id", ctx.deps.workspace_id)
                 .eq("slug", slug)
                 .execute()
             )
             rows = result.data
             if rows and isinstance(rows, list) and len(rows) > 0:
-                return rows[0]["content"]
+                row = rows[0]
+                _add_citation(
+                    ctx,
+                    Citation(
+                        kind="wiki",
+                        title=row.get("title") or slug,
+                        url=_wiki_page_url(ctx.deps.workspace_id, slug),
+                        category=row.get("page_type"),
+                        source_id=f"wiki:{slug}",
+                    ),
+                )
+                return row["content"]
             return (
                 "Wiki page not found. "
                 "Available wiki pages can be seen in the Wiki Index above."
@@ -958,8 +1084,19 @@ async def build_agent(
             lines = [f"Found {len(pages)} wiki pages for {query!r}:"]
             for p in pages:
                 tldr = (p.get("tldr") or "").strip()
+                slug = p["slug"]
+                _add_citation(
+                    ctx,
+                    Citation(
+                        kind="wiki",
+                        title=p["title"],
+                        url=_wiki_page_url(ctx.deps.workspace_id, slug),
+                        category=p.get("page_type"),
+                        source_id=f"wiki:{slug}",
+                    ),
+                )
                 lines.append(
-                    f"- [{p['slug']}] ({p['page_type']}) {p['title']} — {tldr[:180]}"
+                    f"- [{slug}] ({p['page_type']}) {p['title']} — {tldr[:180]}"
                 )
             lines.append(
                 "\nUse `read_wiki_page(slug)` to read the full content of any page."

@@ -38,8 +38,70 @@ export interface AuthUser {
  * const health = await apiGet<HealthResponse>('/api/health');
  * ```
  */
+
+// ---------------------------------------------------------------------------
+// fetchWithAuth — singleton refresh lock + 401 interceptor (STORY-022-01)
+// ---------------------------------------------------------------------------
+
+/**
+ * Module-level promise used as a mutex so that multiple concurrent 401s
+ * only trigger a single POST /api/auth/refresh. All callers await the same
+ * promise; after it settles the lock is cleared for the next expiry cycle.
+ */
+let refreshPromise: Promise<void> | null = null;
+
+/**
+ * Core fetch wrapper that transparently renews expired access tokens.
+ *
+ * On a 401 (and only if the URL is not the refresh endpoint itself):
+ *   1. Acquires the singleton refresh lock (or reuses an in-flight one).
+ *   2. Awaits POST /api/auth/refresh — backend sets a new access_token cookie.
+ *   3. On refresh success: replays the original request.
+ *   4. On refresh failure (7-day refresh_token expired): lazily imports
+ *      authStore and calls logout() to transition status → 'anon'.
+ *
+ * @param url     Fully-qualified URL (`API_URL` already prepended by caller).
+ * @param options Standard RequestInit. `credentials: 'include'` is always forced.
+ */
+async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<Response> {
+  const opts: RequestInit = { ...options, credentials: 'include' };
+  let response = await fetch(url, opts);
+
+  if (response.status === 401 && !url.includes('/api/auth/refresh')) {
+    if (!refreshPromise) {
+      refreshPromise = fetch(`${API_URL}/api/auth/refresh`, {
+        method: 'POST',
+        credentials: 'include',
+      })
+        .then((res) => {
+          if (!res.ok) throw new Error('refresh_failed');
+        })
+        .finally(() => {
+          refreshPromise = null;
+        });
+    }
+
+    try {
+      await refreshPromise;
+      // Refresh succeeded — replay with the new cookie.
+      response = await fetch(url, opts);
+    } catch {
+      // Refresh token also expired — eject the user.
+      // Lazy import avoids circular: api.ts → authStore → api.ts.
+      try {
+        const { useAuth } = await import('../stores/authStore');
+        await useAuth.getState().logout();
+      } catch {
+        // Network down or store unavailable — ignore, let callers handle the 401.
+      }
+    }
+  }
+
+  return response;
+}
+
 export async function apiGet<T>(path: string): Promise<T> {
-  const r = await fetch(`${API_URL}${path}`, { credentials: 'include' });
+  const r = await fetchWithAuth(`${API_URL}${path}`);
   if (!r.ok) throw new Error(`API ${path} failed: ${r.status}`);
   return r.json() as Promise<T>;
 }
@@ -56,10 +118,9 @@ export async function apiGet<T>(path: string): Promise<T> {
  * @returns Parsed JSON body cast to `TRes`.
  */
 export async function apiPost<TReq, TRes>(path: string, body: TReq): Promise<TRes> {
-  const r = await fetch(`${API_URL}${path}`, {
+  const r = await fetchWithAuth(`${API_URL}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
     body: JSON.stringify(body),
   });
   if (!r.ok) {
@@ -156,9 +217,8 @@ export async function listSlackTeams(): Promise<SlackTeamsResponse> {
  * Owner-only — returns 403 if the caller is not the team owner.
  */
 export async function deleteSlackTeam(teamId: string): Promise<void> {
-  const res = await fetch(`${API_URL}/api/slack/teams/${teamId}`, {
+  const res = await fetchWithAuth(`${API_URL}/api/slack/teams/${teamId}`, {
     method: 'DELETE',
-    credentials: 'include',
   });
   if (!res.ok) throw new Error(await res.text());
 }
@@ -197,10 +257,9 @@ export interface Workspace {
  * @returns Parsed JSON body cast to `TRes`.
  */
 export async function apiPatch<TReq, TRes>(path: string, body: TReq): Promise<TRes> {
-  const r = await fetch(`${API_URL}${path}`, {
+  const r = await fetchWithAuth(`${API_URL}${path}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
     body: JSON.stringify(body),
   });
   if (!r.ok) {
@@ -276,9 +335,8 @@ export async function renameWorkspace(id: string, name: string): Promise<Workspa
  * @throws Error with backend `detail` message on non-2xx responses.
  */
 export async function deleteWorkspace(workspaceId: string): Promise<void> {
-  const r = await fetch(`${API_URL}/api/workspaces/${encodeURIComponent(workspaceId)}`, {
+  const r = await fetchWithAuth(`${API_URL}/api/workspaces/${encodeURIComponent(workspaceId)}`, {
     method: 'DELETE',
-    credentials: 'include',
   });
   if (!r.ok) {
     const payload = await r.json().catch(() => ({}));
@@ -684,12 +742,9 @@ export function bindChannel(workspaceId: string, channelId: string): Promise<Cha
  * @returns void (HTTP 204 No Content).
  */
 export async function unbindChannel(workspaceId: string, channelId: string): Promise<void> {
-  const r = await fetch(
+  const r = await fetchWithAuth(
     `${API_URL}/api/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(channelId)}`,
-    {
-      method: 'DELETE',
-      credentials: 'include',
-    },
+    { method: 'DELETE' },
   );
   if (!r.ok) {
     const payload = await r.json().catch(() => ({}));
@@ -710,12 +765,9 @@ export async function unbindChannel(workspaceId: string, channelId: string): Pro
  * @returns Confirmation with status field.
  */
 export async function removeKnowledgeFile(workspaceId: string, knowledgeId: string): Promise<{ status: string }> {
-  const r = await fetch(
+  const r = await fetchWithAuth(
     `${API_URL}/api/workspaces/${encodeURIComponent(workspaceId)}/knowledge/${encodeURIComponent(knowledgeId)}`,
-    {
-      method: 'DELETE',
-      credentials: 'include',
-    },
+    { method: 'DELETE' },
   );
   if (!r.ok) {
     const payload = await r.json().catch(() => ({}));
@@ -756,4 +808,34 @@ export function reindexKnowledge(workspaceId: string): Promise<ReindexResult> {
     `/api/workspaces/${encodeURIComponent(workspaceId)}/knowledge/reindex`,
     {},
   );
+}
+
+// ---------------------------------------------------------------------------
+// Skills wrappers (STORY-023-01)
+// ---------------------------------------------------------------------------
+
+/**
+ * A single active skill record returned by GET /api/workspaces/{id}/skills.
+ * Mirrors the L1 catalog shape from backend skill_service.list_skills:
+ * only ``name`` and ``summary`` are included — instructions are server-only.
+ */
+export interface Skill {
+  /** Slug identifier, e.g. "daily-standup". */
+  name: string;
+  /** Short "Use when..." description. Max 160 chars. */
+  summary: string;
+}
+
+/**
+ * GET /api/workspaces/{workspaceId}/skills
+ * Returns all active skills configured for a workspace.
+ *
+ * Skills are created via Slack chat (chat-only CRUD per ADR-023) and are
+ * read-only in the dashboard.
+ *
+ * @param workspaceId - UUID of the workspace to list skills for.
+ * @returns Array of Skill records (name + summary). Empty array if none.
+ */
+export function listWorkspaceSkills(workspaceId: string): Promise<Skill[]> {
+  return apiGet<Skill[]>(`/api/workspaces/${encodeURIComponent(workspaceId)}/skills`);
 }

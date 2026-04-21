@@ -426,3 +426,56 @@ async def delete_workspace(
     )
     if not result.data:
         raise HTTPException(status_code=404, detail="Workspace not found.")
+
+
+# ---------------------------------------------------------------------------
+# GET /api/workspaces/{id}/skills  (STORY-023-01)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/workspaces/{workspace_id}/skills",
+    status_code=200,
+)
+async def list_workspace_skills(
+    workspace_id: uuid.UUID,
+    user_id: str = Depends(get_current_user_id),
+) -> list[dict]:
+    """Return the active skill catalog for a workspace.
+
+    Reuses ``skill_service.list_skills`` which returns ``name`` and ``summary``
+    only — instructions are never included in the catalog listing.
+
+    Authorization mirrors ``get_workspace``: filtering on both ``id`` AND
+    ``user_id`` on the workspaces table ensures users can only list skills
+    for their own workspaces.
+
+    Args:
+        workspace_id: UUID of the workspace from the path.
+        user_id: Injected by ``get_current_user_id``; raises 401 if invalid.
+
+    Returns:
+        List of dicts with ``name`` and ``summary``. Empty list if none exist.
+
+    Raises:
+        HTTPException(401): No or invalid auth token.
+        HTTPException(404): Workspace not found or not owned by the current user.
+    """
+    from app.services.skill_service import list_skills  # local import — avoids circular risk
+
+    sb = get_supabase()
+
+    # Confirm workspace ownership before exposing skill data.
+    ownership_check = (
+        sb.table("teemo_workspaces")
+        .select("id")
+        .eq("id", str(workspace_id))
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    if not ownership_check.data:
+        raise HTTPException(status_code=404, detail="Workspace not found.")
+
+    return list_skills(str(workspace_id), sb)
+

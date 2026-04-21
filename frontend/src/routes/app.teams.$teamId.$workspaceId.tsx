@@ -41,7 +41,8 @@ import { useWorkspaceQuery } from '../hooks/useWorkspaces';
 import { useKeyQuery } from '../hooks/useKey';
 import { useDriveStatusQuery, useDisconnectDriveMutation } from '../hooks/useDrive';
 import { useKnowledgeQuery, useAddKnowledgeMutation, useRemoveKnowledgeMutation, useReindexKnowledgeMutation } from '../hooks/useKnowledge';
-import { getPickerToken, deleteWorkspace, type KnowledgeFile, type DocumentSource } from '../lib/api';
+import { useSkillsQuery } from '../hooks/useSkills';
+import { getPickerToken, deleteWorkspace, type KnowledgeFile, type DocumentSource, type Skill } from '../lib/api';
 import { SetupStepper } from '../components/workspace/SetupStepper';
 import { ChannelSection } from '../components/workspace/ChannelSection';
 
@@ -636,6 +637,75 @@ function TruncationToast({
 }
 
 // ---------------------------------------------------------------------------
+// SkillsSection (STORY-023-01)
+// ---------------------------------------------------------------------------
+
+/** Props for SkillsSection. */
+interface SkillsSectionProps {
+  workspaceId: string;
+}
+
+/**
+ * SkillsSection — read-only list of agent skills configured for a workspace.
+ *
+ * Skills are created and managed exclusively via Slack chat (ADR-023 chat-only
+ * CRUD). This section surfaces the skill catalog so dashboard users can see
+ * what the bot has been trained to do without leaving the UI.
+ *
+ * States:
+ *   - Loading  — skeleton cards while the query is in-flight.
+ *   - Empty    — helper text explaining skills are created via Slack.
+ *   - Populated — one card per skill with name slug + summary.
+ *
+ * @param workspaceId - UUID of the workspace to list skills for.
+ */
+function SkillsSection({ workspaceId }: SkillsSectionProps) {
+  const { data: skills, isLoading } = useSkillsQuery(workspaceId);
+
+  return (
+    <Card>
+      <div className="mb-3">
+        <h2 className="text-base font-semibold text-slate-900">Active Skills</h2>
+        <p className="text-xs text-slate-400 mt-0.5">
+          Skills are created by chatting with Tee-Mo in Slack. They appear here automatically.
+        </p>
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-2">
+          {[1, 2].map((i) => (
+            <div key={i} className="animate-pulse rounded-lg border border-slate-100 bg-slate-50 p-3">
+              <div className="h-3 w-1/4 rounded bg-slate-200 mb-2" />
+              <div className="h-3 w-2/3 rounded bg-slate-100" />
+            </div>
+          ))}
+        </div>
+      ) : !skills || skills.length === 0 ? (
+        <p className="text-sm text-slate-400 py-4 text-center">
+          No skills yet. Teach Tee-Mo new behaviors directly in Slack.
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {skills.map((skill: Skill) => (
+            <li
+              key={skill.name}
+              className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3"
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <span className="font-mono text-xs font-semibold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded">
+                  {skill.name}
+                </span>
+              </div>
+              <p className="text-xs text-slate-600">{skill.summary}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // DeleteWorkspaceSection
 // ---------------------------------------------------------------------------
 
@@ -870,6 +940,9 @@ function WorkspaceDetailPage() {
           files={files}
           isLoading={knowledgeLoading}
         />
+
+        {/* Active skills catalog (STORY-023-01) */}
+        <SkillsSection workspaceId={workspaceId} />
 
         {/* Channel binding section (STORY-008-02) */}
         <ChannelSection workspaceId={workspaceId} teamId={teamId} />

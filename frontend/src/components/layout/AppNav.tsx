@@ -52,21 +52,47 @@ export function AppNav({ userEmail }: AppNavProps) {
   }
 
   return (
-    <nav className="sticky top-0 z-10 bg-white border-b border-slate-200 px-6 h-14 flex items-center justify-between">
-      {/* Left: logo */}
-      <Link to="/app" className="text-lg font-semibold text-brand-500">
-        Tee-Mo
-      </Link>
+    <nav className="sticky top-0 z-10 bg-white/70 backdrop-blur-md border-b border-slate-200 px-6 h-14 flex items-center justify-between transition-colors duration-300">
+      {/* Left: Logo & Primary Navigation */}
+      <div className="flex items-center gap-8 md:gap-10">
+        <Link to="/app" className="flex items-center gap-2 text-xl font-bold text-brand-500 hover:text-brand-600 transition-colors">
+          Tee-Mo
+        </Link>
 
-      {/* Center: primary navigation */}
-      <Link to="/app" className="text-sm font-medium text-slate-600">
-        Workspaces
-      </Link>
+        {/* Primary navigation list */}
+        <ul className="flex items-center gap-1 hidden sm:flex">
+          <li>
+            <Link 
+              to="/app" 
+              className="px-3 py-1.5 rounded-md text-sm font-medium text-slate-600 hover:text-brand-600 hover:bg-brand-50 transition-all duration-200"
+              activeProps={{ className: '!text-brand-600 bg-brand-50/50' }}
+            >
+              Workspaces
+            </Link>
+          </li>
+        </ul>
+      </div>
 
-      {/* Right: user email + logout */}
-      <div className="flex items-center gap-3">
-        <span className="text-sm text-slate-700">{userEmail}</span>
-        <Button variant="ghost" size="sm" type="button" onClick={handleLogout}>
+      {/* Right: User Controls */}
+      <div className="flex items-center gap-4">
+        {/* Profile representation */}
+        <div className="flex items-center gap-3">
+          <div className="hidden sm:flex flex-col items-end">
+            <span className="text-sm font-medium text-slate-700 leading-tight">{userEmail.split('@')[0]}</span>
+            <span className="text-xs text-slate-500 leading-tight">{userEmail}</span>
+          </div>
+          <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-brand-400 to-amber-300 flex items-center justify-center text-white font-bold shadow-sm ring-2 ring-white">
+            {userEmail.charAt(0).toUpperCase()}
+          </div>
+        </div>
+        
+        <Button 
+          variant="ghost" 
+          size="sm" 
+          type="button" 
+          onClick={handleLogout}
+          className="text-slate-500 hover:text-red-600 hover:bg-red-50"
+        >
           Log out
         </Button>
       </div>

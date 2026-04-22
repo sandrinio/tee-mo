@@ -1,4 +1,4 @@
-"""Unit tests for slack_blocks.build_reply_blocks (STORY-017-09).
+"""Unit tests for slack_blocks.build_reply_blocks.
 
 Covers every Gherkin scenario from the story's §2.1 that can be exercised
 without a live Slack client or pydantic-ai runtime:
@@ -9,8 +9,8 @@ without a live Slack client or pydantic-ai runtime:
 - Web citation renders clickable chip with hostname category
 - Missing URL falls back to plain-label chip
 - Dedupe collapses same source_id to one chip
-- Overflow produces "+N more" trailing chip
-- SOURCES label appears once between reply and chips
+- Overflow produces "+N more" trailing line
+- Every sources line is prefixed with ``>`` so Slack draws the blockquote bar
 """
 
 from __future__ import annotations
@@ -19,15 +19,9 @@ from app.services.citation_collector import Citation
 from app.services.slack_blocks import build_reply_blocks
 
 
-def _context_mrkdwn_texts(blocks: list[dict]) -> list[str]:
-    """Return the mrkdwn text of every context block in order."""
-    out: list[str] = []
-    for b in blocks:
-        if b["type"] == "context":
-            for el in b["elements"]:
-                if el["type"] == "mrkdwn":
-                    out.append(el["text"])
-    return out
+def _sources_text(blocks: list[dict]) -> str:
+    """Return the mrkdwn text of the sources section block (blocks[1])."""
+    return blocks[1]["text"]["text"]
 
 
 class TestBuildReplyBlocks:
@@ -44,16 +38,15 @@ class TestBuildReplyBlocks:
         )
         blocks = build_reply_blocks("our refund window is 30 days.", [c])
         assert blocks is not None
-        # [0] section reply, [1] *SOURCES*, [2] chip
+        # [0] section reply, [1] section sources (blockquote)
         assert blocks[0]["type"] == "section"
         assert blocks[0]["text"]["text"] == "our refund window is 30 days."
-        assert blocks[1]["elements"][0]["text"] == "*SOURCES*"
-        chip = blocks[2]["elements"][0]["text"]
+        sources = _sources_text(blocks)
+        assert sources.startswith("> *Sources*")
         assert (
-            "<https://teemo.soula.ge/app/workspaces/ws/wiki/refund-policy|Refund Policy>"
-            in chip
+            "> <https://teemo.soula.ge/app/workspaces/ws/wiki/refund-policy|Refund Policy>  `source-summary`"
+            in sources
         )
-        assert "`source-summary`" in chip
 
     def test_document_citation_with_drive_link(self) -> None:
         c = Citation(
@@ -65,9 +58,11 @@ class TestBuildReplyBlocks:
         )
         blocks = build_reply_blocks("see attached", [c])
         assert blocks is not None
-        chip = blocks[2]["elements"][0]["text"]
-        assert "<https://drive.google.com/file/d/abc/view|Refund Policy.docx>" in chip
-        assert "`google_drive`" in chip
+        sources = _sources_text(blocks)
+        assert (
+            "> <https://drive.google.com/file/d/abc/view|Refund Policy.docx>  `google_drive`"
+            in sources
+        )
 
     def test_web_citation_renders_hostname_category(self) -> None:
         c = Citation(
@@ -79,9 +74,8 @@ class TestBuildReplyBlocks:
         )
         blocks = build_reply_blocks("per Stripe...", [c])
         assert blocks is not None
-        chip = blocks[2]["elements"][0]["text"]
-        assert "<https://stripe.com/docs/refunds|Stripe Docs>" in chip
-        assert "`stripe.com`" in chip
+        sources = _sources_text(blocks)
+        assert "> <https://stripe.com/docs/refunds|Stripe Docs>  `stripe.com`" in sources
 
     def test_missing_url_falls_back_to_plain_label(self) -> None:
         c = Citation(
@@ -93,19 +87,23 @@ class TestBuildReplyBlocks:
         )
         blocks = build_reply_blocks("hi", [c])
         assert blocks is not None
-        chip = blocks[2]["elements"][0]["text"]
-        assert chip == "Refund Policy"  # no <|> link syntax, no category
+        sources = _sources_text(blocks)
+        # No <|> link syntax, no backtick category — bare label on its blockquote line.
+        assert "\n> Refund Policy" in "\n" + sources
+        assert "<" not in sources  # no mrkdwn link syntax anywhere
+        assert "`" not in sources  # no category code-span
 
     def test_dedupe_collapses_same_source_id(self) -> None:
         c1 = Citation(kind="document", title="Doc", url="u", category=None, source_id="doc-1")
         c2 = Citation(kind="document", title="Doc again", url="u2", category=None, source_id="doc-1")
         blocks = build_reply_blocks("reply", [c1, c2])
         assert blocks is not None
-        # section + SOURCES + 1 chip = 3 blocks (no overflow)
-        assert len(blocks) == 3
-        chip = blocks[2]["elements"][0]["text"]
+        # reply section + sources section = 2 blocks
+        assert len(blocks) == 2
+        sources = _sources_text(blocks)
         # first occurrence wins
-        assert "<u|Doc>" in chip
+        assert "<u|Doc>" in sources
+        assert "Doc again" not in sources
 
     def test_overflow_renders_plus_n_more(self) -> None:
         cs = [
@@ -120,15 +118,26 @@ class TestBuildReplyBlocks:
         ]
         blocks = build_reply_blocks("reply", cs)
         assert blocks is not None
-        mrkdwn_contexts = _context_mrkdwn_texts(blocks)
-        # *SOURCES* + 5 chips + +3 more = 7 mrkdwn contexts
-        assert mrkdwn_contexts[0] == "*SOURCES*"
-        assert len(mrkdwn_contexts) == 1 + 5 + 1
-        assert mrkdwn_contexts[-1] == "+3 more"
+        sources = _sources_text(blocks)
+        lines = sources.splitlines()
+        # "> *Sources*" + 5 chip lines + "> _+3 more_"
+        assert lines[0] == "> *Sources*"
+        assert len(lines) == 1 + 5 + 1
+        assert lines[-1] == "> _+3 more_"
 
-    def test_sources_label_is_only_context_header(self) -> None:
-        c = Citation(kind="wiki", title="T", url=None, category=None, source_id="s")
-        blocks = build_reply_blocks("r", [c])
+    def test_every_sources_line_is_blockquoted(self) -> None:
+        cs = [
+            Citation(
+                kind="wiki",
+                title=f"T{i}",
+                url=f"https://x/{i}",
+                category="concept",
+                source_id=f"s{i}",
+            )
+            for i in range(3)
+        ]
+        blocks = build_reply_blocks("r", cs)
         assert blocks is not None
-        mrkdwn_contexts = _context_mrkdwn_texts(blocks)
-        assert mrkdwn_contexts.count("*SOURCES*") == 1
+        sources = _sources_text(blocks)
+        for line in sources.splitlines():
+            assert line.startswith("> "), f"non-blockquoted line: {line!r}"

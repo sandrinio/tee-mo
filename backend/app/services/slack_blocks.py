@@ -1,11 +1,13 @@
-"""Slack Block Kit payload builders (STORY-017-09).
+"""Slack Block Kit payload builders.
 
-Right now the only builder is ``build_reply_blocks``, which produces the
-Block Kit list that replaces a plain ``text=`` post when the agent cited
-any sources during its run. The sources are rendered as a single mrkdwn
-blockquote section — every line prefixed with ``>`` so Slack shows the
-gray vertical bar on the left that visually groups the label, all
-citation chips, and any trailing ``+N more`` overflow into one unit.
+``build_reply_blocks`` produces the Block Kit list that replaces a plain
+``text=`` post when the agent cited any sources during its run. The
+sources footer is rendered as a ``rich_text_quote`` inside a ``rich_text``
+block — this is the officially-preferred structured approach per Slack's
+docs ("rich_text is strongly preferred and allows greater flexibility").
+``rich_text_quote`` renders a native left-side border around its content,
+which visually anchors the Sources label, every citation chip, and the
+``+N more`` overflow into one grouped panel under the reply.
 
 Kept separate from ``slack_formatter`` so the mrkdwn converter stays a
 pure string → string function; anything shaping Block Kit payloads goes
@@ -20,36 +22,54 @@ from app.services.citation_collector import Citation, dedupe_and_cap
 MAX_DISPLAYED_SOURCES = 5
 
 
-def _chip_mrkdwn(citation: Citation) -> str:
-    """Render a single citation as mrkdwn — clickable link + muted category.
+def _citation_elements(c: Citation) -> list[dict]:
+    r"""Return the rich-text elements that render a single citation chip.
 
-    Chips use Slack's mrkdwn link syntax ``<url|text>`` when a URL is
-    available, falling back to the title alone when not (e.g. a wiki
-    citation rendered before ``FRONTEND_URL`` is configured). The
-    category, when present, renders as an inline code span (``` ` ```)
-    to visually separate it from the title without introducing a second
-    Block Kit element per chip.
+    Emits a clickable ``link`` element when the citation has a URL,
+    otherwise a bare ``text`` element with the title. The optional
+    ``category`` tag is appended as a monospace (``code``) span —
+    visually equivalent to the previous ``\`backtick\``` mrkdwn chip.
     """
-    title = citation.title.strip() or "(untitled)"
-    label = f"<{citation.url}|{title}>" if citation.url else title
-    if citation.category:
-        return f"{label}  `{citation.category}`"
-    return label
+    title = c.title.strip() or "(untitled)"
+    if c.url:
+        chip: list[dict] = [{"type": "link", "url": c.url, "text": title}]
+    else:
+        chip = [{"type": "text", "text": title}]
+    if c.category:
+        chip.append({"type": "text", "text": "  "})
+        chip.append(
+            {"type": "text", "text": c.category, "style": {"code": True}}
+        )
+    return chip
 
 
-def _sources_blockquote_mrkdwn(displayed: list[Citation], overflow: int) -> str:
-    """Render the full sources panel as a single mrkdwn blockquote.
+def _build_quote_elements(
+    displayed: list[Citation], overflow: int
+) -> list[dict]:
+    """Assemble the rich-text element list for the sources blockquote.
 
-    Every line is prefixed with ``> `` so Slack draws its blockquote
-    vertical bar down the entire section — label, chips, and the
-    optional ``+N more`` overflow all share one visual group.
+    Layout inside the quote:
+
+    - Bold ``Sources`` header
+    - One line per citation (link + optional monospace category)
+    - Optional trailing italic ``+N more`` when the list was capped
     """
-    lines = ["> *Sources*"]
+    elements: list[dict] = [
+        {"type": "text", "text": "Sources", "style": {"bold": True}},
+    ]
     for c in displayed:
-        lines.append(f"> {_chip_mrkdwn(c)}")
+        elements.append({"type": "text", "text": "\n"})
+        elements.extend(_citation_elements(c))
     if overflow > 0:
-        lines.append(f"> _+{overflow} more_")
-    return "\n".join(lines)
+        elements.append({"type": "text", "text": "\n"})
+        elements.append(
+            {
+                "type": "text",
+                "text": f"+{overflow} more",
+                "style": {"italic": True},
+            }
+        )
+    return elements
 
 
 def build_reply_blocks(
@@ -67,10 +87,11 @@ def build_reply_blocks(
     Layout:
 
     1. ``section`` — the reply itself, mrkdwn.
-    2. ``section`` — a single mrkdwn blockquote containing the
-       ``*Sources*`` label, one chip per cited source (after
-       dedupe-and-cap), and an optional ``_+N more_`` line when the
-       citation list exceeded ``MAX_DISPLAYED_SOURCES``.
+    2. ``rich_text`` wrapping a single ``rich_text_quote`` that holds
+       the bold ``Sources`` header, one line per displayed citation
+       (clickable link + optional monospace category), and an optional
+       italic ``+N more`` trailing line when the citation list exceeded
+       ``MAX_DISPLAYED_SOURCES``.
     """
     if not citations:
         return None
@@ -85,10 +106,12 @@ def build_reply_blocks(
             "text": {"type": "mrkdwn", "text": reply_mrkdwn},
         },
         {
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": _sources_blockquote_mrkdwn(displayed, overflow),
-            },
+            "type": "rich_text",
+            "elements": [
+                {
+                    "type": "rich_text_quote",
+                    "elements": _build_quote_elements(displayed, overflow),
+                }
+            ],
         },
     ]

@@ -49,8 +49,8 @@ def test_citations_present_adds_blocks_and_keeps_text() -> None:
     # dispatcher propagated the list rather than building text-only.
     assert isinstance(blocks, list)
     assert blocks[0]["type"] == "section"
-    assert blocks[1]["type"] == "section"
-    assert blocks[1]["text"]["text"].startswith("> *Sources*")
+    assert blocks[1]["type"] == "rich_text"
+    assert blocks[1]["elements"][0]["type"] == "rich_text_quote"
 
 
 def test_deps_without_citations_attr_falls_back_to_text() -> None:

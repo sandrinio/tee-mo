@@ -783,6 +783,8 @@ export async function removeKnowledgeFile(workspaceId: string, knowledgeId: stri
 export interface ReindexResult {
   /** Number of files successfully re-extracted and updated. */
   reindexed: number;
+  /** Number of files that were skipped (unchanged on Drive). */
+  skipped: number;
   /** Number of files that failed during re-indexing. */
   failed: number;
   /** Per-file error details for each failure. */

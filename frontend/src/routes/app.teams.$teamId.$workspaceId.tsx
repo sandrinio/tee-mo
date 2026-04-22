@@ -270,6 +270,7 @@ interface PickerSectionProps {
 /** Result state for the reindex operation, shown inline after completion. */
 interface ReindexFeedback {
   reindexed: number;
+  skipped: number;
   failed: number;
 }
 
@@ -365,7 +366,7 @@ function PickerSection({
     setReindexFeedback(null);
     try {
       const result = await reindexMutation.mutateAsync();
-      setReindexFeedback({ reindexed: result.reindexed, failed: result.failed });
+      setReindexFeedback({ reindexed: result.reindexed, skipped: result.skipped, failed: result.failed });
     } catch {
       // error surfaced via reindexMutation.error
     }
@@ -447,11 +448,17 @@ function PickerSection({
       {/* Re-index success feedback */}
       {reindexFeedback && (
         <p className="text-xs text-slate-600 mt-1">
-          Re-indexed {reindexFeedback.reindexed} file
-          {reindexFeedback.reindexed !== 1 ? 's' : ''}
-          {reindexFeedback.failed > 0
-            ? ` (${reindexFeedback.failed} failed — check Drive permissions)`
-            : ' successfully.'}
+          Re-indexed {reindexFeedback.reindexed} file{reindexFeedback.reindexed !== 1 ? 's' : ''}
+          { (reindexFeedback.skipped > 0 || reindexFeedback.failed > 0) && (
+            <span>
+              {' '}
+              ({[
+                reindexFeedback.skipped > 0 ? `${reindexFeedback.skipped} skipped` : null,
+                reindexFeedback.failed > 0 ? `${reindexFeedback.failed} failed — check Drive permissions` : null
+              ].filter(Boolean).join(', ')})
+            </span>
+          )}
+          {reindexFeedback.failed === 0 ? ' successfully.' : ''}
         </p>
       )}
     </Card>

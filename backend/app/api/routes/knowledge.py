@@ -259,7 +259,7 @@ async def index_file(
                 _fetch, drive_client, payload.drive_file_id, payload.mime_type
             )
 
-        # Step 9: Map MIME type to doc_type and create document via document_service.
+        # step 9: Map MIME type to doc_type and create document via document_service.
         # document_service handles SHA-256 hash + AI description generation internally.
         doc_type = MIME_TO_DOC_TYPE.get(payload.mime_type, "pdf")
         response_row = await _document_service.create_document(
@@ -271,6 +271,7 @@ async def index_file(
             source="google_drive",
             external_id=payload.drive_file_id,
             external_link=payload.link,
+            metadata={"mime_type": payload.mime_type},
         )
 
     # Step 10: Add truncation warning if content was truncated by drive_service
@@ -455,6 +456,7 @@ async def reindex_knowledge(
     Returns:
         JSON object with:
           - ``reindexed``: Number of files successfully re-indexed.
+          - ``skipped``: Number of files that were skipped (unchanged on Drive).
           - ``failed``: Number of files that failed during re-indexing.
           - ``errors``: List of ``{"file_id": str, "error": str}`` dicts for failures.
 
@@ -496,6 +498,7 @@ async def reindex_knowledge(
     file_rows = list_result.data or []
 
     reindexed = 0
+    skipped = 0
     failed = 0
     errors: list[dict] = []
 
@@ -504,6 +507,20 @@ async def reindex_knowledge(
         doc_id = file_row.get("id", "")
         mime_type = file_row.get("metadata", {}).get("mime_type") or ""
         try:
+            from datetime import datetime
+
+            file_meta = drive_client.files().get(fileId=file_id, fields="modifiedTime").execute()
+            drive_modified_time_str = file_meta.get("modifiedTime")
+            stored_updated_at_str = file_row.get("updated_at")
+
+            if drive_modified_time_str and stored_updated_at_str:
+                # Drive returns RFC 3339 with 'Z' for UTC. Supabase returns ISO format.
+                drive_dt = datetime.fromisoformat(drive_modified_time_str.replace("Z", "+00:00"))
+                stored_dt = datetime.fromisoformat(stored_updated_at_str.replace("Z", "+00:00"))
+                if drive_dt <= stored_dt:
+                    skipped += 1
+                    continue
+
             # Re-fetch content from Drive
             # fetch_file_content returns _AwaitableStr — use inspect.isawaitable to handle both
             # sync and async return values (FLASHCARDS.md / STORY-006-08 pattern).
@@ -537,7 +554,12 @@ async def reindex_knowledge(
             failed += 1
             errors.append({"file_id": file_id, "error": str(exc)})
 
-    return {"reindexed": reindexed, "failed": failed, "errors": errors}
+    return {
+        "reindexed": reindexed,
+        "skipped": skipped,
+        "failed": failed,
+        "errors": errors,
+    }
 
 
 # ---------------------------------------------------------------------------

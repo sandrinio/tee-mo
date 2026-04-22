@@ -2,8 +2,9 @@
 -- Migration: 013_add_bot_persona
 -- Purpose:   Add bot_persona TEXT column to teemo_workspaces.
 --            The persona replaces the default "You are Tee-Mo" identity line
---            at the top of the agent system prompt with a role defined by the
---            workspace owner (edited from the dashboard via PATCH /api/workspaces/{id}).
+--            at the top of the agent system prompt. Edited from the dashboard
+--            (PATCH /api/workspaces/{id}) or in-chat via the agent's
+--            `update_persona` tool.
 -- Depends on: 002_teemo_workspaces, 007_teemo_workspaces_alter
 -- =============================================================================
 

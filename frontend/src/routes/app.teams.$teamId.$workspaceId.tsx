@@ -846,9 +846,9 @@ function WorkspaceDetailPage() {
   const [wizardSkipped, setWizardSkipped] = useState(false);
 
   // Data queries
-  const { data: workspace } = useWorkspaceQuery(workspaceId);
-  const { data: keyData } = useKeyQuery(workspaceId);
-  const { data: driveStatus } = useDriveStatusQuery(workspaceId);
+  const { data: workspace, isLoading: workspaceLoading } = useWorkspaceQuery(workspaceId);
+  const { data: keyData, isLoading: keyLoading } = useKeyQuery(workspaceId);
+  const { data: driveStatus, isLoading: driveLoading } = useDriveStatusQuery(workspaceId);
   const {
     data: knowledgeFiles,
     isLoading: knowledgeLoading,
@@ -874,6 +874,19 @@ function WorkspaceDetailPage() {
       setTruncationWarning(file.warning);
     }
   }, []);
+
+  // Show a full-screen spinner while prerequisite data is loading
+  if (workspaceLoading || keyLoading || driveLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50">
+        <div
+          role="status"
+          aria-label="Loading workspace setup status"
+          className="h-8 w-8 animate-spin rounded-full border-2 border-brand-500 border-t-transparent"
+        />
+      </div>
+    );
+  }
 
   // Show guided setup mode when setup is incomplete and user hasn't skipped
   if (!isSetupComplete && !wizardSkipped) {

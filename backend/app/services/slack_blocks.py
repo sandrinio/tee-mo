@@ -2,11 +2,10 @@
 
 Right now the only builder is ``build_reply_blocks``, which produces the
 Block Kit list that replaces a plain ``text=`` post when the agent cited
-any sources during its run. The output layout matches the UX reference
-captured in the story file: a main section block with the reply, a
-``*SOURCES*`` context label, and one context block per cited source
-rendering as a clickable mrkdwn chip with an optional muted category
-tag.
+any sources during its run. The sources are rendered as a single mrkdwn
+blockquote section — every line prefixed with ``>`` so Slack shows the
+gray vertical bar on the left that visually groups the label, all
+citation chips, and any trailing ``+N more`` overflow into one unit.
 
 Kept separate from ``slack_formatter`` so the mrkdwn converter stays a
 pure string → string function; anything shaping Block Kit payloads goes
@@ -38,6 +37,21 @@ def _chip_mrkdwn(citation: Citation) -> str:
     return label
 
 
+def _sources_blockquote_mrkdwn(displayed: list[Citation], overflow: int) -> str:
+    """Render the full sources panel as a single mrkdwn blockquote.
+
+    Every line is prefixed with ``> `` so Slack draws its blockquote
+    vertical bar down the entire section — label, chips, and the
+    optional ``+N more`` overflow all share one visual group.
+    """
+    lines = ["> *Sources*"]
+    for c in displayed:
+        lines.append(f"> {_chip_mrkdwn(c)}")
+    if overflow > 0:
+        lines.append(f"> _+{overflow} more_")
+    return "\n".join(lines)
+
+
 def build_reply_blocks(
     reply_mrkdwn: str,
     citations: list[Citation],
@@ -50,12 +64,12 @@ def build_reply_blocks(
         ``None`` when ``citations`` is empty — callers treat ``None`` as
         "fall back to the plain text=-only post path".
 
-    Layout (matches STORY-017-09 §3.3):
+    Layout:
 
     1. ``section`` — the reply itself, mrkdwn.
-    2. ``context`` — a single ``*SOURCES*`` label.
-    3. ``context`` blocks — one per cited source chip, after dedupe-and-cap.
-    4. Optional ``context`` — a trailing ``+N more`` chip when the
+    2. ``section`` — a single mrkdwn blockquote containing the
+       ``*Sources*`` label, one chip per cited source (after
+       dedupe-and-cap), and an optional ``_+N more_`` line when the
        citation list exceeded ``MAX_DISPLAYED_SOURCES``.
     """
     if not citations:
@@ -65,31 +79,16 @@ def build_reply_blocks(
     if not displayed:
         return None
 
-    blocks: list[dict] = [
+    return [
         {
             "type": "section",
             "text": {"type": "mrkdwn", "text": reply_mrkdwn},
         },
         {
-            "type": "context",
-            "elements": [{"type": "mrkdwn", "text": "*SOURCES*"}],
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": _sources_blockquote_mrkdwn(displayed, overflow),
+            },
         },
     ]
-
-    for c in displayed:
-        blocks.append(
-            {
-                "type": "context",
-                "elements": [{"type": "mrkdwn", "text": _chip_mrkdwn(c)}],
-            }
-        )
-
-    if overflow > 0:
-        blocks.append(
-            {
-                "type": "context",
-                "elements": [{"type": "mrkdwn", "text": f"+{overflow} more"}],
-            }
-        )
-
-    return blocks

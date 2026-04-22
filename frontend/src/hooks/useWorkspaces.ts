@@ -20,7 +20,7 @@ import {
   listSlackTeams,
   listWorkspaces,
   makeWorkspaceDefault,
-  renameWorkspace,
+  updateWorkspace,
   SlackTeam,
   Workspace,
 } from '../lib/api';

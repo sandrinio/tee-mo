@@ -91,6 +91,7 @@ const workspace: Workspace = {
   owner_user_id: 'user-001',
   is_default_for_team: false,
   created_at: '2026-01-01T00:00:00Z',
+  updated_at: '2026-01-01T00:00:00Z',
 };
 
 /** Default no-op stubs for save/delete mutations — override per test if needed. */

@@ -31,7 +31,7 @@
  *   `useKeyQuery(workspaceId).data.has_key !== true`.
  * 15-file cap (R5): picker button disabled with count badge when files.length >= 15.
  */
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
@@ -743,7 +743,6 @@ function PersonaSection({ workspace }: PersonaSectionProps) {
     </Card>
   );
 }
-
 
 // ---------------------------------------------------------------------------
 // SkillsSection (STORY-023-01)

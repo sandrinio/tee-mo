@@ -315,8 +315,8 @@ export async function createWorkspace(teamId: string, name: string): Promise<Wor
  * Updates a workspace's name and/or bot persona.
  *
  * @param id - Workspace UUID.
- * @param updates - Fields to update: { name?, bot_persona? }. Name is technically
- *   required by the backend model for now, but we'll see.
+ * @param updates - Fields to update. `name` is required by the backend model;
+ *   `bot_persona` is optional (pass `null` or `""` to clear).
  * @returns The updated Workspace object.
  */
 export async function updateWorkspace(

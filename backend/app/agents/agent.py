@@ -321,11 +321,11 @@ def _build_system_prompt(
                     non-empty, the wiki index section is rendered above the
                     document catalog.
         bot_persona: Optional free-text persona string set by the workspace
-                    owner (via the dashboard or update_persona tool). When
-                    provided, it is injected as a "## Core Persona" block at
-                    the very top of the prompt — overriding the default
-                    "You are Tee-Mo" identity. The base capabilities and tool
-                    rules follow unchanged below it.
+                    owner via the dashboard. When provided, it replaces the
+                    default "You are Tee-Mo..." identity sentence at the top
+                    of the preamble. All downstream rules (tools, formatting,
+                    citations, knowledge-routing) remain unchanged — only the
+                    role/voice is overridden.
 
     Returns:
         A fully assembled system prompt string.
@@ -343,22 +343,22 @@ def _build_system_prompt(
         "or any other relative date — do not guess.\n\n"
     )
 
-    # --- Bot persona injection ---
-    # When a custom persona is set, it is rendered at the very top of the
-    # prompt as an authoritative "Core Persona" block. This takes precedence
-    # over the default Tee-Mo identity that follows.
-    persona_block = ""
+    # --- Identity line ---
+    # Default identity is the built-in Tee-Mo voice. When a workspace sets a
+    # custom persona, it *replaces* the identity sentence — the tool rules,
+    # formatting guidance, and knowledge-routing strategy below still apply.
     if bot_persona and bot_persona.strip():
-        persona_block = (
-            "## Core Persona\n"
-            f"{bot_persona.strip()}\n\n"
-            "---\n\n"
+        identity_line = f"{bot_persona.strip()}\n\n"
+    else:
+        identity_line = (
+            "You are Tee-Mo, an AI assistant embedded in your team's Slack workspace.\n"
+            "You help teams with standups, reports, analysis, and workflow automation.\n\n"
         )
+
     preamble = (
         current_time_line
-        + "You are Tee-Mo, an AI assistant embedded in your team's Slack workspace.\n"
-        "You help teams with standups, reports, analysis, and workflow automation.\n\n"
-        "Rules:\n"
+        + identity_line
+        + "Rules:\n"
         "- Be concise and helpful.\n"
         "- Never reveal internal workspace IDs, API keys, or stack traces.\n"
         "- When a skill is available that fits the request, load it first with load_skill.\n"
@@ -406,7 +406,7 @@ def _build_system_prompt(
         "5. Never read more than 5 wiki pages in a single turn — pick the best ones.\n"
     )
 
-    prompt = persona_block + preamble
+    prompt = preamble
 
     if skills:
         skill_lines = "\n".join(
@@ -613,38 +613,6 @@ async def build_agent(
                 "Check the Available Skills list in your system prompt for valid names."
             )
         return f"## Skill: {skill['name']}\n\n{skill['instructions']}"
-
-    async def update_persona(ctx: RunContext[AgentDeps], persona: str) -> str:
-        """Update your own core persona/identity.
-
-        Use this when the user asks you to change your role, vibe, or behavior
-        permanently for this workspace. The change will take effect on your
-        next message.
-
-        Args:
-            ctx:     pydantic-ai RunContext with deps.
-            persona: Free-text description of your new persona. Max 2000 chars.
-        """
-        try:
-            # We use the service-role client from deps to update the workspace row.
-            # Empty string or None clears the persona.
-            payload = {"bot_persona": persona.strip() or None}
-            res = (
-                ctx.deps.supabase.table("teemo_workspaces")
-                .update(payload)
-                .eq("id", ctx.deps.workspace_id)
-                .execute()
-            )
-            if not res.data:
-                return "Failed to update persona: workspace not found."
-
-            return (
-                f"Persona updated successfully to: \"{persona.strip()[:100]}...\"\n"
-                "I will adopt this new identity starting from my next response."
-            )
-        except Exception as exc:
-            logger.error("[AGENT] update_persona unexpected error: %s", exc)
-            return f"Failed to update persona: {exc}"
 
     async def create_skill(
         ctx: RunContext[AgentDeps],

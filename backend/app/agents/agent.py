@@ -910,8 +910,8 @@ async def build_agent(
             )
         except Exception as exc:
             exc_str = str(exc)
-            if "Maximum 15 documents" in exc_str or "doc_cap" in exc_str:
-                return "Maximum 15 documents per workspace reached. Delete a document before creating a new one."
+            if "Maximum 100 documents" in exc_str or "Maximum 15 documents" in exc_str or "doc_cap" in exc_str:
+                return "Maximum 100 documents per workspace reached. Delete a document before creating a new one."
             logger.error("[AGENT] create_document unexpected error: %s", exc)
             return f"Failed to create document: {exc}"
 

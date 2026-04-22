@@ -63,7 +63,7 @@ export const Route = createFileRoute('/app/teams/$teamId/$workspaceId')({
 // ---------------------------------------------------------------------------
 
 /** Maximum number of files that can be indexed per workspace (R5). */
-const MAX_FILES = 15;
+const MAX_FILES = 100;
 
 /** Google API client script URL for loading the Picker API. */
 const GAPI_SCRIPT_URL = 'https://apis.google.com/js/api.js';

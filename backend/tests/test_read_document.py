@@ -376,13 +376,13 @@ class TestCreateDocument:
 
     @pytest.mark.asyncio
     async def test_create_document_handles_cap_reached(self) -> None:
-        """create_document returns friendly message when 15-doc cap is reached."""
+        """create_document returns friendly message when 100-doc cap is reached."""
         import app.agents.agent as agent_mod  # type: ignore[import]
 
         create_document = await _extract_tool("create_document")
 
         def _raise_cap(*args: Any, **kwargs: Any):
-            raise Exception("Maximum 15 documents per workspace (doc_cap)")
+            raise Exception("Maximum 100 documents per workspace (doc_cap)")
 
         mock_create = AsyncMock(side_effect=_raise_cap)
         supabase = MagicMock()
@@ -392,7 +392,7 @@ class TestCreateDocument:
         with patch.object(agent_mod._doc_service, "create_document", mock_create):
             result = await create_document(ctx, FAKE_TITLE, FAKE_CONTENT)
 
-        assert "Maximum 15 documents" in result, (
+        assert "Maximum 100 documents" in result, (
             f"Must return cap-reached message when DB raises exception. Got: {result!r}"
         )
 

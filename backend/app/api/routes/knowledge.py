@@ -220,10 +220,10 @@ async def index_file(
             .execute()
         )
         current_count = count_result.count or 0
-        if current_count >= 15:
+        if current_count >= 100:
             raise HTTPException(
                 status_code=400,
-                detail="Maximum 15 files per workspace. Remove a file before adding another.",
+                detail="Maximum 100 files per workspace. Remove a file before adding another.",
             )
 
         # Step 7: Duplicate check — look for an existing document with the same external_id

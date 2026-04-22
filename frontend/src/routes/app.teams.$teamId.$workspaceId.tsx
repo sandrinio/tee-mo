@@ -329,7 +329,10 @@ function PickerSection({
         // Build a DocsView scoped to plain-text files (.txt) to surface files
         // that are hidden from the default DOCS view (which only shows Google
         // Workspace native types + PDFs/Office files).
-        const textView = new google.picker.DocsView()
+        // Cast to `any` because DocsView exists at runtime but is absent from
+        // the @types/google-apps-script Picker type definitions.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const textView = new (google.picker as any).DocsView()
           .setMimeTypes('text/plain');
 
         const picker = new google.picker.PickerBuilder()

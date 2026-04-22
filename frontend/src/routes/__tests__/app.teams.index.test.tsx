@@ -102,6 +102,7 @@ vi.mock('../../components/dashboard/CreateWorkspaceModal', () => ({
               owner_user_id: 'user-001',
               is_default_for_team: false,
               created_at: '2024-01-20T10:00:00Z',
+              updated_at: '2024-01-20T10:00:00Z',
             };
             mockCreateMutateAsync.mockResolvedValue(newWs);
             if (onCreated) onCreated(newWs);
@@ -130,6 +131,7 @@ function makeWorkspace(id: string, name: string): Workspace {
     owner_user_id: 'user-001',
     is_default_for_team: false,
     created_at: '2024-01-15T10:00:00Z',
+    updated_at: '2024-01-15T10:00:00Z',
   };
 }
 

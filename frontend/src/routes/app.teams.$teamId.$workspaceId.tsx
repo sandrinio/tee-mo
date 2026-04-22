@@ -31,13 +31,13 @@
  *   `useKeyQuery(workspaceId).data.has_key !== true`.
  * 15-file cap (R5): picker button disabled with count badge when files.length >= 15.
  */
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { Badge } from '../components/ui/Badge';
 import { Card } from '../components/ui/Card';
-import { useWorkspaceQuery } from '../hooks/useWorkspaces';
+import { useWorkspaceQuery, useUpdateWorkspaceMutation } from '../hooks/useWorkspaces';
 import { useKeyQuery } from '../hooks/useKey';
 import { useDriveStatusQuery, useDisconnectDriveMutation } from '../hooks/useDrive';
 import { useKnowledgeQuery, useAddKnowledgeMutation, useRemoveKnowledgeMutation, useReindexKnowledgeMutation } from '../hooks/useKnowledge';
@@ -655,6 +655,96 @@ function TruncationToast({
 }
 
 // ---------------------------------------------------------------------------
+// PersonaSection
+// ---------------------------------------------------------------------------
+
+/** Props for PersonaSection. */
+interface PersonaSectionProps {
+  workspace: {
+    id: string;
+    name: string;
+    bot_persona?: string | null;
+  };
+}
+
+/**
+ * PersonaSection — configuration for the bot's custom identity.
+ *
+ * Users can define a "Persona" (role, vibe, behavior) that is injected at the
+ * top of the agent's system prompt. Changes are persisted via updateWorkspace.
+ *
+ * @param workspace - The current workspace object with id, name, and bot_persona.
+ */
+function PersonaSection({ workspace }: PersonaSectionProps) {
+  const [persona, setPersona] = useState(workspace.bot_persona ?? '');
+  const updateMutation = useUpdateWorkspaceMutation();
+
+  // Sync internal state if the workspace object changes (e.g. after a refresh)
+  useEffect(() => {
+    setPersona(workspace.bot_persona ?? '');
+  }, [workspace.bot_persona]);
+
+  const hasChanged = persona !== (workspace.bot_persona ?? '');
+
+  const handleSave = () => {
+    updateMutation.mutate({
+      id: workspace.id,
+      name: workspace.name,
+      bot_persona: persona,
+    });
+  };
+
+  return (
+    <Card>
+      <div className="mb-3">
+        <h2 className="text-base font-semibold text-slate-900">Bot Persona</h2>
+        <p className="text-xs text-slate-500 mt-0.5">
+          Define how Tee-Mo should behave. Tell it to be a legal assistant, a creative writer, or a grumpy pirate.
+        </p>
+      </div>
+
+      <div className="space-y-3">
+        <textarea
+          value={persona}
+          onChange={(e) => setPersona(e.target.value)}
+          placeholder="e.g. You are a senior project manager at a fast-paced tech startup. Be direct, efficient, and always check for blockers."
+          rows={4}
+          className="w-full rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          maxLength={2000}
+        />
+
+        <div className="flex items-center justify-between">
+          <div className="text-[10px] text-slate-400">
+            {persona.length} / 2000 characters
+          </div>
+
+          <div className="flex items-center gap-2">
+            {updateMutation.isSuccess && !hasChanged && (
+              <span className="text-xs text-emerald-600 animate-fade-in">
+                Saved successfully
+              </span>
+            )}
+            {updateMutation.error && (
+              <span className="text-xs text-rose-600">
+                Failed to save
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={updateMutation.isPending || !hasChanged}
+              className="rounded-md bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+            >
+              {updateMutation.isPending ? 'Saving…' : 'Save Persona'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // SkillsSection (STORY-023-01)
 // ---------------------------------------------------------------------------
 
@@ -971,6 +1061,9 @@ function WorkspaceDetailPage() {
           files={files}
           isLoading={knowledgeLoading}
         />
+
+        {/* Bot persona configuration (STORY-019-01) */}
+        {workspace && <PersonaSection workspace={workspace} />}
 
         {/* Active skills catalog (STORY-023-01) */}
         <SkillsSection workspaceId={workspaceId} />

@@ -31,6 +31,7 @@ class WorkspaceUpdate(BaseModel):
     """Request model for PATCH /api/workspaces/{id}"""
 
     name: str = Field(..., min_length=1, max_length=120)
+    bot_persona: Optional[str] = Field(None, max_length=2000)
 
 
 class WorkspaceResponse(WorkspaceBase):
@@ -46,6 +47,7 @@ class WorkspaceResponse(WorkspaceBase):
     ai_provider: Optional[str] = Field(None, max_length=16)
     ai_model: Optional[str] = Field(None, max_length=64)
     is_default_for_team: bool = False
+    bot_persona: Optional[str] = Field(None, max_length=2000)
     created_at: datetime
     updated_at: datetime
 

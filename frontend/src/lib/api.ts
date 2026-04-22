@@ -242,8 +242,9 @@ export interface Workspace {
   owner_user_id: string;
   /** Whether this workspace is the default for its Slack team. */
   is_default_for_team: boolean;
-  /** ISO 8601 creation timestamp. */
+  bot_persona?: string | null;
   created_at: string;
+  updated_at: string;
 }
 
 /**
@@ -310,17 +311,27 @@ export async function createWorkspace(teamId: string, name: string): Promise<Wor
 }
 
 /**
- * PATCH /api/workspaces/{id} — renames an existing workspace.
+ * PATCH /api/workspaces/{id}
+ * Updates a workspace's name and/or bot persona.
  *
- * @param id   - The workspace UUID to rename.
- * @param name - The new workspace name.
- * @returns The updated workspace record.
+ * @param id - Workspace UUID.
+ * @param updates - Fields to update. `name` is required by the backend model;
+ *   `bot_persona` is optional (pass `null` or `""` to clear).
+ * @returns The updated Workspace object.
  */
-export async function renameWorkspace(id: string, name: string): Promise<Workspace> {
-  return apiPatch<{ name: string }, Workspace>(
+export async function updateWorkspace(
+  id: string,
+  updates: { name: string; bot_persona?: string | null }
+): Promise<Workspace> {
+  return apiPatch<{ name: string; bot_persona?: string | null }, Workspace>(
     `/api/workspaces/${encodeURIComponent(id)}`,
-    { name },
+    updates
   );
+}
+
+/** Legacy wrapper for updateWorkspace (renames only). */
+export async function renameWorkspace(id: string, name: string): Promise<Workspace> {
+  return updateWorkspace(id, { name });
 }
 
 /**

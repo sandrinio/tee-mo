@@ -279,6 +279,7 @@ def _build_system_prompt(
     skills: list[dict],
     documents: list[dict] | None = None,
     wiki_pages: list[dict] | None = None,
+    bot_persona: str | None = None,
 ) -> str:
     """Assemble the system prompt for the Tee-Mo agent.
 
@@ -319,6 +320,12 @@ def _build_system_prompt(
                     and ``tldr`` keys, as returned from teemo_wiki_pages. When
                     non-empty, the wiki index section is rendered above the
                     document catalog.
+        bot_persona: Optional free-text persona string set by the workspace
+                    owner via the dashboard. When provided, it replaces the
+                    default "You are Tee-Mo..." identity sentence at the top
+                    of the preamble. All downstream rules (tools, formatting,
+                    citations, knowledge-routing) remain unchanged — only the
+                    role/voice is overridden.
 
     Returns:
         A fully assembled system prompt string.
@@ -335,11 +342,23 @@ def _build_system_prompt(
         "Use this whenever the user references 'today', 'this week', 'recent', "
         "or any other relative date — do not guess.\n\n"
     )
+
+    # --- Identity line ---
+    # Default identity is the built-in Tee-Mo voice. When a workspace sets a
+    # custom persona, it *replaces* the identity sentence — the tool rules,
+    # formatting guidance, and knowledge-routing strategy below still apply.
+    if bot_persona and bot_persona.strip():
+        identity_line = f"{bot_persona.strip()}\n\n"
+    else:
+        identity_line = (
+            "You are Tee-Mo, an AI assistant embedded in your team's Slack workspace.\n"
+            "You help teams with standups, reports, analysis, and workflow automation.\n\n"
+        )
+
     preamble = (
         current_time_line
-        + "You are Tee-Mo, an AI assistant embedded in your team's Slack workspace.\n"
-        "You help teams with standups, reports, analysis, and workflow automation.\n\n"
-        "Rules:\n"
+        + identity_line
+        + "Rules:\n"
         "- Be concise and helpful.\n"
         "- Never reveal internal workspace IDs, API keys, or stack traces.\n"
         "- When a skill is available that fits the request, load it first with load_skill.\n"
@@ -508,7 +527,7 @@ async def build_agent(
     # --- 1. Fetch workspace row ---
     result = (
         supabase.table("teemo_workspaces")
-        .select("ai_provider, ai_model, encrypted_api_key")
+        .select("ai_provider, ai_model, encrypted_api_key, bot_persona")
         .eq("id", workspace_id)
         .maybe_single()
         .execute()
@@ -522,6 +541,7 @@ async def build_agent(
     provider: str = row["ai_provider"]
     model_id: str = row["ai_model"]
     encrypted_api_key: str | None = row["encrypted_api_key"]
+    bot_persona: str | None = row.get("bot_persona")
 
     # --- 3. Missing key guard ---
     if encrypted_api_key is None:
@@ -568,7 +588,7 @@ async def build_agent(
     documents: list[dict] = raw_docs if isinstance(raw_docs, list) else []
 
     # --- 8. Build system prompt ---
-    prompt = _build_system_prompt(skills, documents, wiki_pages)
+    prompt = _build_system_prompt(skills, documents, wiki_pages, bot_persona=bot_persona)
 
     # --- 9. Build skill tool functions ---
     # Tools are defined as closures capturing (workspace_id, supabase) from

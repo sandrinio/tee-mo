@@ -320,8 +320,9 @@ def _build_system_prompt(
                     and ``tldr`` keys, as returned from teemo_wiki_pages. When
                     non-empty, the wiki index section is rendered above the
                     document catalog.
-        bot_persona: Optional free-text persona string set by the workspace
-                    owner via the dashboard. When provided, it replaces the
+        bot_persona: Optional free-text persona string set either from the
+                    dashboard (PATCH /api/workspaces/{id}) or in-chat via the
+                    `update_persona` tool. When provided, it replaces the
                     default "You are Tee-Mo..." identity sentence at the top
                     of the preamble. All downstream rules (tools, formatting,
                     citations, knowledge-routing) remain unchanged — only the
@@ -362,6 +363,9 @@ def _build_system_prompt(
         "- Be concise and helpful.\n"
         "- Never reveal internal workspace IDs, API keys, or stack traces.\n"
         "- When a skill is available that fits the request, load it first with load_skill.\n"
+        "- Persona: when the user asks you to save, set, define, change, or clear "
+        "your persona / role / voice / vibe, call `update_persona` with the new text. "
+        "Do NOT create a document or skill for this — the persona is its own field.\n"
         "- Always confirm destructive actions before executing them.\n"
         "- Always identify who you're responding to by name when the thread has multiple participants.\n"
         "- CRITICAL: When users ask what documents or wiki pages are available, "
@@ -613,6 +617,50 @@ async def build_agent(
                 "Check the Available Skills list in your system prompt for valid names."
             )
         return f"## Skill: {skill['name']}\n\n{skill['instructions']}"
+
+    async def update_persona(ctx: RunContext[AgentDeps], persona: str) -> str:
+        """Set or clear your own core persona for this workspace.
+
+        Call this — and ONLY this — when the user asks to save, set, define,
+        change, or clear your persona / role / voice / vibe. Do NOT create a
+        document or skill to represent the persona; the persona is its own
+        first-class field on the workspace.
+
+        The new persona replaces the default "You are Tee-Mo..." identity on
+        your next message. Pass an empty string to revert to the default.
+
+        Args:
+            ctx:     pydantic-ai RunContext with deps.
+            persona: Free-text persona description. Max 2000 chars. Empty
+                     string clears the persona.
+        """
+        cleaned = (persona or "").strip()
+        if len(cleaned) > 2000:
+            return "Persona too long — max 2000 characters."
+
+        payload = {"bot_persona": cleaned or None}
+        try:
+            res = (
+                ctx.deps.supabase.table("teemo_workspaces")
+                .update(payload)
+                .eq("id", ctx.deps.workspace_id)
+                .execute()
+            )
+        except Exception as exc:
+            logger.error("[AGENT] update_persona failed: %s", exc, exc_info=True)
+            return f"Failed to update persona: {exc}"
+
+        if not res.data:
+            return "Failed to update persona: workspace not found."
+
+        if not cleaned:
+            return "Persona cleared — I will revert to the default Tee-Mo identity on my next message."
+
+        preview = cleaned if len(cleaned) <= 100 else cleaned[:100] + "…"
+        return (
+            f'Persona saved: "{preview}"\n'
+            "I will adopt this identity starting with my next message."
+        )
 
     async def create_skill(
         ctx: RunContext[AgentDeps],
@@ -1162,7 +1210,7 @@ async def build_agent(
         model,
         system_prompt=prompt,
         deps_type=AgentDeps,
-        tools=[load_skill, create_skill, update_skill, delete_skill, web_search, crawl_page, http_request, read_document, create_document, update_document, delete_document, search_wiki, read_wiki_page, lint_wiki],
+        tools=[load_skill, create_skill, update_skill, delete_skill, update_persona, web_search, crawl_page, http_request, read_document, create_document, update_document, delete_document, search_wiki, read_wiki_page, lint_wiki],
     )
     deps = AgentDeps(
         workspace_id=workspace_id,

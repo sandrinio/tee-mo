@@ -502,10 +502,23 @@ async def reindex_knowledge(
     failed = 0
     errors: list[dict] = []
 
+    # Reverse mapping for the one-shot backfill
+    DOC_TYPE_TO_MIME = {v: k for k, v in MIME_TO_DOC_TYPE.items()}
+
     for file_row in file_rows:
         file_id = file_row.get("external_id", "")
         doc_id = file_row.get("id", "")
-        mime_type = file_row.get("metadata", {}).get("mime_type") or ""
+        metadata = file_row.get("metadata") or {}
+        mime_type = metadata.get("mime_type") or ""
+
+        if not mime_type:
+            # R1: one-shot idempotent backfill for existing rows that missed the mime_type
+            doc_type = file_row.get("doc_type")
+            mime_type = DOC_TYPE_TO_MIME.get(doc_type, "")
+            if mime_type:
+                metadata["mime_type"] = mime_type
+                supabase.table("teemo_documents").update({"metadata": metadata}).eq("id", doc_id).execute()
+
         try:
             from datetime import datetime
 

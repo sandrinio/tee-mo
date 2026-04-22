@@ -106,20 +106,28 @@ export function useCreateWorkspaceMutation(teamId: string) {
 }
 
 /**
- * Renames an existing workspace.
+ * Updates a workspace (name and/or persona).
  *
  * On success:
  *   1. Updates the individual `['workspace', id]` cache entry directly.
- *   2. Invalidates the `['workspaces', teamId]` list so the new name
- *      propagates to any workspace list views.
+ *   2. Invalidates the `['workspaces', teamId]` list so the updates
+ *      propagate to any workspace list views.
  *
- * @returns TanStack Mutation object. Call `.mutate({ id, name })` to rename.
+ * @returns TanStack Mutation object. Call `.mutate({ id, name, bot_persona })` to update.
  */
-export function useRenameWorkspaceMutation() {
+export function useUpdateWorkspaceMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ id, name }: { id: string; name: string }) => renameWorkspace(id, name),
+    mutationFn: ({
+      id,
+      name,
+      bot_persona,
+    }: {
+      id: string;
+      name: string;
+      bot_persona?: string | null;
+    }) => updateWorkspace(id, { name, bot_persona }),
     onSuccess: (updatedWorkspace) => {
       // Update individual workspace cache if present
       queryClient.setQueryData(['workspace', updatedWorkspace.id], updatedWorkspace);
@@ -132,6 +140,23 @@ export function useRenameWorkspaceMutation() {
       }
     },
   });
+}
+
+/**
+ * Legacy wrapper for renaming a workspace.
+ *
+ * @returns TanStack Mutation object. Call `.mutate({ id, name })` to rename.
+ */
+export function useRenameWorkspaceMutation() {
+  const updateMutation = useUpdateWorkspaceMutation();
+
+  return {
+    ...updateMutation,
+    mutate: ({ id, name }: { id: string; name: string }) =>
+      updateMutation.mutate({ id, name }),
+    mutateAsync: ({ id, name }: { id: string; name: string }) =>
+      updateMutation.mutateAsync({ id, name }),
+  };
 }
 
 /**

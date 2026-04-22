@@ -106,6 +106,7 @@ def _to_response(row: dict[str, Any]) -> WorkspaceResponse:
         ai_provider=row.get("ai_provider"),
         ai_model=row.get("ai_model"),
         is_default_for_team=row.get("is_default_for_team", False),
+        bot_persona=row.get("bot_persona"),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -271,25 +272,21 @@ async def get_workspace(
     "/workspaces/{workspace_id}",
     response_model=WorkspaceResponse,
 )
-async def rename_workspace(
+async def update_workspace(
     workspace_id: uuid.UUID,
     body: WorkspaceUpdate,
     user_id: str = Depends(get_current_user_id),
 ) -> WorkspaceResponse:
-    """Rename a workspace (update name only).
+    """Update workspace name and/or bot persona.
 
-    Only the ``name`` field is accepted. All other fields (``ai_provider``,
-    ``ai_model``, ``is_default_for_team``, etc.) are out of scope for this
-    endpoint (see §1.3 Out of Scope).
-
-    ``updated_at`` is NOT included in the update payload — the DB trigger or
-    DEFAULT handles it. If the schema uses a manual ``updated_at``, this should
-    be revisited; for now, the migration defines ``updated_at DEFAULT NOW()``
-    which is preserved server-side.
+    Accepts ``name`` (required) and an optional ``bot_persona`` string.
+    When ``bot_persona`` is provided it is stored and injected at the top of
+    the agent system prompt on the next request. Setting it to ``None`` or an
+    empty string clears the persona and reverts to the default Tee-Mo identity.
 
     Args:
         workspace_id: UUID of the workspace from the path.
-        body: Request body — only ``name`` is accepted.
+        body: Request body — ``name`` (required) + optional ``bot_persona``.
         user_id: Injected by ``get_current_user_id``; raises 401 if invalid.
 
     Returns:
@@ -300,9 +297,17 @@ async def rename_workspace(
         HTTPException(404): Workspace not found or not owned by the current user.
     """
     sb = get_supabase()
+
+    payload: dict[str, Any] = {"name": body.name}
+    # Only include bot_persona in the payload when the caller explicitly provides
+    # it (not None). An empty string is treated as a persona clear — the DB
+    # constraint allows empty strings, and the agent skips injection when empty.
+    if body.bot_persona is not None:
+        payload["bot_persona"] = body.bot_persona or None  # coerce "" → NULL
+
     result = (
         await execute_async(sb.table("teemo_workspaces")
-        .update({"name": body.name})
+        .update(payload)
         .eq("id", str(workspace_id))
         .eq("user_id", user_id)
         )

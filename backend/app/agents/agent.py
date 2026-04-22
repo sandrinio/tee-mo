@@ -279,6 +279,7 @@ def _build_system_prompt(
     skills: list[dict],
     documents: list[dict] | None = None,
     wiki_pages: list[dict] | None = None,
+    bot_persona: str | None = None,
 ) -> str:
     """Assemble the system prompt for the Tee-Mo agent.
 
@@ -319,6 +320,12 @@ def _build_system_prompt(
                     and ``tldr`` keys, as returned from teemo_wiki_pages. When
                     non-empty, the wiki index section is rendered above the
                     document catalog.
+        bot_persona: Optional free-text persona string set by the workspace
+                    owner (via the dashboard or update_persona tool). When
+                    provided, it is injected as a "## Core Persona" block at
+                    the very top of the prompt — overriding the default
+                    "You are Tee-Mo" identity. The base capabilities and tool
+                    rules follow unchanged below it.
 
     Returns:
         A fully assembled system prompt string.
@@ -335,6 +342,18 @@ def _build_system_prompt(
         "Use this whenever the user references 'today', 'this week', 'recent', "
         "or any other relative date — do not guess.\n\n"
     )
+
+    # --- Bot persona injection ---
+    # When a custom persona is set, it is rendered at the very top of the
+    # prompt as an authoritative "Core Persona" block. This takes precedence
+    # over the default Tee-Mo identity that follows.
+    persona_block = ""
+    if bot_persona and bot_persona.strip():
+        persona_block = (
+            "## Core Persona\n"
+            f"{bot_persona.strip()}\n\n"
+            "---\n\n"
+        )
     preamble = (
         current_time_line
         + "You are Tee-Mo, an AI assistant embedded in your team's Slack workspace.\n"
@@ -387,7 +406,7 @@ def _build_system_prompt(
         "5. Never read more than 5 wiki pages in a single turn — pick the best ones.\n"
     )
 
-    prompt = preamble
+    prompt = persona_block + preamble
 
     if skills:
         skill_lines = "\n".join(
@@ -508,7 +527,7 @@ async def build_agent(
     # --- 1. Fetch workspace row ---
     result = (
         supabase.table("teemo_workspaces")
-        .select("ai_provider, ai_model, encrypted_api_key")
+        .select("ai_provider, ai_model, encrypted_api_key, bot_persona")
         .eq("id", workspace_id)
         .maybe_single()
         .execute()
@@ -522,6 +541,7 @@ async def build_agent(
     provider: str = row["ai_provider"]
     model_id: str = row["ai_model"]
     encrypted_api_key: str | None = row["encrypted_api_key"]
+    bot_persona: str | None = row.get("bot_persona")
 
     # --- 3. Missing key guard ---
     if encrypted_api_key is None:
@@ -568,7 +588,7 @@ async def build_agent(
     documents: list[dict] = raw_docs if isinstance(raw_docs, list) else []
 
     # --- 8. Build system prompt ---
-    prompt = _build_system_prompt(skills, documents, wiki_pages)
+    prompt = _build_system_prompt(skills, documents, wiki_pages, bot_persona=bot_persona)
 
     # --- 9. Build skill tool functions ---
     # Tools are defined as closures capturing (workspace_id, supabase) from
@@ -593,6 +613,38 @@ async def build_agent(
                 "Check the Available Skills list in your system prompt for valid names."
             )
         return f"## Skill: {skill['name']}\n\n{skill['instructions']}"
+
+    async def update_persona(ctx: RunContext[AgentDeps], persona: str) -> str:
+        """Update your own core persona/identity.
+
+        Use this when the user asks you to change your role, vibe, or behavior
+        permanently for this workspace. The change will take effect on your
+        next message.
+
+        Args:
+            ctx:     pydantic-ai RunContext with deps.
+            persona: Free-text description of your new persona. Max 2000 chars.
+        """
+        try:
+            # We use the service-role client from deps to update the workspace row.
+            # Empty string or None clears the persona.
+            payload = {"bot_persona": persona.strip() or None}
+            res = (
+                ctx.deps.supabase.table("teemo_workspaces")
+                .update(payload)
+                .eq("id", ctx.deps.workspace_id)
+                .execute()
+            )
+            if not res.data:
+                return "Failed to update persona: workspace not found."
+
+            return (
+                f"Persona updated successfully to: \"{persona.strip()[:100]}...\"\n"
+                "I will adopt this new identity starting from my next response."
+            )
+        except Exception as exc:
+            logger.error("[AGENT] update_persona unexpected error: %s", exc)
+            return f"Failed to update persona: {exc}"
 
     async def create_skill(
         ctx: RunContext[AgentDeps],

@@ -112,6 +112,7 @@ function docTypeLabel(docType: string | null | undefined, mimeType: string | nul
       case 'docx':           return 'DOCX';
       case 'xlsx':           return 'XLSX';
       case 'markdown':       return 'MD';
+      case 'text':           return 'TXT';
       default:               return docType.toUpperCase().slice(0, 6);
     }
   }
@@ -325,10 +326,17 @@ function PickerSection({
 
       // Load the picker module then build and open the picker
       gapi.load('picker', () => {
+        // Build a DocsView scoped to plain-text files (.txt) to surface files
+        // that are hidden from the default DOCS view (which only shows Google
+        // Workspace native types + PDFs/Office files).
+        const textView = new google.picker.DocsView()
+          .setMimeTypes('text/plain');
+
         const picker = new google.picker.PickerBuilder()
           .setOAuthToken(access_token)
           .setDeveloperKey(picker_api_key)
           .addView(google.picker.ViewId.DOCS)
+          .addView(textView)
           .setCallback(async (data: google.picker.CallbackData) => {
             if (data.action !== google.picker.Action.PICKED) return;
             const doc = data.docs?.[0];

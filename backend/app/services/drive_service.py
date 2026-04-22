@@ -106,6 +106,11 @@ _BINARY_MIMES = {
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 }
 
+# Plain-text MIME types downloaded directly as UTF-8 text
+_TEXT_MIMES = {
+    "text/plain",
+}
+
 
 def get_drive_client(encrypted_refresh_token: str):
     """Decrypt an encrypted OAuth refresh token and build an authenticated Drive v3 client.
@@ -386,10 +391,15 @@ def fetch_file_content(
         raw_bytes = _download_media(drive_client, drive_file_id)
         content = _extract_xlsx(raw_bytes)
 
+    elif mime_type in _TEXT_MIMES:
+        # Plain text files: download via get_media and decode as UTF-8.
+        raw_bytes = _download_media(drive_client, drive_file_id)
+        content = raw_bytes.decode("utf-8", errors="replace")
+
     else:
         raise ValueError(
             f"Unsupported MIME type: {mime_type!r}. "
-            f"Supported types: {sorted(_GOOGLE_EXPORT_MIMES.keys() | _BINARY_MIMES)}"
+            f"Supported types: {sorted(_GOOGLE_EXPORT_MIMES.keys() | _BINARY_MIMES | _TEXT_MIMES)}"
         )
 
     return _AwaitableStr(_maybe_truncate(content))

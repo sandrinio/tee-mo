@@ -62,6 +62,7 @@ ALLOWED_MIME_TYPES = {
     "application/pdf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "text/plain",
 }
 
 # ---------------------------------------------------------------------------
@@ -76,6 +77,7 @@ MIME_TO_DOC_TYPE: dict[str, str] = {
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
     "application/vnd.google-apps.spreadsheet": "google_sheet",
     "application/vnd.google-apps.presentation": "google_slides",
+    "text/plain": "text",
 }
 
 # ---------------------------------------------------------------------------

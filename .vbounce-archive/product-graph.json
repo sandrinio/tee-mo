@@ -1,0 +1,656 @@
+{
+  "generated_at": "2026-04-21T00:00:00.000Z",
+  "node_count": 21,
+  "edge_count": 100,
+  "nodes": {
+    "CHARTER": {
+      "type": "charter",
+      "status": "🌿 Refining",
+      "ambiguity": "🟢 Low",
+      "path": "product_plans/strategy/tee_mo_charter.md",
+      "title": "Project Charter: Tee-Mo"
+    },
+    "ROADMAP": {
+      "type": "roadmap",
+      "status": "In Execution — Releases 1–3 core delivered (S-01–S-09). Documents + Wiki pipeline shipped (S-10–S-11). EPIC-017 Phase A live (search_wiki). S-12 closed: EPIC-018 Phase A delivered (018-01..04). Next: S-13 planning — EPIC-018 UI (018-05/06), EPIC-017 Phase B (synthesis), EPIC-008 Setup Wizard remaining work.",
+      "ambiguity": null,
+      "path": "product_plans/strategy/tee_mo_roadmap.md",
+      "title": "Product Roadmap: Tee-Mo"
+    },
+    "EPIC-003": {
+      "type": "epic",
+      "status": "Done — Slice A delivered in S-03; Slice B delivered in S-05 (7/7 stories, merge f5839c1, tag v0.5.0)",
+      "ambiguity": "🟢 Low (post-ADR-026 reshape)",
+      "path": "product_plans/backlog/EPIC-003_dashboard_shell/EPIC-003_dashboard_shell.md",
+      "title": "EPIC-003: Dashboard Shell + SlackTeam / Workspace CRUD"
+    },
+    "EPIC-005-phase-a": {
+      "type": "epic",
+      "status": "Done — 6/6 stories delivered in S-04 (real Slack OAuth install + event HMAC verification)",
+      "ambiguity": "🟢 Low",
+      "path": "product_plans/backlog/EPIC-005_slack_integration/EPIC-005-phase-a_slack_oauth_install.md",
+      "title": "EPIC-005 Phase A: Slack OAuth Install"
+    },
+    "EPIC-011": {
+      "type": "epic",
+      "status": "Draft",
+      "ambiguity": "🔴 High",
+      "path": "product_plans/backlog/EPIC-011_slack_ai_apps/EPIC-011_slack_ai_apps_surface.md",
+      "title": "EPIC-011: Slack Agents & AI Apps Surface"
+    },
+    "EPIC-012": {
+      "type": "epic",
+      "status": "Planning-Ready — sanctioned in Roadmap §2 Post-MVP; governed by ADR-028; 5 stories (012-01, 012-02, 012-03a, 012-03b, 012-04); open questions all closed; unified dashboard+chat management surface",
+      "ambiguity": "🟢 Low",
+      "path": "product_plans/backlog/EPIC-012_mcp_integration/EPIC-012_mcp_integration.md",
+      "title": "EPIC-012: MCP Server Integration"
+    },
+    "EPIC-014": {
+      "type": "epic",
+      "status": "Ready",
+      "ambiguity": "🟢 Low",
+      "path": "product_plans/backlog/EPIC-014_local_upload/EPIC-014_local_upload.md",
+      "title": "EPIC-014: Local Document Upload"
+    },
+    "EPIC-017": {
+      "type": "epic",
+      "status": "In Progress — Phase A live (search_wiki + compact prompt, commit 89f81d0). Phases B/C/D/E pending; STORY-017-* specs not yet drafted",
+      "ambiguity": "🟡 Medium",
+      "path": "product_plans/backlog/EPIC-017_wiki_karpathy_parity/EPIC-017_wiki_karpathy_parity.md",
+      "title": "EPIC-017: Wiki Karpathy-Parity — Retrieval, Synthesis, Cascade"
+    },
+    "EPIC-018": {
+      "type": "epic",
+      "status": "In Progress — S-12 delivered stories 018-01/02/03/04 (backend + agent tools). Remaining: 018-05 dashboard UI + 018-06 add-modal/schedule-builder",
+      "ambiguity": "🟢 Low",
+      "path": "product_plans/backlog/EPIC-018_scheduled_automations/EPIC-018_scheduled_automations.md",
+      "title": "EPIC-018: Scheduled Automations"
+    },
+    "STORY-018-01-service-layer": {
+      "type": "story",
+      "status": "Done",
+      "ambiguity": "🟢 Low",
+      "path": "product_plans/sprints/sprint-12/STORY-018-01-service-layer.md",
+      "title": "STORY-018-01: Automations Schema + Service Layer"
+    },
+    "STORY-018-02-rest-endpoints": {
+      "type": "story",
+      "status": "Done",
+      "ambiguity": "🟢 Low",
+      "path": "product_plans/sprints/sprint-12/STORY-018-02-rest-endpoints.md",
+      "title": "STORY-018-02: Automations REST Endpoints"
+    },
+    "STORY-018-03-executor-cron": {
+      "type": "story",
+      "status": "Done",
+      "ambiguity": "🟢 Low",
+      "path": "product_plans/sprints/sprint-12/STORY-018-03-executor-cron.md",
+      "title": "STORY-018-03: Automation Executor + Cron Loop"
+    },
+    "STORY-018-04-agent-tools": {
+      "type": "story",
+      "status": "Done",
+      "ambiguity": "🟢 Low",
+      "path": "product_plans/sprints/sprint-12/STORY-018-04-agent-tools.md",
+      "title": "STORY-018-04: Agent Tools + System Prompt Integration"
+    },
+    "STORY-018-05-ui-list-history": {
+      "type": "story",
+      "status": "Draft",
+      "ambiguity": "🟢 Low",
+      "path": "product_plans/backlog/EPIC-018_scheduled_automations/STORY-018-05-ui-list-history.md",
+      "title": "STORY-018-05: Dashboard UI — Automations Section + History Drawer"
+    },
+    "STORY-018-06-ui-modals": {
+      "type": "story",
+      "status": "Draft",
+      "ambiguity": "🟢 Low",
+      "path": "product_plans/backlog/EPIC-018_scheduled_automations/STORY-018-06-ui-modals.md",
+      "title": "STORY-018-06: Dashboard UI — Add Modal + Schedule Builder + Dry Run"
+    },
+    "STORY-012-01-service-layer": {
+      "type": "story",
+      "status": "Draft",
+      "ambiguity": "🟢 Low",
+      "path": "product_plans/backlog/EPIC-012_mcp_integration/STORY-012-01-service-layer.md",
+      "title": "STORY-012-01: MCP Service Layer"
+    },
+    "STORY-012-02-rest-endpoints": {
+      "type": "story",
+      "status": "Draft",
+      "ambiguity": "🟢 Low",
+      "path": "product_plans/backlog/EPIC-012_mcp_integration/STORY-012-02-rest-endpoints.md",
+      "title": "STORY-012-02: MCP REST Endpoints"
+    },
+    "STORY-012-03a-agent-factory-dispatch": {
+      "type": "story",
+      "status": "Draft",
+      "ambiguity": "🟢 Low",
+      "path": "product_plans/backlog/EPIC-012_mcp_integration/STORY-012-03a-agent-factory-dispatch.md",
+      "title": "STORY-012-03a: Agent Factory + Dispatch Lifecycle"
+    },
+    "STORY-012-03b-agent-tools-system-prompt": {
+      "type": "story",
+      "status": "Draft",
+      "ambiguity": "🟢 Low",
+      "path": "product_plans/backlog/EPIC-012_mcp_integration/STORY-012-03b-agent-tools-system-prompt.md",
+      "title": "STORY-012-03b: Agent MCP Tools + System Prompt"
+    },
+    "STORY-012-04-dashboard-ui": {
+      "type": "story",
+      "status": "Draft",
+      "ambiguity": "🟢 Low",
+      "path": "product_plans/backlog/EPIC-012_mcp_integration/STORY-012-04-dashboard-ui.md",
+      "title": "STORY-012-04: MCP Dashboard UI"
+    },
+    "sprint-12": {
+      "type": "sprint-plan",
+      "status": "Active",
+      "ambiguity": null,
+      "path": "product_plans/sprints/sprint-12/sprint-12.md",
+      "title": "Sprint S-12 Plan"
+    }
+  },
+  "edges": [
+    {
+      "from": "product_plans/strategy/tee_mo_charter.md",
+      "to": "ROADMAP",
+      "type": "context-source"
+    },
+    {
+      "from": "RISK-REGISTRY",
+      "to": "ROADMAP",
+      "type": "context-source"
+    },
+    {
+      "from": "EPIC-007",
+      "to": "ROADMAP",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-002",
+      "to": "ROADMAP",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-003",
+      "to": "ROADMAP",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-010",
+      "to": "ROADMAP",
+      "type": "depends-on"
+    },
+    {
+      "from": "ROADMAP",
+      "to": "EPIC-006",
+      "type": "unlocks"
+    },
+    {
+      "from": "ROADMAP",
+      "to": "EPIC-007",
+      "type": "unlocks"
+    },
+    {
+      "from": "EPIC-003",
+      "to": "EPIC-003",
+      "type": "context-source"
+    },
+    {
+      "from": "EPIC-003",
+      "to": "D-01",
+      "type": "feeds"
+    },
+    {
+      "from": "EPIC-005",
+      "to": "EPIC-003",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-008",
+      "to": "EPIC-003",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-004",
+      "to": "EPIC-003",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-006",
+      "to": "EPIC-003",
+      "type": "depends-on"
+    },
+    {
+      "from": "STORY-003",
+      "to": "EPIC-003",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-002",
+      "to": "EPIC-003",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-005-phase-a",
+      "to": "Release 1: Foundation + Deploy + Slack Install",
+      "type": "feeds"
+    },
+    {
+      "from": "EPIC-005",
+      "to": "EPIC-005-phase-a",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-007",
+      "to": "EPIC-005-phase-a",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-003",
+      "to": "EPIC-005-phase-a",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-004",
+      "to": "EPIC-005-phase-a",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-006",
+      "to": "EPIC-005-phase-a",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-002",
+      "to": "EPIC-005-phase-a",
+      "type": "depends-on"
+    },
+    {
+      "from": "STORY-005",
+      "to": "EPIC-005-phase-a",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-005",
+      "to": "EPIC-011",
+      "type": "context-source"
+    },
+    {
+      "from": "EPIC-011",
+      "to": "TBD — assignment blocked on Phase B spike outcome",
+      "type": "feeds"
+    },
+    {
+      "from": "EPIC-005",
+      "to": "EPIC-011",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-007",
+      "to": "EPIC-012",
+      "type": "context-source"
+    },
+    {
+      "from": "EPIC-012",
+      "to": "Release 2: Core Pipeline",
+      "type": "feeds"
+    },
+    {
+      "from": "STORY-012-02",
+      "to": "EPIC-012",
+      "type": "depends-on"
+    },
+    {
+      "from": "STORY-012-03",
+      "to": "EPIC-012",
+      "type": "depends-on"
+    },
+    {
+      "from": "STORY-012-04",
+      "to": "EPIC-012",
+      "type": "depends-on"
+    },
+    {
+      "from": "STORY-012-01",
+      "to": "EPIC-012",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-006",
+      "to": "EPIC-014",
+      "type": "context-source"
+    },
+    {
+      "from": "EPIC-014",
+      "to": "Release 3: Demo Polish",
+      "type": "feeds"
+    },
+    {
+      "from": "STORY-014-01",
+      "to": "EPIC-014",
+      "type": "depends-on"
+    },
+    {
+      "from": "STORY-014-02",
+      "to": "EPIC-014",
+      "type": "depends-on"
+    },
+    {
+      "from": "STORY-014-03",
+      "to": "EPIC-014",
+      "type": "depends-on"
+    },
+    {
+      "from": "STORY-014-04",
+      "to": "EPIC-014",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-006",
+      "to": "EPIC-014",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-004",
+      "to": "EPIC-014",
+      "type": "depends-on"
+    },
+    {
+      "from": "STORY-006-10",
+      "to": "EPIC-014",
+      "type": "depends-on"
+    },
+    {
+      "from": "S-11",
+      "to": "EPIC-017",
+      "type": "context-source"
+    },
+    {
+      "from": "EPIC-017",
+      "to": "v2.1 (post-hackathon)",
+      "type": "feeds"
+    },
+    {
+      "from": "EPIC-013",
+      "to": "EPIC-017",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-015",
+      "to": "EPIC-017",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-018",
+      "to": "EPIC-017",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-016",
+      "to": "EPIC-017",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-007",
+      "to": "EPIC-018",
+      "type": "context-source"
+    },
+    {
+      "from": "EPIC-005",
+      "to": "EPIC-018",
+      "type": "context-source"
+    },
+    {
+      "from": "EPIC-018",
+      "to": "Release 3: Demo Polish (post-MVP feature)",
+      "type": "feeds"
+    },
+    {
+      "from": "STORY-018-03",
+      "to": "EPIC-018",
+      "type": "depends-on"
+    },
+    {
+      "from": "STORY-018-04",
+      "to": "EPIC-018",
+      "type": "depends-on"
+    },
+    {
+      "from": "STORY-018-05",
+      "to": "EPIC-018",
+      "type": "depends-on"
+    },
+    {
+      "from": "STORY-018-06",
+      "to": "EPIC-018",
+      "type": "depends-on"
+    },
+    {
+      "from": "STORY-018-01",
+      "to": "EPIC-018",
+      "type": "depends-on"
+    },
+    {
+      "from": "STORY-018-02",
+      "to": "EPIC-018",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-012",
+      "to": "EPIC-018",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-007",
+      "to": "EPIC-018",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-018",
+      "to": "STORY-018-01-service-layer",
+      "type": "parent"
+    },
+    {
+      "from": "EPIC-018",
+      "to": "STORY-018-01-service-layer",
+      "type": "context-source"
+    },
+    {
+      "from": "EPIC-018",
+      "to": "STORY-018-01-service-layer",
+      "type": "depends-on"
+    },
+    {
+      "from": "STORY-018-01",
+      "to": "STORY-018-01-service-layer",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-018",
+      "to": "STORY-018-02-rest-endpoints",
+      "type": "parent"
+    },
+    {
+      "from": "EPIC-018",
+      "to": "STORY-018-02-rest-endpoints",
+      "type": "context-source"
+    },
+    {
+      "from": "EPIC-007",
+      "to": "STORY-018-02-rest-endpoints",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-018",
+      "to": "STORY-018-03-executor-cron",
+      "type": "parent"
+    },
+    {
+      "from": "EPIC-018",
+      "to": "STORY-018-03-executor-cron",
+      "type": "context-source"
+    },
+    {
+      "from": "EPIC-018",
+      "to": "STORY-018-04-agent-tools",
+      "type": "parent"
+    },
+    {
+      "from": "EPIC-018",
+      "to": "STORY-018-04-agent-tools",
+      "type": "context-source"
+    },
+    {
+      "from": "STORY-018-01",
+      "to": "STORY-018-04-agent-tools",
+      "type": "context-source"
+    },
+    {
+      "from": "EPIC-018",
+      "to": "STORY-018-04-agent-tools",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-018",
+      "to": "STORY-018-05-ui-list-history",
+      "type": "parent"
+    },
+    {
+      "from": "EPIC-018",
+      "to": "STORY-018-05-ui-list-history",
+      "type": "context-source"
+    },
+    {
+      "from": "STORY-018-02",
+      "to": "STORY-018-05-ui-list-history",
+      "type": "context-source"
+    },
+    {
+      "from": "EPIC-018",
+      "to": "STORY-018-06-ui-modals",
+      "type": "parent"
+    },
+    {
+      "from": "EPIC-018",
+      "to": "STORY-018-06-ui-modals",
+      "type": "context-source"
+    },
+    {
+      "from": "STORY-018-05",
+      "to": "STORY-018-06-ui-modals",
+      "type": "context-source"
+    },
+    {
+      "from": "STORY-018-02",
+      "to": "STORY-018-06-ui-modals",
+      "type": "context-source"
+    },
+    {
+      "from": "STORY-018-05",
+      "to": "STORY-018-06-ui-modals",
+      "type": "depends-on"
+    },
+    {
+      "from": "STORY-018-06",
+      "to": "STORY-018-06-ui-modals",
+      "type": "depends-on"
+    },
+    {
+      "from": "sprint-12",
+      "to": "D-07",
+      "type": "feeds"
+    },
+    {
+      "from": "STORY-018-01",
+      "to": "sprint-12",
+      "type": "depends-on"
+    },
+    {
+      "from": "STORY-018-02",
+      "to": "sprint-12",
+      "type": "depends-on"
+    },
+    {
+      "from": "STORY-018-03",
+      "to": "sprint-12",
+      "type": "depends-on"
+    },
+    {
+      "from": "STORY-018-04",
+      "to": "sprint-12",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-012",
+      "to": "STORY-012-01-service-layer",
+      "type": "parent"
+    },
+    {
+      "from": "EPIC-012",
+      "to": "STORY-012-01-service-layer",
+      "type": "context-source"
+    },
+    {
+      "from": "EPIC-012",
+      "to": "STORY-012-02-rest-endpoints",
+      "type": "parent"
+    },
+    {
+      "from": "EPIC-012",
+      "to": "STORY-012-02-rest-endpoints",
+      "type": "context-source"
+    },
+    {
+      "from": "STORY-012-01-service-layer",
+      "to": "STORY-012-02-rest-endpoints",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-012",
+      "to": "STORY-012-03a-agent-factory-dispatch",
+      "type": "parent"
+    },
+    {
+      "from": "EPIC-012",
+      "to": "STORY-012-03a-agent-factory-dispatch",
+      "type": "context-source"
+    },
+    {
+      "from": "STORY-012-01-service-layer",
+      "to": "STORY-012-03a-agent-factory-dispatch",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-012",
+      "to": "STORY-012-03b-agent-tools-system-prompt",
+      "type": "parent"
+    },
+    {
+      "from": "EPIC-012",
+      "to": "STORY-012-03b-agent-tools-system-prompt",
+      "type": "context-source"
+    },
+    {
+      "from": "STORY-012-03a-agent-factory-dispatch",
+      "to": "STORY-012-03b-agent-tools-system-prompt",
+      "type": "depends-on"
+    },
+    {
+      "from": "EPIC-012",
+      "to": "STORY-012-04-dashboard-ui",
+      "type": "parent"
+    },
+    {
+      "from": "EPIC-012",
+      "to": "STORY-012-04-dashboard-ui",
+      "type": "context-source"
+    },
+    {
+      "from": "STORY-012-02-rest-endpoints",
+      "to": "STORY-012-04-dashboard-ui",
+      "type": "depends-on"
+    }
+  ]
+}

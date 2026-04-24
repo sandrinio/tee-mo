@@ -277,3 +277,6 @@ For duplicate-name check: catch the unique-violation from supabase-py. Either in
 
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| Developer | 23 | 1,072 | 1,095 |
+| Developer | 26 | 2,009 | 2,035 |
+| DevOps | 2,122 | 264 | 2,386 |

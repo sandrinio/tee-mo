@@ -229,3 +229,6 @@ N/A — this story adds no HTTP endpoints.
 
 | Agent | Input | Output | Total |
 |-------|-------|--------|-------|
+| Developer | 28 | 1,573 | 1,601 |
+| Developer | 21 | 575 | 596 |
+| DevOps | 14 | 250 | 264 |

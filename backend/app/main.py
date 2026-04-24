@@ -33,6 +33,7 @@ from starlette.responses import Response
 
 from app.api.routes.auth import router as auth_router
 from app.api.routes import keys as keys_module
+from app.api.routes.automations import router as automations_router
 from app.api.routes.channels import router as channels_router
 from app.api.routes.drive_oauth import router as drive_oauth_router
 from app.api.routes.knowledge import router as knowledge_router
@@ -43,6 +44,8 @@ from app.core.config import settings
 from app.core.db import get_supabase
 from app.core.encryption import key_fingerprint
 from app.core.logging_config import setup_logging, request_id_ctx
+from app.services.automation_cron import automation_cron_loop
+from app.services.automation_executor import reset_stale_executions
 from app.services.drive_sync_cron import drive_sync_loop
 from app.services.wiki_ingest_cron import wiki_ingest_loop
 
@@ -65,11 +68,17 @@ async def lifespan(app: FastAPI):
       - Registers the Wiki Ingest Cron as an asyncio background task
         (STORY-013-03). The task runs every 60 seconds, processing all
         ``teemo_documents`` rows with ``sync_status='pending'``.
+      - Resets any stale 'running' automation execution rows left over from a
+        previous service restart (STORY-018-03).
+      - Registers the Automation Cron as an asyncio background task
+        (STORY-018-03). The task runs every 60 seconds, firing any automations
+        whose ``next_run_at`` has elapsed.
 
     On shutdown:
-      - Cancels both cron tasks so the event loop can terminate cleanly.
-        Each task catches ``asyncio.CancelledError`` and logs a shutdown event
-        before re-raising to allow clean termination.
+      - Cancels all three cron tasks (Drive sync, Wiki ingest, Automation) so
+        the event loop can terminate cleanly. Each task catches
+        ``asyncio.CancelledError`` and logs a shutdown event before re-raising
+        to allow clean termination.
     """
     # Start Drive content sync cron as a background task.
     cron_task = asyncio.create_task(drive_sync_loop())
@@ -79,11 +88,26 @@ async def lifespan(app: FastAPI):
     wiki_cron_task = asyncio.create_task(wiki_ingest_loop())
     logger.info("lifespan.startup", extra={"event": "lifespan.startup", "detail": "Wiki ingest cron registered"})
 
+    # Reset any stale 'running' execution rows left over from a previous restart.
+    try:
+        await reset_stale_executions(supabase=get_supabase())
+        logger.info("lifespan.startup", extra={"event": "lifespan.startup", "detail": "Stale automation executions reset"})
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "lifespan.startup.reset_stale_skip",
+            extra={"event": "lifespan.startup", "detail": f"reset_stale_executions skipped: {exc}"},
+        )
+
+    # Start Automation Cron as a background task.
+    automation_cron_task = asyncio.create_task(automation_cron_loop())
+    logger.info("lifespan.startup", extra={"event": "lifespan.startup", "detail": "Automation cron registered"})
+
     yield
 
     # Shutdown: cancel background tasks gracefully.
     cron_task.cancel()
     wiki_cron_task.cancel()
+    automation_cron_task.cancel()
     try:
         await cron_task
     except asyncio.CancelledError:
@@ -92,8 +116,13 @@ async def lifespan(app: FastAPI):
         await wiki_cron_task
     except asyncio.CancelledError:
         pass
+    try:
+        await automation_cron_task
+    except asyncio.CancelledError:
+        pass
     logger.info("lifespan.shutdown", extra={"event": "lifespan.shutdown", "detail": "Drive sync cron stopped"})
     logger.info("lifespan.shutdown", extra={"event": "lifespan.shutdown", "detail": "Wiki ingest cron stopped"})
+    logger.info("lifespan.shutdown", extra={"event": "lifespan.shutdown", "detail": "Automation cron stopped"})
 
 
 app = FastAPI(
@@ -185,6 +214,7 @@ app.include_router(knowledge_router)
 app.include_router(workspace_router)
 app.include_router(keys_module.router)
 app.include_router(channels_router)
+app.include_router(automations_router)
 
 # Log the encryption key fingerprint at module import time (startup).
 # Only the 8-char hex fingerprint is logged — never the raw key or any secret.
@@ -207,6 +237,8 @@ TEEMO_TABLES = (
     "teemo_slack_team_members",
     "teemo_wiki_pages",
     "teemo_wiki_log",
+    "teemo_automations",
+    "teemo_automation_executions",
 )
 
 

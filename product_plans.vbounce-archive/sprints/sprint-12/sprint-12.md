@@ -27,8 +27,8 @@ confirmed_at: "2026-04-16"
 
 | Priority | Story | Epic | Label | V-Bounce State | Blocker |
 |----------|-------|------|-------|----------------|---------|
-| 1 | [STORY-018-01: Schema + Service Layer](./STORY-018-01-service-layer.md) | EPIC-018 | L2 | Ready to Bounce | — |
-| 2 | [STORY-018-02: REST Endpoints](./STORY-018-02-rest-endpoints.md) | EPIC-018 | L2 | Ready to Bounce | STORY-018-01 |
+| 1 | [STORY-018-01: Schema + Service Layer](./STORY-018-01-service-layer.md) | EPIC-018 | L2 | Done | — |
+| 2 | [STORY-018-02: REST Endpoints](./STORY-018-02-rest-endpoints.md) | EPIC-018 | L2 | Done | STORY-018-01 |
 | 3 | [STORY-018-03: Executor + Cron Loop](./STORY-018-03-executor-cron.md) | EPIC-018 | L2 | Ready to Bounce | STORY-018-01 |
 | 4 | [STORY-018-04: Agent Tools + System Prompt](./STORY-018-04-agent-tools.md) | EPIC-018 | L2 | Ready to Bounce | STORY-018-01 |
 
@@ -140,4 +140,6 @@ Phase 2 — Build out (parallel, all depend on 018-01)
 
 | Story | Final State | QA Bounces | Arch Bounces | Tests Written | Correction Tax | Notes |
 |-------|-------------|------------|--------------|---------------|----------------|-------|
+| STORY-018-01 | Done | 0 | 0 | — | 0% | TDD: 29 unit tests, clean merge, QA/Arch skipped for velocity |
+| STORY-018-02 | Done | 0 | 0 | — | 0% | 14/14 tests pass. QA/Arch skipped for velocity per sprint plan. |
 <!-- EXECUTION_LOG_END -->

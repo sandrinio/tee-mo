@@ -342,3 +342,11 @@ This avoids env-var load at import time and makes tests easier to mock.
 | Date | Author | Change |
 |------|--------|--------|
 | 2026-04-15 | Claude (doc-manager) | Initial draft. Port from new_app automation_executor.py + workers/cron.py, stripped to Tee-Mo shape: asyncio loop (no ARQ), slack_channel_ids array fanout with delivery_results JSONB, workspace BYOK only, no data-source injection, no mention resolution. |
+
+---
+
+## Token Usage
+
+| Agent | Input | Output | Total |
+|-------|-------|--------|-------|
+| Developer | 87 | 2,024 | 2,111 |

@@ -115,6 +115,34 @@ OpenAIProvider = None
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Automation tools — module-level constants and helpers (EPIC-018 Phase C)
+# ---------------------------------------------------------------------------
+
+#: System prompt section injected when the workspace has ≥1 active automation.
+#: Keyword-gated: only included in the prompt when automations is non-empty.
+_AUTOMATIONS_PROMPT_SECTION = (
+    "Use these tools to manage scheduled automations for this workspace:\n"
+    "- `create_automation(name, prompt, schedule, slack_channel_ids, timezone?)`: "
+    "Schedule a prompt to run automatically and post results to one or more bound Slack channels.\n"
+    "- `list_automations()`: List all automations — name, schedule, next run, active state.\n"
+    "- `update_automation(automation_id, **patch)`: Update any field of an existing automation "
+    "(name, prompt, schedule, channels, is_active).\n"
+    "- `delete_automation(automation_id)`: Permanently delete an automation and its execution history.\n\n"
+    "**When to use**: when the user says \"schedule\", \"every week\", \"automatically post\", "
+    "\"set up a recurring task\", \"remind me\", \"automate\", or asks about existing automations.\n\n"
+    "**Channel rule**: ALWAYS require the user to name at least one bound channel. Do NOT assume a "
+    "default. If the user hasn't specified a channel, ask which of the workspace's bound channels "
+    "to post to before calling create_automation.\n\n"
+    "**Schedule shape** (pass as a dict):\n"
+    '- Daily:    {"occurrence": "daily",    "when": "09:00"}\n'
+    '- Weekdays: {"occurrence": "weekdays", "when": "09:00"}\n'
+    '- Weekly:   {"occurrence": "weekly",   "when": "09:00", "days": [1, 3]}   # 0=Sun … 6=Sat\n'
+    '- Monthly:  {"occurrence": "monthly",  "when": "09:00", "day_of_month": 1}\n'
+    '- Once:     {"occurrence": "once",     "at": "2026-04-20T17:00:00"}       # ISO 8601, must be future'
+)
+
+
 def _add_citation(ctx: "RunContext", citation: Citation) -> None:
     """Append a Citation to the run's collector, tolerant of a missing field.
 
@@ -144,6 +172,46 @@ def _wiki_page_url(workspace_id: str, slug: str) -> str | None:
     if not base:
         return None
     return f"{base}/app/workspaces/{workspace_id}/wiki/{slug}"
+
+
+def _schedule_summary(schedule: dict, timezone: str) -> str:
+    """Produce a human-readable summary of a schedule dict.
+
+    Converts the automation schedule dict into a concise string like
+    "every weekday at 09:00 UTC" or "every Mon, Wed at 09:00 Europe/Tbilisi".
+    Used by list_automations to format the automation list returned to the agent.
+
+    Args:
+        schedule: Automation schedule dict with at minimum an ``occurrence`` key.
+                  Expected shapes:
+                  - daily:    {"occurrence": "daily",    "when": "HH:MM"}
+                  - weekdays: {"occurrence": "weekdays", "when": "HH:MM"}
+                  - weekly:   {"occurrence": "weekly",   "when": "HH:MM", "days": [int, ...]}
+                  - monthly:  {"occurrence": "monthly",  "when": "HH:MM", "day_of_month": int}
+                  - once:     {"occurrence": "once",     "at": "ISO8601 datetime string"}
+        timezone: IANA timezone string (e.g. "UTC", "Europe/Tbilisi").
+
+    Returns:
+        A short human-readable schedule summary string.
+    """
+    occ = schedule.get("occurrence", "")
+    when = schedule.get("when", "")
+    tz_label = timezone if timezone != "UTC" else "UTC"
+
+    if occ == "daily":
+        return f"every day at {when} {tz_label}"
+    elif occ == "weekdays":
+        return f"every weekday at {when} {tz_label}"
+    elif occ == "weekly":
+        day_names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+        days = ", ".join(day_names[d] for d in schedule.get("days", []))
+        return f"every {days} at {when} {tz_label}"
+    elif occ == "monthly":
+        return f"monthly on day {schedule.get('day_of_month')} at {when} {tz_label}"
+    elif occ == "once":
+        return f"once at {schedule.get('at')} {tz_label}"
+    else:
+        return occ
 
 
 # ---------------------------------------------------------------------------
@@ -280,11 +348,14 @@ def _build_system_prompt(
     documents: list[dict] | None = None,
     wiki_pages: list[dict] | None = None,
     bot_persona: str | None = None,
+    automations: list[dict] | None = None,
 ) -> str:
     """Assemble the system prompt for the Tee-Mo agent.
 
     Combines a static identity preamble with an optional skill catalog section,
-    an optional wiki index section, and an optional document catalog section.
+    an optional wiki index section, an optional document catalog section, and
+    an optional scheduled automations section.
+
     Sections are only included when the workspace has relevant data — omitting
     empty sections prevents the LLM from being confused by empty catalog headers.
 
@@ -295,6 +366,11 @@ def _build_system_prompt(
     Updated in STORY-013-01 to add wiki index support. When ``wiki_pages`` is
     non-empty, a ``## Wiki Index`` section is rendered above the document
     catalog. Use ``read_wiki_page(slug)`` to retrieve full page content.
+
+    Updated in STORY-018-04 to add automation tools section (EPIC-018 Phase C).
+    When ``automations`` is a non-empty list (workspace has ≥1 active automation),
+    a ``## Scheduled Automations`` section is appended describing the 4 automation
+    tools.
 
     Wiki index logic (STORY-013-01 R3):
       - When ``wiki_pages`` is non-empty: render ``## Wiki Index`` with one
@@ -309,24 +385,29 @@ def _build_system_prompt(
         wiki ingest runs).
 
     Args:
-        skills:     List of skill dicts with ``name`` and ``summary`` keys,
-                    as returned by skill_service.list_skills(). May be empty.
-        documents:  Optional list of document dicts with ``id``, ``title``,
-                    ``ai_description``, and ``sync_status`` keys, as returned
-                    from teemo_documents. Non-synced docs are annotated with a
-                    ⏳ marker so the agent does not quote their raw content
-                    before wiki ingest lands. May be None or empty.
-        wiki_pages: Optional list of wiki page dicts with ``slug``, ``title``,
-                    and ``tldr`` keys, as returned from teemo_wiki_pages. When
-                    non-empty, the wiki index section is rendered above the
-                    document catalog.
+        skills:      List of skill dicts with ``name`` and ``summary`` keys,
+                     as returned by skill_service.list_skills(). May be empty.
+        documents:   Optional list of document dicts with ``id``, ``title``,
+                     ``ai_description``, and ``sync_status`` keys, as returned
+                     from teemo_documents. Non-synced docs are annotated with a
+                     ⏳ marker so the agent does not quote their raw content
+                     before wiki ingest lands. May be None or empty.
+        wiki_pages:  Optional list of wiki page dicts with ``slug``, ``title``,
+                     and ``tldr`` keys, as returned from teemo_wiki_pages. When
+                     non-empty, the wiki index section is rendered above the
+                     document catalog.
         bot_persona: Optional free-text persona string set either from the
-                    dashboard (PATCH /api/workspaces/{id}) or in-chat via the
-                    `update_persona` tool. When provided, it replaces the
-                    default "You are Tee-Mo..." identity sentence at the top
-                    of the preamble. All downstream rules (tools, formatting,
-                    citations, knowledge-routing) remain unchanged — only the
-                    role/voice is overridden.
+                     dashboard (PATCH /api/workspaces/{id}) or in-chat via the
+                     `update_persona` tool. When provided, it replaces the
+                     default "You are Tee-Mo..." identity sentence at the top
+                     of the preamble. All downstream rules (tools, formatting,
+                     citations, knowledge-routing) remain unchanged — only the
+                     role/voice is overridden.
+        automations: Optional list of active automation dicts from
+                     ``teemo_automations``. When non-empty, the
+                     ``## Scheduled Automations`` section is appended to the
+                     prompt. When None or empty, the section is omitted (keyword
+                     gate — prevents hallucination when no automations exist).
 
     Returns:
         A fully assembled system prompt string.
@@ -471,7 +552,246 @@ def _build_system_prompt(
             "content from an un-indexed doc. Only create documents when the user explicitly asks you to."
         )
 
+    # STORY-018-04 R2: Keyword-gated automations section.
+    # Only injected when the workspace has at least one active automation. Omitting
+    # the section for empty workspaces prevents the LLM from hallucinating automation
+    # commands when no automations have been configured.
+    if automations:
+        prompt += "\n\n## Scheduled Automations\n" + _AUTOMATIONS_PROMPT_SECTION
+
     return prompt
+
+
+# ---------------------------------------------------------------------------
+# --- 11.70. Automation tools (EPIC-018 Phase C) ---
+#
+# These are module-level async functions so that:
+#   (a) Tests can access them directly via `agent_module.create_automation` without
+#       calling build_agent() (which requires pydantic-ai and DB access).
+#   (b) They follow the lazy-import pattern for automation_service to avoid circular
+#       import risk (same pattern used by wiki_service imports in tool bodies).
+#
+# All 4 tools must be added to the Agent tools=[...] list inside build_agent().
+# ---------------------------------------------------------------------------
+
+
+async def create_automation(
+    ctx: RunContext[AgentDeps],
+    name: str,
+    prompt: str,
+    schedule: dict,
+    slack_channel_ids: list[str],
+    timezone: str = "UTC",
+    description: str | None = None,
+) -> str:
+    """Create a new scheduled automation in the workspace.
+
+    Schedules a prompt to run automatically on the given schedule and post
+    results to the specified Slack channels. All channels must already be
+    bound to the workspace — unbound channels are rejected with an error string.
+
+    **Schedule dict shapes** (pass as ``schedule`` argument):
+
+    - Daily:    ``{"occurrence": "daily",    "when": "09:00"}``
+    - Weekdays: ``{"occurrence": "weekdays", "when": "09:00"}``
+    - Weekly:   ``{"occurrence": "weekly",   "when": "09:00", "days": [1, 3]}``
+                (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat)
+    - Monthly:  ``{"occurrence": "monthly",  "when": "09:00", "day_of_month": 1}``
+    - Once:     ``{"occurrence": "once",     "at": "2026-04-20T17:00:00"}``
+                (ISO 8601 datetime, must be in the future)
+
+    Args:
+        ctx:              pydantic-ai RunContext with deps (workspace_id, user_id, supabase).
+        name:             Short display name for the automation (e.g. "Daily Standup").
+        prompt:           The AI prompt to execute on each run.
+        schedule:         Schedule dict — see shapes above.
+        slack_channel_ids: List of Slack channel IDs (e.g. ["C123", "C456"]) to post
+                          results to. Must be bound to the workspace.
+        timezone:         IANA timezone for the schedule (default "UTC").
+        description:      Optional longer description of what the automation does.
+
+    Returns:
+        A confirmation string including the automation name and next_run_at on
+        success, or an error string if validation fails or another error occurs.
+    """
+    from app.services import automation_service as _auto_service
+
+    try:
+        row = _auto_service.create_automation(
+            workspace_id=ctx.deps.workspace_id,
+            owner_user_id=ctx.deps.user_id,
+            payload={
+                "name": name,
+                "prompt": prompt,
+                "schedule": schedule,
+                "slack_channel_ids": slack_channel_ids,
+                "timezone": timezone,
+                "description": description,
+            },
+            supabase=ctx.deps.supabase,
+        )
+        next_run = row.get("next_run_at") or "—"
+        channels = ", ".join(f"#{c}" for c in row.get("slack_channel_ids", slack_channel_ids))
+        return (
+            f"Automation '{row.get('name', name)}' created. "
+            f"Next run: {next_run} UTC. Posts to: {channels}."
+        )
+    except ValueError as exc:
+        return str(exc)
+    except Exception as exc:
+        logger.error("[AGENT] create_automation unexpected error: %s", exc)
+        return f"Failed to create automation: {exc}"
+
+
+async def list_automations(ctx: RunContext[AgentDeps]) -> str:
+    """List all automations configured for this workspace.
+
+    Returns a Markdown-formatted list of every automation in the workspace,
+    regardless of active/inactive state, sorted newest-first. Each entry
+    includes the name, schedule summary, active state, next run time, and
+    target channels.
+
+    Args:
+        ctx: pydantic-ai RunContext with deps (workspace_id, supabase).
+
+    Returns:
+        A Markdown string listing all automations, or the canonical empty-state
+        string "No automations configured for this workspace." when none exist.
+    """
+    from app.services import automation_service as _auto_service
+
+    try:
+        automations = _auto_service.list_automations(
+            workspace_id=ctx.deps.workspace_id,
+            supabase=ctx.deps.supabase,
+        )
+    except Exception as exc:
+        logger.error("[AGENT] list_automations unexpected error: %s", exc)
+        return f"Failed to list automations: {exc}"
+
+    if not automations:
+        return "No automations configured for this workspace."
+
+    lines = [f"**Automations ({len(automations)} total)**\n"]
+    for i, auto in enumerate(automations, 1):
+        state = "Active" if auto.get("is_active") else "Paused"
+        schedule_dict = auto.get("schedule") or {}
+        tz = auto.get("timezone") or "UTC"
+        summary = _schedule_summary(schedule_dict, tz)
+        next_run = auto.get("next_run_at") or "—"
+        channel_ids = auto.get("slack_channel_ids") or []
+        channels = ", ".join(f"#{c}" for c in channel_ids) if channel_ids else "—"
+        lines.append(
+            f"{i}. **{auto.get('name', '(unnamed)')}** ({state}) — {summary}\n"
+            f"   Next run: {next_run} | Channels: {channels}"
+        )
+
+    return "\n".join(lines)
+
+
+async def update_automation(
+    ctx: RunContext[AgentDeps],
+    automation_id: str,
+    name: str | None = None,
+    prompt: str | None = None,
+    schedule: dict | None = None,
+    slack_channel_ids: list[str] | None = None,
+    timezone: str | None = None,
+    is_active: bool | None = None,
+    description: str | None = None,
+) -> str:
+    """Update fields of an existing automation.
+
+    Builds a patch dict from the non-None arguments and calls the automation
+    service. Only fields explicitly passed (not None) are included in the patch,
+    so callers can update a single field without affecting others.
+
+    To pause an automation, call ``update_automation(automation_id=id, is_active=False)``.
+    To resume it, call ``update_automation(automation_id=id, is_active=True)``.
+
+    Args:
+        ctx:              pydantic-ai RunContext with deps (workspace_id, supabase).
+        automation_id:    UUID of the automation to update.
+        name:             Optional new display name.
+        prompt:           Optional new AI prompt.
+        schedule:         Optional new schedule dict (see create_automation for shapes).
+        slack_channel_ids: Optional new list of target Slack channel IDs.
+        timezone:         Optional new IANA timezone string.
+        is_active:        Optional new active state (True to enable, False to pause).
+        description:      Optional new description.
+
+    Returns:
+        A confirmation string listing updated fields, or an error string if the
+        automation is not found or validation fails.
+    """
+    from app.services import automation_service as _auto_service
+
+    # Build patch dict from non-None arguments only.
+    patch: dict = {}
+    if name is not None:
+        patch["name"] = name
+    if prompt is not None:
+        patch["prompt"] = prompt
+    if schedule is not None:
+        patch["schedule"] = schedule
+    if slack_channel_ids is not None:
+        patch["slack_channel_ids"] = slack_channel_ids
+    if timezone is not None:
+        patch["timezone"] = timezone
+    if is_active is not None:
+        patch["is_active"] = is_active
+    if description is not None:
+        patch["description"] = description
+
+    try:
+        _auto_service.update_automation(
+            workspace_id=ctx.deps.workspace_id,
+            automation_id=automation_id,
+            patch=patch,
+            supabase=ctx.deps.supabase,
+        )
+        updated_fields = ", ".join(patch.keys()) if patch else "no changes"
+        return f"Automation {automation_id} updated successfully. Fields changed: {updated_fields}."
+    except ValueError as exc:
+        return str(exc)
+    except Exception as exc:
+        logger.error("[AGENT] update_automation unexpected error: %s", exc)
+        return f"Failed to update automation: {exc}"
+
+
+async def delete_automation(
+    ctx: RunContext[AgentDeps],
+    automation_id: str,
+) -> str:
+    """Permanently delete an automation and its execution history.
+
+    Calls the automation service to delete the automation row and all associated
+    execution history records. This action is irreversible.
+
+    Args:
+        ctx:           pydantic-ai RunContext with deps (workspace_id, supabase).
+        automation_id: UUID of the automation to delete.
+
+    Returns:
+        "Automation deleted. Execution history has been removed." if the
+        automation was found and deleted, or "Automation not found." if no
+        matching automation exists for this workspace.
+    """
+    from app.services import automation_service as _auto_service
+
+    try:
+        deleted = _auto_service.delete_automation(
+            workspace_id=ctx.deps.workspace_id,
+            automation_id=automation_id,
+            supabase=ctx.deps.supabase,
+        )
+    except Exception as exc:
+        logger.error("[AGENT] delete_automation unexpected error: %s", exc)
+        return f"Failed to delete automation: {exc}"
+
+    if deleted:
+        return "Automation deleted. Execution history has been removed."
+    return "Automation not found."
 
 
 # ---------------------------------------------------------------------------
@@ -504,6 +824,8 @@ async def build_agent(
       10. Build web tools (web_search, crawl_page, http_request).
       11.5. Build document CRUD tools (read_document, create_document, update_document, delete_document).
       11.6. Build read_wiki_page tool.
+      11.7. Query teemo_automations for active automations (system prompt gating).
+      11.70. Wire automation tools (create_automation, list_automations, update_automation, delete_automation).
       12. Construct and return (Agent, AgentDeps).
 
     Args:
@@ -591,8 +913,21 @@ async def build_agent(
     raw_docs = docs_result.data
     documents: list[dict] = raw_docs if isinstance(raw_docs, list) else []
 
+    # --- 7.7. Query automations for system prompt gating (STORY-018-04) ---
+    # Only active automations are queried — the system prompt section is a
+    # keyword hint to the LLM about when to use the automation tools. Inactive
+    # automations don't need a hint because they can't run.
+    automations_result = (
+        supabase.table("teemo_automations")
+        .select("id, name, schedule, timezone, is_active, next_run_at, slack_channel_ids")
+        .eq("workspace_id", workspace_id)
+        .eq("is_active", True)
+        .execute()
+    )
+    automations: list[dict] = automations_result.data or []
+
     # --- 8. Build system prompt ---
-    prompt = _build_system_prompt(skills, documents, wiki_pages, bot_persona=bot_persona)
+    prompt = _build_system_prompt(skills, documents, wiki_pages, bot_persona=bot_persona, automations=automations)
 
     # --- 9. Build skill tool functions ---
     # Tools are defined as closures capturing (workspace_id, supabase) from
@@ -1210,7 +1545,14 @@ async def build_agent(
         model,
         system_prompt=prompt,
         deps_type=AgentDeps,
-        tools=[load_skill, create_skill, update_skill, delete_skill, update_persona, web_search, crawl_page, http_request, read_document, create_document, update_document, delete_document, search_wiki, read_wiki_page, lint_wiki],
+        tools=[
+            load_skill, create_skill, update_skill, delete_skill,
+            update_persona,
+            web_search, crawl_page, http_request,
+            read_document, create_document, update_document, delete_document,
+            search_wiki, read_wiki_page, lint_wiki,
+            create_automation, list_automations, update_automation, delete_automation,
+        ],
     )
     deps = AgentDeps(
         workspace_id=workspace_id,

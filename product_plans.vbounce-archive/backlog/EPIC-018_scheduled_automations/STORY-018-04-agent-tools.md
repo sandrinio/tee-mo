@@ -309,3 +309,11 @@ async def list_automations(ctx: RunContext[AgentDeps]) -> str:
 | Date | Author | Change |
 |------|--------|--------|
 | 2026-04-15 | Claude (doc-manager) | Initial draft. 4 tools (create/list/update/delete), system prompt keyword-gated by automation existence, lazy service import pattern. Dry-run intentionally excluded (UI-only per EPIC-018 §8). |
+
+---
+
+## Token Usage
+
+| Agent | Input | Output | Total |
+|-------|-------|--------|-------|
+| Developer | 77 | 1,212 | 1,289 |

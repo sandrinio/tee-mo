@@ -1,7 +1,7 @@
 ---
 story_id: "STORY-018-07-frontend-browser-tz"
 parent_epic_ref: "EPIC-018"
-status: "Draft"
+status: "Shipped"
 ambiguity: "🟢"
 context_source: "EPIC-018-scheduled-automations.md"
 actor: "Workspace User (dashboard)"

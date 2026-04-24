@@ -1,7 +1,7 @@
 ---
 story_id: "STORY-024-04-fix-legacy-tests"
 parent_epic_ref: "EPIC-024"
-status: "Draft"
+status: "Shipped"
 ambiguity: "🟢"
 context_source: "PROPOSAL-001-teemo-platform.md"
 complexity_label: "L1"

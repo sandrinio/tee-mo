@@ -1,7 +1,7 @@
 ---
 story_id: "STORY-024-05-testclient-lifespan-unblock"
 parent_epic_ref: "EPIC-024"
-status: "Draft"
+status: "Shipped"
 ambiguity: "🟢"
 context_source: "EPIC-024-concurrency-hardening.md"
 actor: "Backend developer running the pytest suite"

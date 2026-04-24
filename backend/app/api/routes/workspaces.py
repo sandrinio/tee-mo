@@ -10,8 +10,10 @@ STORY-003-B02 implements the five REST endpoints for workspace management:
 
 Authorization pattern:
 - All endpoints require Bearer/cookie auth via ``get_current_user_id``.
-- Routes scoped to a team_id call ``assert_team_owner`` first to prevent
-  cross-user data leakage.
+- Routes scoped to a team_id call ``assert_team_member`` first to prevent
+  cross-user data leakage. Any member of a Slack team (owner or member role)
+  can manage their own workspaces inside it — isolation is enforced at the row
+  level via ``teemo_workspaces.user_id`` (BUG-002 / S-09 multi-user design).
 
 DB access:
 - All Supabase operations go through ``get_supabase()`` — NEVER ad-hoc
@@ -48,27 +50,31 @@ router = APIRouter(prefix="/api", tags=["workspaces"])
 # ---------------------------------------------------------------------------
 
 
-async def assert_team_owner(team_id: str, user_id: str) -> None:
-    """Verify that the authenticated user owns the given Slack team.
+async def assert_team_member(team_id: str, user_id: str) -> None:
+    """Verify that the authenticated user is a member of the given Slack team.
 
-    Queries ``teemo_slack_teams`` for a row matching both ``slack_team_id``
-    and ``owner_user_id``. Raises HTTP 403 if no match is found, preventing
-    cross-user access to workspaces scoped to a team.
+    Queries ``teemo_slack_team_members`` for any role (owner OR member) matching
+    ``(slack_team_id, user_id)``. Raises HTTP 403 if no match is found.
+
+    Per the multi-user design from S-09, any member of a team can manage their
+    own workspaces inside it — workspace isolation is enforced at the row level
+    by ``teemo_workspaces.user_id``. This replaces the previous
+    ``assert_team_owner`` helper which only accepted the installing owner
+    (BUG-002: team members were blocked with 403 on workspace endpoints).
 
     Args:
         team_id: The Slack team ID from the path parameter (e.g. ``"T12345"``).
         user_id: The authenticated user's UUID string from the JWT ``sub`` claim.
 
     Raises:
-        HTTPException(403): If the user does not own (or has not installed) the
-            specified Slack team.
+        HTTPException(403): If the user is not a member of the specified Slack team.
     """
     sb = get_supabase()
     result = (
-        await execute_async(sb.table("teemo_slack_teams")
+        await execute_async(sb.table("teemo_slack_team_members")
         .select("slack_team_id")
         .eq("slack_team_id", team_id)
-        .eq("owner_user_id", user_id)
+        .eq("user_id", user_id)
         .limit(1)
         )
     )
@@ -139,9 +145,9 @@ async def list_workspaces(
 
     Raises:
         HTTPException(401): No or invalid auth token.
-        HTTPException(403): Authenticated user does not own this Slack team.
+        HTTPException(403): Authenticated user is not a member of this Slack team.
     """
-    await assert_team_owner(team_id, user_id)
+    await assert_team_member(team_id, user_id)
     sb = get_supabase()
     result = (
         await execute_async(sb.table("teemo_workspaces")
@@ -188,9 +194,9 @@ async def create_workspace(
 
     Raises:
         HTTPException(401): No or invalid auth token.
-        HTTPException(403): Authenticated user does not own this Slack team.
+        HTTPException(403): Authenticated user is not a member of this Slack team.
     """
-    await assert_team_owner(team_id, user_id)
+    await assert_team_member(team_id, user_id)
 
     sb = get_supabase()
 

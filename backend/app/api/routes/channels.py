@@ -14,8 +14,8 @@ Authorization pattern:
 - All endpoints require authentication via ``get_current_user_id``.
 - Workspace-scoped routes verify ownership via ``teemo_workspaces`` lookup;
   non-owners receive HTTP 403.
-- The Slack team channels endpoint verifies ownership via ``teemo_slack_teams``
-  lookup; non-owners receive HTTP 403.
+- The Slack team channels endpoint verifies membership via ``teemo_slack_team_members``
+  lookup; non-members receive HTTP 403 (BUG-002: migrated from owner-only check).
 
 DB access:
 - All Supabase operations go through ``get_supabase()`` — NEVER ad-hoc
@@ -111,12 +111,19 @@ async def _assert_workspace_owner(workspace_id: str, user_id: str) -> dict[str, 
     return result.data[0]
 
 
-async def _assert_slack_team_owner(team_id: str, user_id: str) -> dict[str, Any]:
-    """Verify that the authenticated user owns the given Slack team.
+async def _assert_slack_team_member(team_id: str, user_id: str) -> dict[str, Any]:
+    """Verify that the authenticated user is a member of the given Slack team,
+    then return the full team row (including the encrypted bot token) for use
+    by the Slack API call.
 
-    Queries ``teemo_slack_teams`` for a row matching both ``slack_team_id``
-    and ``owner_user_id``. Raises HTTP 403 if no match — prevents cross-user
-    access to Slack team data.
+    Membership check queries ``teemo_slack_team_members`` for any role (owner OR
+    member) matching ``(slack_team_id, user_id)``. If the user is a member, the
+    team row is fetched from ``teemo_slack_teams`` for the bot token. Raises
+    HTTP 403 if no membership row is found.
+
+    Per the S-09 multi-user design (BUG-002), any member of a team can list
+    available Slack channels — this replaces the previous owner-only check that
+    queried ``teemo_slack_teams.owner_user_id`` directly.
 
     Parameters
     ----------
@@ -128,24 +135,40 @@ async def _assert_slack_team_owner(team_id: str, user_id: str) -> dict[str, Any]
     Returns
     -------
     dict
-        The raw Supabase slack team row (includes ``encrypted_slack_bot_token``).
+        The raw Supabase ``teemo_slack_teams`` row (includes
+        ``encrypted_slack_bot_token``).
 
     Raises
     ------
     HTTPException(403)
-        If the user does not own the specified Slack team.
+        If the user is not a member of the specified Slack team.
+    HTTPException(404)
+        If the team row does not exist (should not happen if membership exists).
     """
     sb = get_supabase()
+
+    # Step 1: confirm the user has any membership row for this team.
+    membership = (
+        await execute_async(sb.table("teemo_slack_team_members")
+        .select("slack_team_id")
+        .eq("slack_team_id", team_id)
+        .eq("user_id", user_id)
+        .limit(1)
+        )
+    )
+    if not membership.data:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    # Step 2: fetch the full team row (needed for encrypted_slack_bot_token).
     result = (
         await execute_async(sb.table("teemo_slack_teams")
         .select("*")
         .eq("slack_team_id", team_id)
-        .eq("owner_user_id", user_id)
         .limit(1)
         )
     )
     if not result.data:
-        raise HTTPException(status_code=403, detail="Forbidden")
+        raise HTTPException(status_code=404, detail="Slack team not found.")
     return result.data[0]
 
 
@@ -438,12 +461,12 @@ async def list_slack_team_channels(
     HTTPException(401)
         No or invalid auth token.
     HTTPException(403)
-        Authenticated user does not own the specified Slack team.
+        Authenticated user is not a member of the specified Slack team.
     HTTPException(500)
         Slack API call failed or returned ``ok: false``.
     """
-    # 1. Verify team ownership — raises 403 for non-owners.
-    team_row = await _assert_slack_team_owner(team_id, user_id)
+    # 1. Verify team membership — raises 403 for non-members.
+    team_row = await _assert_slack_team_member(team_id, user_id)
 
     # 2. Decrypt the bot token stored in teemo_slack_teams.
     #    Called via encryption_module.decrypt (not a direct binding) so that

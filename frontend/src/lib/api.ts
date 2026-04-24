@@ -824,6 +824,134 @@ export function reindexKnowledge(workspaceId: string): Promise<ReindexResult> {
 }
 
 // ---------------------------------------------------------------------------
+// Automation wrappers (STORY-018-05)
+// ---------------------------------------------------------------------------
+
+import type {
+  Automation,
+  AutomationCreate,
+  AutomationUpdate,
+  AutomationExecution,
+  TestRunResult,
+} from '../types/automation';
+
+// Re-export so consumers can import from api.ts directly.
+export type { Automation, AutomationCreate, AutomationUpdate, AutomationExecution, TestRunResult };
+
+/**
+ * GET /api/workspaces/{workspaceId}/automations
+ * Returns all automations configured for a workspace, newest first.
+ *
+ * @param workspaceId - UUID of the workspace to list automations for.
+ * @returns Array of Automation records.
+ */
+export function listAutomations(workspaceId: string): Promise<Automation[]> {
+  return apiGet<Automation[]>(`/api/workspaces/${encodeURIComponent(workspaceId)}/automations`);
+}
+
+/**
+ * POST /api/workspaces/{workspaceId}/automations
+ * Creates a new automation for the given workspace.
+ *
+ * Throws HTTP 409 if an automation with the same name already exists.
+ * Throws HTTP 422 if the schedule dict is invalid.
+ *
+ * @param workspaceId - UUID of the workspace to create the automation in.
+ * @param body        - Automation creation payload.
+ * @returns The newly created Automation record.
+ */
+export function createAutomation(workspaceId: string, body: AutomationCreate): Promise<Automation> {
+  return apiPost<AutomationCreate, Automation>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/automations`,
+    body,
+  );
+}
+
+/**
+ * PATCH /api/workspaces/{workspaceId}/automations/{automationId}
+ * Partially updates an automation (toggle is_active, rename, reschedule, etc.).
+ *
+ * Only fields present in the body are updated. Throws HTTP 404 if not found.
+ *
+ * @param workspaceId  - UUID of the workspace that owns the automation.
+ * @param automationId - UUID of the automation to update.
+ * @param body         - Partial update payload.
+ * @returns The updated Automation record.
+ */
+export function updateAutomation(
+  workspaceId: string,
+  automationId: string,
+  body: AutomationUpdate,
+): Promise<Automation> {
+  return apiPatch<AutomationUpdate, Automation>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/automations/${encodeURIComponent(automationId)}`,
+    body,
+  );
+}
+
+/**
+ * DELETE /api/workspaces/{workspaceId}/automations/{automationId}
+ * Permanently deletes an automation and its execution history.
+ *
+ * Returns void (HTTP 204 No Content) on success.
+ * Throws an Error with backend `detail` on non-2xx responses.
+ *
+ * @param workspaceId  - UUID of the workspace that owns the automation.
+ * @param automationId - UUID of the automation to delete.
+ */
+export async function deleteAutomation(workspaceId: string, automationId: string): Promise<void> {
+  const r = await fetchWithAuth(
+    `${API_URL}/api/workspaces/${encodeURIComponent(workspaceId)}/automations/${encodeURIComponent(automationId)}`,
+    { method: 'DELETE' },
+  );
+  if (!r.ok) {
+    const payload = await r.json().catch(() => ({}));
+    throw new Error(payload?.detail ?? `HTTP ${r.status}`);
+  }
+}
+
+/**
+ * GET /api/workspaces/{workspaceId}/automations/{automationId}/history
+ * Returns the execution history for a specific automation, newest first.
+ *
+ * @param workspaceId  - UUID of the workspace that owns the automation.
+ * @param automationId - UUID of the automation to fetch history for.
+ * @returns Array of AutomationExecution records, newest first.
+ */
+export function getAutomationHistory(
+  workspaceId: string,
+  automationId: string,
+): Promise<AutomationExecution[]> {
+  return apiGet<AutomationExecution[]>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/automations/${encodeURIComponent(automationId)}/history`,
+  );
+}
+
+/**
+ * POST /api/workspaces/{workspaceId}/automations/test-run
+ * Runs a prompt against the workspace's BYOK model without persisting to Slack.
+ *
+ * NOTE (FLASHCARD 2026-04-24 #frontend #epic-018): endpoint is
+ * `/automations/test-run` — NOT `/{automation_id}/dry-run`.
+ * Body shape: `{ prompt, timezone?, description? }`.
+ *
+ * Always returns HTTP 200; check `result.success` for failure conditions.
+ *
+ * @param workspaceId - UUID of the workspace to run the test against.
+ * @param body        - Test-run request with prompt (required), timezone, description.
+ * @returns TestRunResult with success flag, output, error, and token/timing info.
+ */
+export function testRunAutomation(
+  workspaceId: string,
+  body: { prompt: string; timezone?: string; description?: string },
+): Promise<TestRunResult> {
+  return apiPost<{ prompt: string; timezone?: string; description?: string }, TestRunResult>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/automations/test-run`,
+    body,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Skills wrappers (STORY-023-01)
 // ---------------------------------------------------------------------------
 

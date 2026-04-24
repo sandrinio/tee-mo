@@ -45,6 +45,11 @@ import { useSkillsQuery } from '../hooks/useSkills';
 import { getPickerToken, deleteWorkspace, type KnowledgeFile, type DocumentSource, type Skill } from '../lib/api';
 import { SetupStepper } from '../components/workspace/SetupStepper';
 import { ChannelSection } from '../components/workspace/ChannelSection';
+import { AutomationsSection } from '../components/workspace/AutomationsSection';
+import { AutomationHistoryDrawer } from '../components/workspace/AutomationHistoryDrawer';
+import { AddAutomationModal } from '../components/workspace/AddAutomationModal';
+import { DryRunModal } from '../components/workspace/DryRunModal';
+import { useChannelBindingsQuery } from '../hooks/useChannels';
 
 // ---------------------------------------------------------------------------
 // Route declaration
@@ -946,6 +951,45 @@ function WorkspaceDetailPage() {
   const [isIndexing, setIsIndexing] = useState(false);
   const [wizardSkipped, setWizardSkipped] = useState(false);
 
+  // ---------------------------------------------------------------------------
+  // Automations state stubs (STORY-018-05 declares; STORY-018-06 wires modals)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Controls AddAutomationModal visibility — true when the modal is open.
+   * Set to true by AutomationsSection's onAddClick callback.
+   * Reset to false by AddAutomationModal's onClose callback (018-06).
+   */
+  const [addAutomationOpen, setAddAutomationOpen] = useState(false);
+
+  /**
+   * Prompt text passed to the DryRunModal — populated by AutomationsSection's
+   * onDryRunClick callback so the modal pre-fills the prompt field.
+   */
+  const [dryRunPrompt, setDryRunPrompt] = useState('');
+
+  /**
+   * Automation name passed to the DryRunModal for display purposes.
+   */
+  const [dryRunName, setDryRunName] = useState('');
+
+  /**
+   * Controls DryRunModal visibility — true when the modal is open.
+   * Set to true alongside dryRunPrompt/dryRunName by onDryRunClick.
+   */
+  const [dryRunOpen, setDryRunOpen] = useState(false);
+
+  /**
+   * Automation ID for the history drawer — non-null when the drawer is open.
+   * Set by AutomationsSection's onHistoryClick callback.
+   */
+  const [historyAutomationId, setHistoryAutomationId] = useState<string | null>(null);
+
+  /**
+   * Automation name for the history drawer header.
+   */
+  const [historyAutomationName, setHistoryAutomationName] = useState('');
+
   // Data queries
   const { data: workspace, isLoading: workspaceLoading } = useWorkspaceQuery(workspaceId);
   const { data: keyData, isLoading: keyLoading } = useKeyQuery(workspaceId);
@@ -954,6 +998,10 @@ function WorkspaceDetailPage() {
     data: knowledgeFiles,
     isLoading: knowledgeLoading,
   } = useKnowledgeQuery(workspaceId);
+
+  // Channel bindings — needed by AutomationsSection and AutomationHistoryDrawer
+  // to resolve Slack channel IDs to human-readable names.
+  const { data: channelBindings = [] } = useChannelBindingsQuery(workspaceId);
 
   const files = knowledgeFiles ?? [];
   const driveConnected = driveStatus?.connected ?? false;
@@ -1067,6 +1115,53 @@ function WorkspaceDetailPage() {
 
         {/* Active skills catalog (STORY-023-01) */}
         <SkillsSection workspaceId={workspaceId} />
+
+        {/* Automations section (STORY-018-05) */}
+        <AutomationsSection
+          workspaceId={workspaceId}
+          channelBindings={channelBindings}
+          onAddClick={() => setAddAutomationOpen(true)}
+          onDryRunClick={(prompt, name) => {
+            setDryRunPrompt(prompt);
+            setDryRunName(name);
+            setDryRunOpen(true);
+          }}
+          onHistoryClick={(automationId, automationName) => {
+            setHistoryAutomationId(automationId);
+            setHistoryAutomationName(automationName);
+          }}
+        />
+
+        {/* Automation history drawer — inline slide-in, shown when historyAutomationId is set */}
+        {historyAutomationId && (
+          <AutomationHistoryDrawer
+            workspaceId={workspaceId}
+            automationId={historyAutomationId}
+            automationName={historyAutomationName}
+            onClose={() => {
+              setHistoryAutomationId(null);
+              setHistoryAutomationName('');
+            }}
+            channelBindings={channelBindings}
+          />
+        )}
+
+        {/* AddAutomationModal (STORY-018-06) — mounted under addAutomationOpen stub declared by 018-05 */}
+        <AddAutomationModal
+          workspaceId={workspaceId}
+          open={addAutomationOpen}
+          onClose={() => setAddAutomationOpen(false)}
+          channelBindings={channelBindings}
+        />
+
+        {/* DryRunModal (STORY-018-06) — mounted under dryRunOpen/dryRunPrompt/dryRunName stubs declared by 018-05 */}
+        <DryRunModal
+          workspaceId={workspaceId}
+          automationName={dryRunName}
+          prompt={dryRunPrompt}
+          open={dryRunOpen}
+          onClose={() => setDryRunOpen(false)}
+        />
 
         {/* Channel binding section (STORY-008-02) */}
         <ChannelSection workspaceId={workspaceId} teamId={teamId} />

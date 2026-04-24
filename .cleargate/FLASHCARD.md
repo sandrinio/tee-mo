@@ -8,6 +8,11 @@ Format: `YYYY-MM-DD · #tags · [marker]? lesson`
 
 ---
 
+2026-04-24 · #reporting #hook · Orchestrator must write `.cleargate/sprint-runs/.active` with sprint ID at kickoff; otherwise SubagentStop hook drops every row and REPORT.md has no ledger.
+2026-04-24 · #test-harness #fastapi · `with TestClient(app) as client:` deadlocks under pytest-asyncio auto mode — lifespan spawns drive/wiki/automation cron loops; use bare `TestClient(app)` for mock-heavy tests (pattern from `test_auth_routes.py`).
+2026-04-24 · #vitest #test-harness · Button whose label flips on `isPending` — render with `isPending: false`, click, then `rerender` with `isPending: true` to assert spinner; setting it true before first render disables the button.
+2026-04-24 · #vitest #test-harness · Prefer `getByLabelText` over `getByDisplayValue('')`; empty-value queries are ambiguous whenever a form has multiple empty inputs.
+2026-04-24 · #frontend #epic-018 · EPIC-018 dry-run endpoint is POST /automations/test-run (prompt-only body), NOT /{aid}/dry-run — declared before /{automation_id}.
 2026-04-15 · #qa #process · [S] V-Bounce: 2 consecutive Dev-agent timeouts on a story = Team Lead implements directly, do not spawn a 3rd.
 2026-04-15 · #qa · Sprint plans with 3+ stories touching agent.py mark it red-zone in §2 Shared Surface Warnings; merges need review.
 2026-04-15 · #qa #recipe #ambiguity · L3 stories tuning LLM prompts need an AI judge harness in §3 (≥5 fixtures, 3-7 criteria, ≥3.5 pass) as QA gate.

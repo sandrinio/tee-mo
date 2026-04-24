@@ -6,6 +6,7 @@ children:
   - "STORY-024-02-background-worker-locks"
   - "STORY-024-03-fastapi-thread-wrapper"
   - "STORY-024-04-fix-legacy-tests"
+  - "STORY-024-05-testclient-lifespan-unblock"
 ambiguity: "🟢"
 context_source: "PROPOSAL-001-teemo-platform.md"
 owner: "DevOps & Backend Lead"

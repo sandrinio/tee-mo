@@ -8,6 +8,8 @@ children:
   - "STORY-018-04-agent-tools"
   - "STORY-018-05-ui-list-history"
   - "STORY-018-06-ui-modals"
+  - "STORY-018-07-frontend-browser-tz"
+  - "STORY-018-08-agent-scheduler-tz"
 ambiguity: "🟢"
 context_source: "PROPOSAL-001-teemo-platform.md"
 owner: "sandrinio"

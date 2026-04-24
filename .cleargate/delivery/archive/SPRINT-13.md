@@ -102,13 +102,14 @@ cached_gate_result: { pass: null, failing_criteria: [], last_gate_check: null }
 
 ### Definition of Done
 - [x] All 3 items pass QA on their own branches.
-- [ ] Sprint branch `sprint/S-13` merges cleanly to `main`. — pending final merge (orchestrator will propose, human approves)
+- [x] Sprint branch `sprint/S-13` merges cleanly to `main` (squash-merged as `934497a` on 2026-04-24 under explicit human approval, pushed to `origin/main`).
 - [x] `npm test` (frontend Vitest) green — existing suite + new UI tests for 018-05 (7) + 018-06 (9). Pre-existing failures on `WorkspaceCard.test.tsx` + `KeySection.test.tsx` confirmed present on parent `3676a3e` — not regressions.
 - [x] `pytest` (backend) green — 3 new BUG-002 tests, +0 regressions vs `main`. 4 modules excluded for pre-existing lifespan/asyncio deadlock (not a BUG-002 regression).
 - [x] No regression on workspace-owner semantics — `_assert_workspace_owner` helpers in keys/drive_oauth/automations/knowledge untouched (QA verified via `git diff`).
-- [ ] `cleargate wiki build` rebuilds cleanly. — pending orchestrator run
-- [x] Reporter writes `.cleargate/sprint-runs/SPRINT-13/REPORT.md`. — written in Reporter-fallback mode (Reporter agent unavailable this session).
-- [x] Flashcards recorded for any surprises discovered during execution. — 5 new cards on 2026-04-24.
+- [x] `cleargate wiki build` rebuilds cleanly — CLI not installed locally; wiki-ingest agent processed all SPRINT-13 work items, bumped synthesis pages (`active-sprint.md`, `product-state.md`), log entries appended. `.cleargate/wiki/` is gitignored (auto-regenerated), so no commit.
+- [x] Reporter writes `.cleargate/sprint-runs/SPRINT-13/REPORT.md` — written in Reporter-fallback mode (Reporter agent unavailable this session).
+- [x] Flashcards recorded for any surprises discovered during execution — 8 new cards on 2026-04-24 (5 from original sprint + 3 from hotfix window).
+- [x] Live-testing window closed — 4 hotfix commits on `main` (`062dce8`, `301e3c5`, `1a55b89`, `c17f6ec`), all logged in REPORT.md §Post-ship hotfixes.
 
 ## 6. Sprint Metrics & Goals
 

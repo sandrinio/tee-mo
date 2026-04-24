@@ -1,8 +1,10 @@
 # SPRINT-13 Report: EPIC-018 Dashboard UI Close + P1 Auth Fix
 
-**Status:** ✅ Shipped
-**Window:** 2026-04-24 → 2026-04-24 (1 calendar day, ~4h active dev)
+**Status:** ✅ Shipped + Closed
+**Window:** 2026-04-24 → 2026-04-24 (1 calendar day: ~4h development, ~1h live-testing + hotfixes)
 **Stories:** 3 planned / 3 shipped / 0 carried over
+**Hotfixes during live-testing window:** 4 commits (5 distinct fixes)
+**Closed:** 2026-04-24 by orchestrator (Reporter-fallback — agent unavailable this session)
 
 ---
 
@@ -129,16 +131,16 @@ Supersede candidates: none.
 
 ---
 
-## Post-ship hotfixes (live-testing window)
+## Post-ship hotfixes (live-testing window — closed)
 
-Sprint closed at `f80cb45` but the human is still validating in prod. Anything below is drift caught after DoD — recorded here (not as separate BUG- items) until user signs off that testing is complete. Each entry is one commit on `main` past the squash-merge.
+The squash-merge to main landed at `934497a`. Between merge and sprint close, live-testing surfaced 4 hotfix commits (5 distinct fixes) — all logged here rather than filed as separate BUG items because they fall inside SPRINT-13 scope. **Live-testing window closed 2026-04-24.**
 
 | # | Commit | Scope | Surfaced by | Fix |
 |---|---|---|---|---|
 | 1 | `062dce8` | `fix(epic-005)` follow-on to BUG-002 | Live test: `POST /api/slack-teams/{id}/workspaces` → 500 `duplicate key on one_default_per_team`. BUG-002 newly let any member POST, but the "is this the first workspace?" check was still `(user_id, team_id)`-scoped, so a second member's first workspace always claimed `is_default_for_team=True` and collided with the owner's. | Scope the team-default check by `team_id + is_default_for_team=True` only. New workspace picks up the default flag only if no default exists for the team yet. Regression test added as Scenario 4 in `test_workspaces_team_member_access.py` with column-differentiating mock — RED on pre-fix confirmed. |
 | 2 | `301e3c5` | `fix(epic-018)` agent prompt gating | Live test in Slack: asked Tee-Mo to schedule a daily news fetch; agent created a `fetch-rundown-ai-news` skill instead of an automation. Cause: `_AUTOMATIONS_PROMPT_SECTION` was gated on `automations is non-empty`, so workspaces with zero automations never saw the "schedule / every week / remind me" keyword hints. Tools were registered with pydantic-ai unconditionally — the gate hid only the discovery prompt, never prevented tool use. | Drop the `if automations:` gate. Section + hints injected on every workspace. Test 9 in `test_automation_tools.py` flipped: was "omit on empty," now "present on empty." |
 | 3 | `1a55b89` | `fix(epic-018)` bound-channel hallucination | Live test: after Fix #2 agent did try to create automation but called `create_automation` with a fabricated channel ID (`C089L445E8D` — never existed; real ID for `#all-slop-tester` was `C0AUN0FJM36`). `validate_channels` correctly rejected the fake ID; the agent then invented an "invite the bot" story to explain the failure. Prod DB confirmed 3 real bound channels for the workspace — user was right, the agent was hallucinating. Root cause: system prompt never told the agent what the bound channel IDs actually were. | Inject a `## Bound Channels` section listing the real `slack_channel_id` values from `teemo_workspace_channels`, with an explicit "never invent, guess, or reconstruct channel IDs" rule. Diagnosed by SSH'ing to the Coolify host + querying Supabase directly (no prod-accessible agent log beyond that). |
-| 4 | _pending_ | `fix(epic-018)` Dry Run + history 500s | Two independent bugs found via dashboard UI: (a) Dry Run on the workspace's Automations section returned HTTP 500 with `UserError: Set the GOOGLE_API_KEY environment variable or pass it via GoogleProvider(api_key=...)` — `_run_preview_prompt` built the pydantic-ai Agent via a `"provider:model_id"` string and tried to pass the BYOK key through `.run(model_settings={"api_key": ...})`, but Google's provider reads the key at construction time so `model_settings` is ignored. (b) `GET /automations/{aid}/history` returned 500 with `TypeError: get_automation_history() missing 1 required positional argument: 'automation_id'` — route called the service with only `automation_id`, but service signature is `(workspace_id, automation_id, *, supabase)`. | (a) Use `_build_pydantic_ai_model(model_id, provider, api_key)` (same helper as `build_agent`) so `GoogleProvider(api_key=...)` / `AnthropicProvider` / `OpenAIProvider` receive the key at construction. Drop the broken `model_settings` arg. (b) Pass both `workspace_id` and `automation_id` positionally. Diagnosed via SSH to Coolify host. |
+| 4 | `c17f6ec` | `fix(epic-018)` Dry Run + history 500s | Two independent bugs found via dashboard UI: (a) Dry Run on the workspace's Automations section returned HTTP 500 with `UserError: Set the GOOGLE_API_KEY environment variable or pass it via GoogleProvider(api_key=...)` — `_run_preview_prompt` built the pydantic-ai Agent via a `"provider:model_id"` string and tried to pass the BYOK key through `.run(model_settings={"api_key": ...})`, but Google's provider reads the key at construction time so `model_settings` is ignored. (b) `GET /automations/{aid}/history` returned 500 with `TypeError: get_automation_history() missing 1 required positional argument: 'automation_id'` — route called the service with only `automation_id`, but service signature is `(workspace_id, automation_id, *, supabase)`. | (a) Use `_build_pydantic_ai_model(model_id, provider, api_key)` (same helper as `build_agent`) so `GoogleProvider(api_key=...)` / `AnthropicProvider` / `OpenAIProvider` receive the key at construction. Drop the broken `model_settings` arg. (b) Pass both `workspace_id` and `automation_id` positionally. Diagnosed via SSH to Coolify host. |
 
 **Running totals (live-testing window):**
 - Hotfixes: 4 (containing 5 distinct fixes — Fix #4 bundles two unrelated 500s)
@@ -147,8 +149,10 @@ Sprint closed at `f80cb45` but the human is still validating in prod. Anything b
 
 **Loop-improvement signals this is sending:**
 - **Live-test the bug-opens-a-new-path case.** BUG-002's test coverage proved the 403 was gone but never tried creating *two* workspaces under the same team. Worth adding to the bug template: "list every write path this fix newly unlocks — test at least one end-to-end in the live environment."
-- **Empty-state probes for keyword-gated prompt sections.** Any prompt section gated on "has ≥1 X" is suspect because the LLM can never create the first X. Should be a flashcard.
-- **Prompt-inject real IDs, not just names.** When a tool argument is a foreign key (channel ID, document ID, workspace ID, user ID), the system prompt needs a catalog of the real values. Otherwise the LLM fabricates plausible-looking ones and narrates around the downstream validation error. Rule of thumb: if a tool param is an opaque token the user can't type, the prompt must list the legal tokens.
+- **Empty-state probes for keyword-gated prompt sections.** Any prompt section gated on "has ≥1 X" is suspect because the LLM can never create the first X. Flashcard recorded.
+- **Prompt-inject real IDs, not just names.** When a tool argument is a foreign key (channel ID, document ID, workspace ID, user ID), the system prompt needs a catalog of the real values. Otherwise the LLM fabricates plausible-looking ones and narrates around the downstream validation error. Rule of thumb: if a tool param is an opaque token the user can't type, the prompt must list the legal tokens. Flashcard recorded.
+- **BYOK keys must flow through provider constructors, not model_settings.** `_run_preview_prompt` cloned the agent-build pattern but took a shortcut with `Agent(model="provider:model_id", ...)` + `run(model_settings={"api_key": ...})`. pydantic-ai's Google / Anthropic / OpenAI providers all read the key at *construction* time; `model_settings` is silently ignored. Any new code path that instantiates pydantic-ai must reuse `_build_pydantic_ai_model(model_id, provider, api_key)`. Flashcard recorded.
+- **Thread-history anchoring is real.** After fix #3 the Slack agent's prompt had the correct bound-channel IDs, but the agent kept hallucinating the fake ID because its own earlier messages in the long thread already contained it. New-thread tests resolved this. Candidate flashcard: when debugging "prompt-injection not working" in a multi-turn chat agent, always sanity-check in a fresh thread before iterating on the prompt.
 
 ---
 

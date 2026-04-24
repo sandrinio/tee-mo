@@ -8,6 +8,9 @@ Format: `YYYY-MM-DD · #tags · [marker]? lesson`
 
 ---
 
+2026-04-24 · #llm #pydantic-ai · BYOK keys must flow through provider constructors (`GoogleProvider(api_key=...)`, `AnthropicProvider(api_key=...)`, `OpenAIProvider(api_key=...)`), not via `Agent.run(model_settings={"api_key": ...})` — `model_settings` is silently ignored, pydantic-ai reads the key at model construction. Always call `_build_pydantic_ai_model(model_id, provider, api_key)` to instantiate.
+2026-04-24 · #llm #slack · Thread-history anchoring beats a freshly-fixed system prompt. When debugging "agent keeps saying X after I fixed the prompt", test in a fresh thread first — the old thread's assistant messages are in-context and the model follows its own established pattern before reading new rules.
+2026-04-24 · #slack #agent · "Bound channel" ≠ "bot invited to channel". Binding is a row in `teemo_workspace_channels` written by the dashboard's channel picker; inviting the bot via `/invite @bot` has no effect on binding. Tell users this explicitly when surfacing a `channel not bound` error.
 2026-04-24 · #llm #prompt · When a tool param is an opaque ID the user can't type (channel ID, document UUID, skill ID), inject the real catalog into the system prompt. Otherwise the LLM fabricates plausible-looking IDs and blames `validate_*` failures on unrelated causes.
 2026-04-24 · #llm #prompt · Never gate a tool's prompt section on "entity exists" — the LLM can never create the first entity because the keyword hints are hidden. Register the tool, always inject the section.
 2026-04-24 · #schema #auth · When a fix broadens who can write to a table (e.g. BUG-002: owner-only → any member), re-check every uniqueness / default / scoping invariant downstream; a per-user existence check becomes wrong the moment multiple users share the scope.

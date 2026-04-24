@@ -1,7 +1,8 @@
 ---
 story_id: "STORY-022-01-api-refresh-interceptor"
 parent_epic_ref: "EPIC-022"
-status: "Active"
+status: "Shipped"
+approved: true
 ambiguity: "🟢"
 context_source: "PROPOSAL-001-teemo-platform.md"
 owner: "TBD"

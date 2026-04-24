@@ -1,7 +1,8 @@
 ---
 story_id: "STORY-023-02-remove-landing-page"
 parent_epic_ref: "EPIC-023"
-status: "Ready"
+status: "Shipped"
+approved: true
 ambiguity: "🟢"
 context_source: "PROPOSAL-001-teemo-platform.md"
 complexity_label: "L1"

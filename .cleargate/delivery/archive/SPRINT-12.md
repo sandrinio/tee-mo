@@ -2,7 +2,7 @@
 sprint_id: "SPRINT-12"
 remote_id: "local:SPRINT-12"
 source_tool: "vbounce-migration"
-status: "Active"
+status: "Completed"
 start_date: "2026-04-15"
 end_date: "2026-04-16"
 synced_at: "2026-04-24T00:00:00Z"

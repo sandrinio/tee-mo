@@ -1,7 +1,8 @@
 ---
 story_id: "STORY-018-02-rest-endpoints"
 parent_epic_ref: "EPIC-018"
-status: "Draft"
+status: "Shipped"
+approved: true
 ambiguity: "🟢"
 context_source: "PROPOSAL-001-teemo-platform.md"
 owner: "TBD"

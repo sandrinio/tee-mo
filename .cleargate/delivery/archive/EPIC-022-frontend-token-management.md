@@ -1,6 +1,7 @@
 ---
 epic_id: "EPIC-022"
-status: "Active"
+status: "Shipped"
+approved: true
 children:
   - "STORY-022-01-api-refresh-interceptor"
 ambiguity: "🟢"

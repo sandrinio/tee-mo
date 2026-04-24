@@ -1,6 +1,7 @@
 ---
 epic_id: "EPIC-023"
 status: "Shipped"
+approved: true
 children:
   - "STORY-023-01-skills-list-ui"
   - "STORY-023-02-remove-landing-page"

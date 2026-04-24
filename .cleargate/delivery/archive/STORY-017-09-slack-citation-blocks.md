@@ -1,7 +1,8 @@
 ---
 story_id: "STORY-017-09-slack-citation-blocks"
 parent_epic_ref: "EPIC-017"
-status: "Draft"
+status: "Shipped"
+approved: true
 ambiguity: "🟡"
 context_source: "PROPOSAL-001-teemo-platform.md"
 owner: "TBD"

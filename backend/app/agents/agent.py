@@ -552,12 +552,13 @@ def _build_system_prompt(
             "content from an un-indexed doc. Only create documents when the user explicitly asks you to."
         )
 
-    # STORY-018-04 R2: Keyword-gated automations section.
-    # Only injected when the workspace has at least one active automation. Omitting
-    # the section for empty workspaces prevents the LLM from hallucinating automation
-    # commands when no automations have been configured.
-    if automations:
-        prompt += "\n\n## Scheduled Automations\n" + _AUTOMATIONS_PROMPT_SECTION
+    # Automation tool instructions are ALWAYS injected. The tools themselves are
+    # registered with pydantic-ai unconditionally, so gating the prompt section
+    # only hid the "when to use" heuristics — it did not prevent tool use. Without
+    # the keyword hints ("schedule", "every week", "remind me", …) the LLM tended
+    # to pick create_skill for recurring-task requests on a workspace with zero
+    # automations, which made creating the first automation impossible from Slack.
+    prompt += "\n\n## Scheduled Automations\n" + _AUTOMATIONS_PROMPT_SECTION
 
     return prompt
 

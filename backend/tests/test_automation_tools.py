@@ -567,31 +567,40 @@ class TestSystemPromptWithAutomations:
 
 
 # ---------------------------------------------------------------------------
-# Test 9: _build_system_prompt omits automations section when no automations
+# Test 9: _build_system_prompt ALWAYS includes automations section
+#
+# Previously this test asserted the section was omitted on empty automations
+# (STORY-018-04 R2). In live Slack testing the gate made the first automation
+# impossible to create — the LLM never saw the "schedule" / "remind me" /
+# "every week" heuristics and routed recurring-task requests to create_skill
+# instead. The tools are registered with pydantic-ai unconditionally, so
+# hiding the prompt section never prevented tool use; it only prevented
+# discovery. Flipped: the section must be present whether or not automations
+# already exist.
 # ---------------------------------------------------------------------------
 
 
-class TestSystemPromptWithoutAutomations:
-    """Scenario: System prompt omits automations section when no automations.
+class TestSystemPromptAutomationsAlwaysPresent:
+    """Scenario: System prompt always includes the automations section.
 
     Given workspace W has 0 automations,
     When _build_system_prompt(skills=[], automations=[]) is called,
-    Then the system prompt does NOT contain "## Scheduled Automations".
+    Then the system prompt still contains "## Scheduled Automations" and
+    documents create_automation — so the LLM can create the first automation.
     """
 
-    def test_system_prompt_omits_automations_section_when_no_automations(self) -> None:
-        """_build_system_prompt must NOT inject ## Scheduled Automations when automations=[] or None.
-
-        The section is keyword-gated: only injected when automations is a non-empty list.
-        Calling with automations=[] will TypeError in RED Phase if the param doesn't exist.
-        """
+    def test_system_prompt_includes_automations_section_when_no_automations(self) -> None:
+        """_build_system_prompt must inject ## Scheduled Automations even on an empty workspace."""
         from app.agents.agent import _build_system_prompt  # type: ignore[import]
 
-        # automations=[] — should TypeError in RED (param not yet added) or pass False-gate check
         prompt = _build_system_prompt(skills=[], automations=[])
 
-        assert "## Scheduled Automations" not in prompt, (
-            f"'## Scheduled Automations' section MUST NOT appear when automations is empty. "
-            f"Got prompt (first 500 chars): {prompt[:500]!r}. "
-            "STORY-018-04 R2: section is only injected when automations is a non-empty list."
+        assert "## Scheduled Automations" in prompt, (
+            f"'## Scheduled Automations' section must appear even when no automations exist "
+            f"(needed so the LLM can create the first one). "
+            f"Got prompt (first 500 chars): {prompt[:500]!r}."
+        )
+        assert "create_automation" in prompt, (
+            "create_automation tool must be documented in the system prompt so the LLM "
+            "routes recurring-task requests to it instead of create_skill."
         )

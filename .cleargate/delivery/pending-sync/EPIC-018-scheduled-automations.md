@@ -1,6 +1,13 @@
 ---
 epic_id: "EPIC-018"
 status: "Active"
+children:
+  - "STORY-018-01-service-layer"
+  - "STORY-018-02-rest-endpoints"
+  - "STORY-018-03-executor-cron"
+  - "STORY-018-04-agent-tools"
+  - "STORY-018-05-ui-list-history"
+  - "STORY-018-06-ui-modals"
 ambiguity: "🟢"
 context_source: "PROPOSAL-001-teemo-platform.md"
 owner: "sandrinio"
@@ -22,7 +29,6 @@ cached_gate_result:
   failing_criteria: []
   last_gate_check: null
 ---
-
 > **Ported from V-Bounce.** Original: `product_plans.vbounce-archive/backlog/EPIC-018_scheduled_automations/EPIC-018_scheduled_automations.md`. Carried forward during ClearGate migration 2026-04-24.
 
 > **Sprint note:** EPIC-018 was Active in SPRINT-12 at migration cutover. Stories 018-01 through 018-06 were in progress at time of porting.

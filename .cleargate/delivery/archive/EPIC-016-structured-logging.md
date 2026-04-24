@@ -1,6 +1,8 @@
 ---
 epic_id: "EPIC-016"
 status: "Shipped"
+children:
+  - "STORY-016-01-structured-logging"
 ambiguity: "🟢"
 context_source: "PROPOSAL-001-teemo-platform.md"
 owner: "Team Lead"
@@ -23,7 +25,6 @@ cached_gate_result:
   failing_criteria: []
   last_gate_check: null
 ---
-
 > **Ported from V-Bounce (shipped).** Original: `product_plans.vbounce-archive/archive/epics/EPIC-016_structured_logging/EPIC-016_structured_logging.md`. Shipped in sprint S-11, carried forward during ClearGate migration 2026-04-24.
 
 # EPIC-016: Structured Logging & Observability

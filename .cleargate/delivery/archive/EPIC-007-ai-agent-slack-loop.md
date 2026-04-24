@@ -1,6 +1,13 @@
 ---
 epic_id: "EPIC-007"
 status: "Shipped"
+children:
+  - "STORY-007-01-skill-service"
+  - "STORY-007-02-agent-factory"
+  - "STORY-007-03-thread-history"
+  - "STORY-007-04-channel-binding-rest"
+  - "STORY-007-05-slack-dispatch"
+  - "STORY-007-06-manual-e2e"
 ambiguity: "🟢"
 context_source: "PROPOSAL-001-teemo-platform.md"
 owner: "sandrinio"
@@ -23,7 +30,6 @@ cached_gate_result:
   failing_criteria: []
   last_gate_check: null
 ---
-
 > **Ported from V-Bounce (shipped).** Original: `product_plans.vbounce-archive/archive/epics/EPIC-007_ai_agent_slack_loop/EPIC-007_ai_agent_slack_loop.md`. Shipped in sprint S-07, carried forward during ClearGate migration 2026-04-24.
 
 # EPIC-007: AI Agent + Slack Event Loop

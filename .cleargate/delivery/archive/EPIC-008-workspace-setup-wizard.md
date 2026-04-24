@@ -1,6 +1,12 @@
 ---
 epic_id: "EPIC-008"
 status: "Shipped"
+children:
+  - "STORY-008-01-guided-setup-mode"
+  - "STORY-008-02-channel-binding-ui"
+  - "STORY-008-03-card-dashboard-polish"
+  - "STORY-008-04-top-nav-chrome"
+  - "STORY-008-05-e2e-verification"
 ambiguity: "🟢"
 context_source: "PROPOSAL-001-teemo-platform.md"
 owner: "sandrinio"
@@ -23,7 +29,6 @@ cached_gate_result:
   failing_criteria: []
   last_gate_check: null
 ---
-
 > **Ported from V-Bounce (shipped).** Original: `product_plans.vbounce-archive/archive/epics/EPIC-008_workspace_setup_wizard/EPIC-008_workspace_setup_wizard.md`. Shipped in sprint S-09, carried forward during ClearGate migration 2026-04-24.
 
 # EPIC-008: Workspace Setup Wizard Polish

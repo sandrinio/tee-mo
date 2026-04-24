@@ -1,6 +1,12 @@
 ---
 epic_id: "EPIC-015"
 status: "Shipped"
+children:
+  - "STORY-015-01-schema-document-service"
+  - "STORY-015-02-route-refactor"
+  - "STORY-015-03-agent-refactor-and-tools"
+  - "STORY-015-05-drive-sync-cron"
+  - "STORY-015-06-frontend-update"
 ambiguity: "🟢"
 context_source: "PROPOSAL-001-teemo-platform.md"
 owner: "Solo dev"
@@ -23,7 +29,6 @@ cached_gate_result:
   failing_criteria: []
   last_gate_check: null
 ---
-
 > **Ported from V-Bounce (shipped).** Original: `product_plans.vbounce-archive/archive/epics/EPIC-015_agent_document_creation/EPIC-015_agent_document_creation.md`. Shipped in sprint S-11, carried forward during ClearGate migration 2026-04-24.
 
 # EPIC-015: Documents Table Redesign + Agent Document Creation

@@ -1,6 +1,15 @@
 ---
 epic_id: "EPIC-003"
 status: "Active"
+children:
+  - "STORY-003-03-migrations"
+  - "STORY-003-B01-workspace-models"
+  - "STORY-003-B02-workspace-routes"
+  - "STORY-003-B03-workspace-tests"
+  - "STORY-003-B04-frontend-api-hooks"
+  - "STORY-003-B05-team-workspace-list"
+  - "STORY-003-B06-rename-make-default"
+  - "STORY-003-B07-manual-verification"
 ambiguity: "🟢"
 context_source: "PROPOSAL-001-teemo-platform.md"
 owner: "Solo dev"
@@ -22,7 +31,6 @@ cached_gate_result:
   failing_criteria: []
   last_gate_check: null
 ---
-
 > **Ported from V-Bounce.** Original: `product_plans.vbounce-archive/backlog/EPIC-003_dashboard_shell/EPIC-003_dashboard_shell.md`. Carried forward during ClearGate migration 2026-04-24.
 
 > **⚠ Post-ADR-026 reshape (2026-04-12).** EPIC-003 is now split into two slices across two sprints, with EPIC-005 Phase A (Slack OAuth install) landing between them. The dev-only manual team-create path is ELIMINATED. Original open questions Q1 / Q2 / Q3 / Q4 / Q5 / Q6 / Q7 / Q8 / Q9 / Q10 are resolved (see §8). See §5 Decomposition for the new Slice A / Slice B story inventory.

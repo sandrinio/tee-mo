@@ -1,6 +1,11 @@
 ---
 epic_id: "EPIC-013"
 status: "Shipped"
+children:
+  - "STORY-013-01-wiki-tables-read-tool"
+  - "STORY-013-02-wiki-ingest-pipeline"
+  - "STORY-013-03-wiki-ingest-cron"
+  - "STORY-013-04-wiki-lint"
 ambiguity: "🟢"
 context_source: "PROPOSAL-001-teemo-platform.md"
 owner: "Solo dev"
@@ -23,7 +28,6 @@ cached_gate_result:
   failing_criteria: []
   last_gate_check: null
 ---
-
 > **Ported from V-Bounce (shipped).** Original: `product_plans.vbounce-archive/archive/epics/EPIC-013_wiki_knowledge_pipeline/EPIC-013_wiki_knowledge_pipeline.md`. Shipped in sprint S-11, carried forward during ClearGate migration 2026-04-24.
 
 # EPIC-013: Wiki Knowledge Pipeline (Karpathy Pattern)

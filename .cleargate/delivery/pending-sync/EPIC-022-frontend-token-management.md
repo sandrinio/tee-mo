@@ -1,6 +1,8 @@
 ---
 epic_id: "EPIC-022"
 status: "Active"
+children:
+  - "STORY-022-01-api-refresh-interceptor"
 ambiguity: "🟢"
 context_source: "PROPOSAL-001-teemo-platform.md"
 owner: "Team Lead"
@@ -22,7 +24,6 @@ cached_gate_result:
   failing_criteria: []
   last_gate_check: null
 ---
-
 > **Ported from V-Bounce.** Original: `product_plans.vbounce-archive/backlog/EPIC-022_frontend_token_management/EPIC-022_frontend_token_management.md`. Carried forward during ClearGate migration 2026-04-24.
 
 # EPIC-022: Frontend Token Management

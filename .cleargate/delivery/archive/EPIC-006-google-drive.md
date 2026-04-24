@@ -1,6 +1,18 @@
 ---
 epic_id: "EPIC-006"
 status: "Shipped"
+children:
+  - "STORY-006-01-drive-service"
+  - "STORY-006-02-drive-oauth"
+  - "STORY-006-03-knowledge-crud"
+  - "STORY-006-04-agent-drive-tool"
+  - "STORY-006-05-frontend-drive"
+  - "STORY-006-06-e2e-verification"
+  - "STORY-006-07-hybrid-extraction"
+  - "STORY-006-08-multimodal-fallback"
+  - "STORY-006-09-delete-workspace"
+  - "STORY-006-10-cached-content"
+  - "STORY-006-11-reindex"
 ambiguity: "🟢"
 context_source: "PROPOSAL-001-teemo-platform.md"
 owner: "Solo dev"
@@ -23,7 +35,6 @@ cached_gate_result:
   failing_criteria: []
   last_gate_check: null
 ---
-
 > **Ported from V-Bounce (shipped).** Original: `product_plans.vbounce-archive/archive/epics/EPIC-006_google_drive/EPIC-006_google_drive.md`. Shipped in sprint S-08 + S-10, carried forward during ClearGate migration 2026-04-24.
 
 # EPIC-006: Google Drive Integration

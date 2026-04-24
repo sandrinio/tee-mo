@@ -1,6 +1,9 @@
 ---
 epic_id: "EPIC-023"
 status: "Shipped"
+children:
+  - "STORY-023-01-skills-list-ui"
+  - "STORY-023-02-remove-landing-page"
 ambiguity: "🟢"
 context_source: "PROPOSAL-001-teemo-platform.md"
 owner: "Team Lead"
@@ -22,7 +25,6 @@ cached_gate_result:
   failing_criteria: []
   last_gate_check: null
 ---
-
 > **Ported from V-Bounce.** Original: `product_plans.vbounce-archive/backlog/EPIC-023_ux_production_readiness/EPIC-023_ux_production_readiness.md`. Carried forward during ClearGate migration 2026-04-24.
 
 # EPIC-023: UX Production Readiness

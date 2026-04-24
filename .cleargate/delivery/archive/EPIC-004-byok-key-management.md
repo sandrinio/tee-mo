@@ -1,6 +1,11 @@
 ---
 epic_id: "EPIC-004"
 status: "Shipped"
+children:
+  - "STORY-004-01-backend-key-routes"
+  - "STORY-004-02-provider-resolvers"
+  - "STORY-004-03-frontend-hooks"
+  - "STORY-004-04-key-section-ui"
 ambiguity: "🟢"
 context_source: "PROPOSAL-001-teemo-platform.md"
 owner: "Solo dev"
@@ -23,7 +28,6 @@ cached_gate_result:
   failing_criteria: []
   last_gate_check: null
 ---
-
 > **Ported from V-Bounce (shipped).** Original: `product_plans.vbounce-archive/archive/epics/EPIC-004_byok_key_management/EPIC-004_byok_key_management.md`. Shipped in sprint S-06, carried forward during ClearGate migration 2026-04-24.
 
 # EPIC-004: BYOK Key Management

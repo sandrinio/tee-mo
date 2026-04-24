@@ -1,6 +1,8 @@
 ---
 epic_id: "EPIC-017"
 status: "Active"
+children:
+  - "STORY-017-09-slack-citation-blocks"
 ambiguity: "🟡"
 context_source: "PROPOSAL-001-teemo-platform.md"
 owner: "Solo dev"
@@ -22,7 +24,6 @@ cached_gate_result:
   failing_criteria: []
   last_gate_check: null
 ---
-
 > **Ported from V-Bounce.** Original: `product_plans.vbounce-archive/backlog/EPIC-017_wiki_karpathy_parity/EPIC-017_wiki_karpathy_parity.md`. Carried forward during ClearGate migration 2026-04-24.
 
 > **Phase A shipped.** Phase A (STORY-017-01 `search_wiki` tool + STORY-017-02 compact system prompt) was delivered via direct commit `89f81d0` outside V-Bounce after S-11 close. Phases B–E (synthesis pages, cascade, ingest prompt tuning, curation + LLM lint) remain. This epic is `Active` with work in flight on Phase F (STORY-017-09 Slack citation blocks) in SPRINT-12.

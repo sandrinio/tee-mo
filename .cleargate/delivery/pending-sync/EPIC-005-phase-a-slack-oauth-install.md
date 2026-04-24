@@ -1,6 +1,14 @@
 ---
 epic_id: "EPIC-005-phase-a"
 status: "Active"
+children:
+  - "STORY-003-05-slack-events-stub"
+  - "STORY-005A-01-slack-bootstrap"
+  - "STORY-005A-02-events-signing-verification"
+  - "STORY-005A-03-install-url-builder"
+  - "STORY-005A-04-oauth-callback-upsert"
+  - "STORY-005A-05-teams-list-endpoint"
+  - "STORY-005A-06-frontend-install-ui"
 ambiguity: "🟢"
 context_source: "PROPOSAL-001-teemo-platform.md"
 owner: "Solo dev"
@@ -22,7 +30,6 @@ cached_gate_result:
   failing_criteria: []
   last_gate_check: null
 ---
-
 > **Ported from V-Bounce.** Original: `product_plans.vbounce-archive/backlog/EPIC-005_slack_integration/EPIC-005-phase-a_slack_oauth_install.md`. Carried forward during ClearGate migration 2026-04-24.
 
 # EPIC-005 Phase A: Slack OAuth Install

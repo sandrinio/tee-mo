@@ -1,6 +1,11 @@
 ---
 epic_id: "EPIC-024"
 status: "Draft"
+children:
+  - "STORY-024-01-database-queue-rpc"
+  - "STORY-024-02-background-worker-locks"
+  - "STORY-024-03-fastapi-thread-wrapper"
+  - "STORY-024-04-fix-legacy-tests"
 ambiguity: "🟢"
 context_source: "PROPOSAL-001-teemo-platform.md"
 owner: "DevOps & Backend Lead"
@@ -22,7 +27,6 @@ cached_gate_result:
   failing_criteria: []
   last_gate_check: null
 ---
-
 > **Ported from V-Bounce.** Original: `product_plans.vbounce-archive/backlog/EPIC-024_concurrency_hardening/EPIC-024_concurrency_hardening.md`. Carried forward during ClearGate migration 2026-04-24.
 
 # EPIC-024: Concurrency Hardening (50-80 User Scale)

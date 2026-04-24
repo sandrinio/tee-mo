@@ -1,14 +1,15 @@
 ---
 story_id: "STORY-024-01"
 parent_epic_ref: "EPIC-024"
-status: "Ready"
+status: "Shipped"
+approved: true
 ambiguity: "🟢"
 context_source: "PROPOSAL-001-teemo-platform.md"
 complexity_label: "L1"
 parallel_eligible: false
 expected_bounce_exposure: "low"
 created_at: "2026-04-10T00:00:00Z"
-updated_at: "2026-04-24T00:00:00Z"
+updated_at: "2026-04-21T00:00:00Z"
 created_at_version: "vbounce-backlog"
 updated_at_version: "cleargate-migration-2026-04-24"
 server_pushed_at_version: null

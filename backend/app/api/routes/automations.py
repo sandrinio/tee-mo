@@ -321,12 +321,21 @@ async def _run_preview_prompt(
     from app.core.encryption import decrypt
     api_key = decrypt(row.data["encrypted_api_key"])
 
-    # 2. Build a minimal tool-free agent
+    # 2. Build a minimal tool-free agent using the same provider wiring as
+    #    the production Slack agent. Passing the API key via `model_settings`
+    #    on .run() does NOT work for Google — GoogleProvider reads the key at
+    #    construction time. Use _build_pydantic_ai_model so BYOK keys reach
+    #    GoogleProvider(api_key=...) / AnthropicProvider / OpenAIProvider.
     from pydantic_ai import Agent  # lazy import — avoid startup overhead
+    from app.agents.agent import (
+        _build_pydantic_ai_model,
+        _ensure_model_imports,
+    )
 
-    model_str = f"{provider}:{model_id}"
+    _ensure_model_imports(provider)
+    model = _build_pydantic_ai_model(model_id, provider, api_key)
     preview = Agent(
-        model=model_str,
+        model=model,
         system_prompt=(
             "You are a preview agent. Respond to the user's prompt as you would "
             "in a scheduled run, without calling any tools."
@@ -337,7 +346,7 @@ async def _run_preview_prompt(
     t0 = time.monotonic()
     try:
         result = await asyncio.wait_for(
-            preview.run(prompt, model_settings={"api_key": api_key}),
+            preview.run(prompt),
             timeout=30.0,
         )
     except asyncio.TimeoutError:
@@ -719,4 +728,6 @@ async def get_automation_history(
         Authenticated user does not own the workspace.
     """
     _assert_workspace_owner(workspace_id, user_id, supabase)
-    return automation_service.get_automation_history(automation_id, supabase=supabase)
+    return automation_service.get_automation_history(
+        workspace_id, automation_id, supabase=supabase
+    )

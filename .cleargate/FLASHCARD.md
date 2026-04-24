@@ -8,6 +8,8 @@ Format: `YYYY-MM-DD · #tags · [marker]? lesson`
 
 ---
 
+2026-04-24 · #llm #prompt · Never gate a tool's prompt section on "entity exists" — the LLM can never create the first entity because the keyword hints are hidden. Register the tool, always inject the section.
+2026-04-24 · #schema #auth · When a fix broadens who can write to a table (e.g. BUG-002: owner-only → any member), re-check every uniqueness / default / scoping invariant downstream; a per-user existence check becomes wrong the moment multiple users share the scope.
 2026-04-24 · #reporting #hook · Orchestrator must write `.cleargate/sprint-runs/.active` with sprint ID at kickoff; otherwise SubagentStop hook drops every row and REPORT.md has no ledger.
 2026-04-24 · #test-harness #fastapi · `with TestClient(app) as client:` deadlocks under pytest-asyncio auto mode — lifespan spawns drive/wiki/automation cron loops; use bare `TestClient(app)` for mock-heavy tests (pattern from `test_auth_routes.py`).
 2026-04-24 · #vitest #test-harness · Button whose label flips on `isPending` — render with `isPending: false`, click, then `rerender` with `isPending: true` to assert spinner; setting it true before first render disables the button.

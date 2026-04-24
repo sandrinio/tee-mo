@@ -129,6 +129,26 @@ Supersede candidates: none.
 
 ---
 
+## Post-ship hotfixes (live-testing window)
+
+Sprint closed at `f80cb45` but the human is still validating in prod. Anything below is drift caught after DoD — recorded here (not as separate BUG- items) until user signs off that testing is complete. Each entry is one commit on `main` past the squash-merge.
+
+| # | Commit | Scope | Surfaced by | Fix |
+|---|---|---|---|---|
+| 1 | `062dce8` | `fix(epic-005)` follow-on to BUG-002 | Live test: `POST /api/slack-teams/{id}/workspaces` → 500 `duplicate key on one_default_per_team`. BUG-002 newly let any member POST, but the "is this the first workspace?" check was still `(user_id, team_id)`-scoped, so a second member's first workspace always claimed `is_default_for_team=True` and collided with the owner's. | Scope the team-default check by `team_id + is_default_for_team=True` only. New workspace picks up the default flag only if no default exists for the team yet. Regression test added as Scenario 4 in `test_workspaces_team_member_access.py` with column-differentiating mock — RED on pre-fix confirmed. |
+| 2 | `301e3c5` | `fix(epic-018)` agent prompt gating | Live test in Slack: asked Tee-Mo to schedule a daily news fetch; agent created a `fetch-rundown-ai-news` skill instead of an automation. Cause: `_AUTOMATIONS_PROMPT_SECTION` was gated on `automations is non-empty`, so workspaces with zero automations never saw the "schedule / every week / remind me" keyword hints. Tools were registered with pydantic-ai unconditionally — the gate hid only the discovery prompt, never prevented tool use. | Drop the `if automations:` gate. Section + hints injected on every workspace. Test 9 in `test_automation_tools.py` flipped: was "omit on empty," now "present on empty." |
+
+**Running totals (live-testing window):**
+- Hotfixes: 2
+- Bug-Fix Tax post-close: +2 (sprint plan §6 had target 1 — BUG-002 only)
+- Both traceable to SPRINT-13 scope: (1) BUG-002 opened a new insert path without updating downstream invariants; (2) EPIC-018 gating heuristic from STORY-018-04 was too conservative for zero-automation workspaces — only surfaces when the user tries to create the *first* one, which no test covered.
+
+**Loop-improvement signals this is sending:**
+- **Live-test the bug-opens-a-new-path case.** BUG-002's test coverage proved the 403 was gone but never tried creating *two* workspaces under the same team. Worth adding to the bug template: "list every write path this fix newly unlocks — test at least one end-to-end in the live environment."
+- **Empty-state probes for keyword-gated prompt sections.** Any prompt section gated on "has ≥1 X" is suspect because the LLM can never create the first X. Should be a flashcard.
+
+---
+
 ## Meta
 
 **Token ledger:** `/Users/ssuladze/Documents/Dev/SlaXadeL/.cleargate/sprint-runs/SPRINT-13/token-ledger.jsonl` — **does not exist.** Sentinel `.cleargate/sprint-runs/.active` was missing for the entire sprint; hook at `.claude/hooks/token-ledger.sh` short-circuited without writing any rows. Sentinel has been written retroactively (2026-04-24 post-sprint) so subsequent agent firings will capture correctly. No way to recover the SPRINT-13 ledger.

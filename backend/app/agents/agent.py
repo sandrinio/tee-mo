@@ -349,6 +349,7 @@ def _build_system_prompt(
     wiki_pages: list[dict] | None = None,
     bot_persona: str | None = None,
     automations: list[dict] | None = None,
+    bound_channels: list[dict] | None = None,
 ) -> str:
     """Assemble the system prompt for the Tee-Mo agent.
 
@@ -559,6 +560,39 @@ def _build_system_prompt(
     # to pick create_skill for recurring-task requests on a workspace with zero
     # automations, which made creating the first automation impossible from Slack.
     prompt += "\n\n## Scheduled Automations\n" + _AUTOMATIONS_PROMPT_SECTION
+
+    # Bound-channels catalog. Without this the LLM hallucinates channel IDs when
+    # the user references a channel by name, then blames the resulting
+    # validate_channels failure on "the bot needs to be invited" — which is not
+    # what binding means in this system. Always rendered (even when empty) so
+    # the agent can tell the user no channels are bound yet.
+    channel_ids = [
+        row["slack_channel_id"]
+        for row in (bound_channels or [])
+        if isinstance(row, dict) and row.get("slack_channel_id")
+    ]
+    if channel_ids:
+        channel_list = "\n".join(f"- `{cid}`" for cid in channel_ids)
+        prompt += (
+            "\n\n## Bound Channels\n"
+            "These are the ONLY Slack channel IDs registered to this workspace. "
+            "When a tool expects ``slack_channel_ids`` (e.g. ``create_automation``), "
+            "you MUST pass IDs from this list — never invent, guess, or reconstruct "
+            "channel IDs from a channel name. If the user references a channel by "
+            "name that isn't represented here, tell them the channel isn't bound "
+            "yet and ask them to bind it from the workspace dashboard's Channels "
+            "section. Do NOT suggest re-inviting the bot — that is unrelated to "
+            "binding.\n\n"
+            f"{channel_list}"
+        )
+    else:
+        prompt += (
+            "\n\n## Bound Channels\n"
+            "No channels are currently bound to this workspace. If the user asks "
+            "to set up an automation or post to a channel, tell them they need to "
+            "bind a channel first from the workspace dashboard's Channels section. "
+            "Never invent a ``slack_channel_id``."
+        )
 
     return prompt
 
@@ -927,8 +961,29 @@ async def build_agent(
     )
     automations: list[dict] = automations_result.data or []
 
+    # --- 7.8. Query bound channels for the ## Bound Channels prompt section ---
+    # Surface the real channel IDs so the agent can't hallucinate them when
+    # picking slack_channel_ids for create_automation.
+    bound_channels_result = (
+        supabase.table("teemo_workspace_channels")
+        .select("slack_channel_id")
+        .eq("workspace_id", workspace_id)
+        .execute()
+    )
+    raw_bound_channels = bound_channels_result.data
+    bound_channels: list[dict] = (
+        raw_bound_channels if isinstance(raw_bound_channels, list) else []
+    )
+
     # --- 8. Build system prompt ---
-    prompt = _build_system_prompt(skills, documents, wiki_pages, bot_persona=bot_persona, automations=automations)
+    prompt = _build_system_prompt(
+        skills,
+        documents,
+        wiki_pages,
+        bot_persona=bot_persona,
+        automations=automations,
+        bound_channels=bound_channels,
+    )
 
     # --- 9. Build skill tool functions ---
     # Tools are defined as closures capturing (workspace_id, supabase) from

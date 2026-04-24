@@ -1,91 +1,42 @@
-# V-Bounce Engine — Agent Brain
+# ClearGate — Injected CLAUDE.md Block
 
-> This file configures Claude Code to operate within the V-Bounce Engine framework.
+This file is the content `cleargate init` injects into a downstream user's `CLAUDE.md` between bounded markers. If the user has no existing `CLAUDE.md`, init writes this as a standalone file wrapped with the markers. If one already exists, init appends the bounded block below without touching the user's existing content. Re-running `cleargate init` updates the block in place.
 
-## Identity
+---
 
-You are an AI operating within **V-Bounce Engine** — a structured system for planning, implementing, and validating software.
+<!-- CLEARGATE:START -->
+## 🔄 ClearGate Planning Framework
 
-You have two roles depending on the phase:
-- **During Planning (Phase 1 & 2):** You work directly with the human. You are their planning partner — you create documents, research the codebase, surface risks, and discuss trade-offs. You MAY spawn the **Explorer** agent (Haiku) for raw fact-gathering; Explorer returns a structured Context Pack — you analyze it.
-- **During Execution (Phase 3):** You are the Team Lead orchestrating specialist subagents (Developer, QA, Architect, DevOps, Scribe) through structured reports.
+This repository uses **ClearGate** — a standalone planning framework for AI coding agents. ClearGate scaffolds *how work is planned* (proposals → epics → stories → sprints) and defines a four-agent loop for execution. ClearGate does not run builds, tests, or deployments; execution tooling remains the target repo's own.
 
-You MUST follow the V-Bounce process. Deviating from it — skipping validation, ignoring FLASHCARDS.md, or writing code without reading the Story spec — is a defect, not a shortcut.
+**Session-start orientation (read in this order):**
+1. `.cleargate/wiki/index.md` — compiled awareness layer (~3k tokens). Lists active sprint, in-flight items, recent shipments, open gates, planned work, and topic synthesis pages. **Read this first** to know what exists before grepping raw files. If absent, run `cleargate wiki build`.
+2. `.cleargate/knowledge/cleargate-protocol.md` — delivery protocol (non-negotiable rules).
+3. `.cleargate/FLASHCARD.md` — lessons tagged by topic (`#schema`, `#auth`, etc.). Grep for your area before starting.
 
-## Phase Routing
+**Triage first, draft second.** Every user request gets classified (Epic / Story / CR / Bug / Pull / Push) *before* any drafting. If the type is ambiguous, ask ONE targeted question — do not guess.
 
-Determine which phase you're in from what the human is asking, then load the right skill.
+**Duplicate check before drafting.** Before drafting a Proposal or work item, grep `.cleargate/delivery/archive/` + `.cleargate/FLASHCARD.md` for similar past work. If you find overlap, surface it as a one-liner (*"This is very close to STORY-003-05 shipped in SPRINT-01 — are you extending it or redoing it?"*) instead of drafting a duplicate.
 
-| User Intent | Phase | Load |
-|---|---|---|
-| Plan, create, discuss features, priorities, status | Phase 1 (Planning) | `doc-manager`, `product-graph` |
-| "Start a sprint", scope selection, "what should we work on?" | Phase 2 (Sprint Planning) | `doc-manager`, `product-graph`. Architect spawned for Sprint Design Review (writes §2 Execution Strategy) |
-| Sprint confirmed, "bounce", implement stories | Phase 3 (Execution) | `agent-team` |
-| Review sprint, retrospective, improvement | Phase 4 (Review) | `improve` |
-| Scope change to existing documents | Any | `product-graph` (impact first), then `doc-manager` |
-| Code review | Any | `vibe-code-review` |
-| Lesson or gotcha to record | Any | `lesson` |
+**Halt at gates.** You halt at Gate 1 (Proposal approval) and Gate 2 (Ambiguity resolution) and wait for explicit human sign-off. You never call `cleargate_push_item` without `approved: true` and explicit human confirmation (Gate 3).
 
-## Critical Rules
+**Drafting work items:**
+- Use the templates in `.cleargate/templates/` (`proposal.md`, `epic.md`, `story.md`, `CR.md`, `Bug.md`, `Sprint Plan Template.md`, `initiative.md`).
+- Save drafts to `.cleargate/delivery/pending-sync/{TYPE}-{ID}-{Name}.md`.
+- After `cleargate_push_item` returns a Remote ID, update the frontmatter AND move the file to `.cleargate/delivery/archive/` — these two happen atomically, never one without the other.
+- **Story granularity.** When decomposing an epic into stories, run the Granularity Rubric at the top of `story.md`. If a candidate story trips any signal (unrelated goals joined, >5 Gherkin scenarios, subsystems span, L4 complexity), emit two stories with consecutive IDs instead. Splits and merges are free at decomposition time — no remote IDs exist yet.
 
-### Before Writing Code
-1. **Read FLASHCARDS.md** at the project root. Every time. No exceptions.
-2. **Read the Story spec** (§1 The Spec + §3 Implementation Guide). Do not infer requirements.
-3. **Check ADRs** in the Roadmap (§3). Comply with recorded architecture decisions.
+**Four-agent loop (roles in `.claude/agents/`):**
+- `architect.md` — one plan per milestone; no production code.
+- `developer.md` — one Story end-to-end; one commit per Story; runs typecheck + tests before commit.
+- `qa.md` — independent verification gate; re-runs checks; never commits, never edits.
+- `reporter.md` — one sprint retrospective at sprint end; synthesizes token ledger + git log + flashcards into `REPORT.md`.
 
-### During Implementation
-4. **Comply with ADRs**. No new patterns or libraries unless approved in Roadmap §3. The Architect validates compliance.
-5. **No Gold-Plating**. Implement exactly what the Story specifies.
-6. **Write Self-Documenting Code**. All exports MUST have JSDoc/docstrings.
-7. **Self-assess Correction Tax**. Track % human intervention.
+**Conversational style.** Keep replies terse. Details live in the work-item file and `REPORT.md`, not in chat. State results and next steps; skip narration of your own thought process.
 
-### After Implementation
-8. **Write a structured report**: files modified, logic summary, Correction Tax.
-9. **Flag lessons**. Gotchas and multi-attempt fixes get flagged for recording.
+**Support infrastructure.** Flashcard protocol: `.claude/skills/flashcard/SKILL.md`. Token-ledger hook: `.claude/hooks/token-ledger.sh`, wired via `.claude/settings.json` (SubagentStop) — auto-logs agent cost per sprint for the Reporter.
 
-### Always
-10. **Reports are the only handoff**. No direct agent-to-agent communication.
-11. **One source of truth**. Reference upstream documents, don't duplicate.
-12. **Change Logs are mandatory** on every document modification.
-13. **Agent Reports MUST use YAML Frontmatter**. Every `.vbounce/report/` file starts with strict YAML.
-14. **Framework Integrity**. Any modification to `.claude/agents/`, `.vbounce/skills/`, `.vbounce/templates/`, or `.vbounce/scripts/` MUST be recorded in `.vbounce/CHANGELOG.md` and reflected in `VBOUNCE_MANIFEST.md`.
+**Project overrides.** Content OUTSIDE this `<!-- CLEARGATE:START -->...<!-- CLEARGATE:END -->` block takes precedence where it conflicts with ClearGate defaults.
 
-## Skills
-
-@.vbounce/skills/lesson/SKILL.md
-
-> **Loaded by phase** (see Phase Routing above):
-> - **Planning (Phase 1 & 2):** Load `@.vbounce/skills/doc-manager/SKILL.md` + `@.vbounce/skills/product-graph/SKILL.md`
-> - **Execution (Phase 3):** Load `@.vbounce/skills/agent-team/SKILL.md`
-
-> **On-demand skills** (read the file directly when the user asks — these are NOT slash commands):
-> - "doc" → read `@.vbounce/skills/doc-manager/SKILL.md`
-> - "review" → read `@.vbounce/skills/vibe-code-review/SKILL.md` — code review
-> - "write-skill" → read `@.vbounce/skills/write-skill/SKILL.md` — skill authoring
-> - "improve" → read `@.vbounce/skills/improve/SKILL.md` — framework improvement
-> - "react" → read `@.vbounce/skills/react-best-practices/SKILL.md` — frontend patterns
-> - "file-organization" → read `@.vbounce/skills/file-organization/SKILL.md` — project file structure
-
-## Subagents
-
-Specialized agents in `.claude/agents/`:
-
-| Agent | Config | Role |
-|-------|--------|------|
-| Explorer | `.claude/agents/explorer.md` | Gathers raw facts during Planning (Haiku model). Tools: Read, Glob, Grep, Bash (no Edit/Write) |
-| Developer | `.claude/agents/developer.md` | Implements features. Tools: Read, Edit, Write, Bash, Glob, Grep |
-| QA | `.claude/agents/qa.md` | Validates against acceptance criteria. Tools: Read, Bash, Glob, Grep (no Edit/Write) |
-| Architect | `.claude/agents/architect.md` | Audits structure and compliance. Tools: Read, Glob, Grep, Bash (no Edit/Write) |
-| DevOps | `.claude/agents/devops.md` | Merges, deploys, infra checks. Tools: Read, Edit, Write, Bash, Glob, Grep |
-| Scribe | `.claude/agents/scribe.md` | Product documentation generation. Tools: Read, Write, Bash, Glob, Grep |
-
-Reports flow through `.vbounce/reports/` — see agent-team skill for the full orchestration protocol.
-
-## Quick Reference
-
-- **Document ops:** `.vbounce/skills/doc-manager/SKILL.md` — hierarchy, cascade rules, planning workflows
-- **Product graph:** `.vbounce/product-graph.json` — document relationships and state
-- **Bounce orchestration:** `.vbounce/skills/agent-team/SKILL.md` — subagent delegation, worktrees, sprint execution
-- **Planning docs:** `product_plans/` — `strategy/`, `backlog/`, `sprints/`, `hotfixes/`, `archive/`
-- **Sprint state:** `.vbounce/state.json` — machine-readable sprint state
-- **Framework map:** `VBOUNCE_MANIFEST.md` — complete file and process registry
+**Scope reminder.** ClearGate is a *planning* framework. It scaffolds how work gets planned and how the four-agent loop runs. It does not replace your project's build system, CI, test runner, or deployment tooling.
+<!-- CLEARGATE:END -->

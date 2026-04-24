@@ -1,0 +1,42 @@
+{
+  "sprintId": "S-01",
+  "generatedAt": "2026-04-10",
+  "impactLevels": {
+    "P0": {
+      "level": "P0",
+      "label": "Critical",
+      "description": "Blocks agent work or causes incorrect output"
+    },
+    "P1": {
+      "level": "P1",
+      "label": "High",
+      "description": "Causes rework — bounces, wasted tokens, repeated manual steps"
+    },
+    "P2": {
+      "level": "P2",
+      "label": "Medium",
+      "description": "Friction that slows agents but does not block"
+    },
+    "P3": {
+      "level": "P3",
+      "label": "Low",
+      "description": "Polish — nice-to-have, batch with other improvements"
+    }
+  },
+  "summary": {
+    "totalProposals": 0,
+    "byImpact": {
+      "P0": 0,
+      "P1": 0,
+      "P2": 0,
+      "P3": 0
+    },
+    "bySource": {
+      "retro": 0,
+      "lesson": 0,
+      "effectiveness_check": 0
+    },
+    "byType": {}
+  },
+  "proposals": []
+}

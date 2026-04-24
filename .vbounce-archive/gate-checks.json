@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "detected_stack": {
+    "language": "javascript",
+    "framework": "unknown",
+    "test_runner": "unknown",
+    "build_cmd": "",
+    "lint_cmd": "",
+    "test_cmd": ""
+  },
+  "qa_checks": [
+    { "id": "tests_exist", "enabled": true, "description": "Verify test files exist for modified source files" },
+    { "id": "tests_pass", "enabled": true, "description": "Run test suite" },
+    { "id": "build", "enabled": true, "description": "Run build command" },
+    { "id": "lint", "enabled": true, "description": "Run linter" },
+    { "id": "no_debug_output", "enabled": true, "description": "No debug statements in modified files" },
+    { "id": "no_todo_fixme", "enabled": true, "description": "No TODO/FIXME in modified files" },
+    { "id": "exports_have_docs", "enabled": true, "description": "Exported symbols have doc comments" }
+  ],
+  "arch_checks": [
+    { "id": "tests_exist", "enabled": true, "description": "Verify test files exist for modified source files" },
+    { "id": "tests_pass", "enabled": true, "description": "Run test suite" },
+    { "id": "build", "enabled": true, "description": "Run build command" },
+    { "id": "lint", "enabled": true, "description": "Run linter" },
+    { "id": "no_debug_output", "enabled": true, "description": "No debug statements in modified files" },
+    { "id": "no_todo_fixme", "enabled": true, "description": "No TODO/FIXME in modified files" },
+    { "id": "exports_have_docs", "enabled": true, "description": "Exported symbols have doc comments" },
+    { "id": "no_new_deps", "enabled": true, "description": "No new dependencies without review" },
+    { "id": "file_size", "enabled": true, "max_lines": 500, "description": "Source files under 500 lines" }
+  ],
+  "custom_checks": []
+}

@@ -83,15 +83,28 @@ class FakeAsyncWebClient:
 
     Captures ``chat_postMessage`` calls in ``self.post_message_calls`` so tests
     can assert on the arguments passed (channel, text, thread_ts).
+
+    ``users_info_response`` controls what ``users_info(user=...)`` returns.
+    Set to a dict to return that response, to an Exception subclass instance
+    to raise it, or leave as None to return a minimal default (no tz).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, users_info_response: Any = None) -> None:
         self.post_message_calls: list[dict[str, Any]] = []
+        self.users_info_response = users_info_response
 
     async def chat_postMessage(self, **kwargs: Any) -> dict[str, Any]:
         """Capture kwargs and return a fake Slack API success response."""
         self.post_message_calls.append(kwargs)
         return {"ok": True, "ts": "9999.0001"}
+
+    async def users_info(self, **kwargs: Any) -> dict[str, Any]:
+        """Return the configured users_info response or raise if it is an Exception."""
+        if isinstance(self.users_info_response, Exception):
+            raise self.users_info_response
+        if self.users_info_response is not None:
+            return self.users_info_response
+        return {"ok": True, "user": {"real_name": "Test User", "profile": {}}}
 
 
 # ---------------------------------------------------------------------------
@@ -816,4 +829,179 @@ async def test_mention_prefix_stripped_before_agent(monkeypatch: pytest.MonkeyPa
     )
     assert "what is X?" in str(user_prompt_arg), (
         f"Stripped prompt should contain 'what is X?'. Got: {user_prompt_arg!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Integration test A (STORY-018-08):
+# slack_dispatch extracts tz from users_info and wires to build_agent
+#
+# Given a Slack user whose profile tz is "America/Los_Angeles"
+# When handle_slack_event receives an app_mention
+# Then build_agent is called with sender_tz="America/Los_Angeles"
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_app_mention_sender_tz_extracted_from_users_info(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Integration A (STORY-018-08) — users_info tz threaded to build_agent.
+
+    Verifies that slack_dispatch plucks ``user["tz"]`` from the users_info
+    response and forwards it as ``sender_tz`` kwarg to build_agent, so the
+    agent's deps and system prompt reflect the sender's local timezone.
+    """
+    if _IMPORT_ERROR is not None:
+        raise _IMPORT_ERROR
+
+    channel_row = {"slack_channel_id": "C001", "workspace_id": "ws-W1"}
+    workspace_row = {
+        "id": "ws-W1",
+        "ai_provider": "openai",
+        "ai_model": "gpt-4o",
+        "encrypted_api_key": "enc-key-blob",
+    }
+    team_row = {
+        "slack_team_id": "T001",
+        "owner_user_id": "user-001",
+        "encrypted_slack_bot_token": "enc-bot-token",
+        "slack_bot_user_id": "UBOT",
+    }
+    mock_supabase = _make_supabase_mock(
+        channel_binding=channel_row,
+        workspace_row=workspace_row,
+        team_row=team_row,
+    )
+
+    import app.core.db as db_module
+    monkeypatch.setattr(db_module, "get_supabase", lambda: mock_supabase)
+
+    import app.core.encryption as enc_module
+    monkeypatch.setattr(enc_module, "decrypt", lambda _: "xoxb-fake-bot-token")
+
+    # Capture build_agent kwargs so we can assert sender_tz
+    mock_agent_result = MagicMock()
+    mock_agent_result.output = "Scheduled!"
+    mock_agent = MagicMock()
+    mock_agent.run = AsyncMock(return_value=mock_agent_result)
+
+    from app.agents.agent import AgentDeps
+    mock_deps = AgentDeps(workspace_id="ws-W1", supabase=mock_supabase, user_id="user-001")
+    build_agent_mock = AsyncMock(return_value=(mock_agent, mock_deps))
+
+    import app.agents.agent as agent_module
+    monkeypatch.setattr(agent_module, "build_agent", build_agent_mock)
+
+    import app.services.slack_thread as thread_module
+    monkeypatch.setattr(thread_module, "fetch_thread_history", AsyncMock(return_value=[]))
+
+    # FakeAsyncWebClient returns "America/Los_Angeles" in users_info
+    fake_slack_client = FakeAsyncWebClient(
+        users_info_response={
+            "ok": True,
+            "user": {
+                "tz": "America/Los_Angeles",
+                "real_name": "Alice",
+                "profile": {"display_name": "Alice"},
+            },
+        }
+    )
+    import app.services.slack_dispatch as dispatch_module  # type: ignore[import]
+    monkeypatch.setattr(dispatch_module, "AsyncWebClient", lambda token: fake_slack_client)
+
+    payload = _app_mention_payload(channel="C001", text="<@UBOT> schedule 9am standup", ts="1234.5678")
+    await handle_slack_event(payload)
+
+    # build_agent must have been called with sender_tz="America/Los_Angeles"
+    assert build_agent_mock.called, "build_agent should have been called"
+    call_kwargs = build_agent_mock.call_args.kwargs
+    assert call_kwargs.get("sender_tz") == "America/Los_Angeles", (
+        f"Expected sender_tz='America/Los_Angeles' passed to build_agent. "
+        f"Got call kwargs: {call_kwargs!r}. "
+        "STORY-018-08 R1: slack_dispatch must thread users_info tz to build_agent."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Integration test B (STORY-018-08):
+# users_info failure → sender_tz="UTC" + build_agent called with default
+#
+# Given users_info raises for the sender
+# When handle_slack_event receives an app_mention
+# Then build_agent is called with sender_tz="UTC" (no 500, no retry storm)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_app_mention_users_info_failure_falls_back_to_utc(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Integration B (STORY-018-08) — users_info failure → sender_tz defaults to UTC.
+
+    Verifies that when users_info raises (network error, Slack API error, etc.)
+    slack_dispatch does NOT propagate the exception. Instead it falls back to
+    sender_tz="UTC" and calls build_agent normally so the agent can still reply
+    with the softer "timezone unknown, defaulting to UTC" prompt variant.
+    """
+    if _IMPORT_ERROR is not None:
+        raise _IMPORT_ERROR
+
+    channel_row = {"slack_channel_id": "C001", "workspace_id": "ws-W1"}
+    workspace_row = {
+        "id": "ws-W1",
+        "ai_provider": "openai",
+        "ai_model": "gpt-4o",
+        "encrypted_api_key": "enc-key-blob",
+    }
+    team_row = {
+        "slack_team_id": "T001",
+        "owner_user_id": "user-001",
+        "encrypted_slack_bot_token": "enc-bot-token",
+        "slack_bot_user_id": "UBOT",
+    }
+    mock_supabase = _make_supabase_mock(
+        channel_binding=channel_row,
+        workspace_row=workspace_row,
+        team_row=team_row,
+    )
+
+    import app.core.db as db_module
+    monkeypatch.setattr(db_module, "get_supabase", lambda: mock_supabase)
+
+    import app.core.encryption as enc_module
+    monkeypatch.setattr(enc_module, "decrypt", lambda _: "xoxb-fake-bot-token")
+
+    mock_agent_result = MagicMock()
+    mock_agent_result.output = "Scheduled in UTC!"
+    mock_agent = MagicMock()
+    mock_agent.run = AsyncMock(return_value=mock_agent_result)
+
+    from app.agents.agent import AgentDeps
+    mock_deps = AgentDeps(workspace_id="ws-W1", supabase=mock_supabase, user_id="user-001")
+    build_agent_mock = AsyncMock(return_value=(mock_agent, mock_deps))
+
+    import app.agents.agent as agent_module
+    monkeypatch.setattr(agent_module, "build_agent", build_agent_mock)
+
+    import app.services.slack_thread as thread_module
+    monkeypatch.setattr(thread_module, "fetch_thread_history", AsyncMock(return_value=[]))
+
+    # FakeAsyncWebClient raises on users_info
+    fake_slack_client = FakeAsyncWebClient(
+        users_info_response=Exception("Slack API error")
+    )
+    import app.services.slack_dispatch as dispatch_module  # type: ignore[import]
+    monkeypatch.setattr(dispatch_module, "AsyncWebClient", lambda token: fake_slack_client)
+
+    payload = _app_mention_payload(channel="C001", text="<@UBOT> schedule 9am standup", ts="1234.5678")
+    await handle_slack_event(payload)
+
+    # build_agent must have been called with sender_tz="UTC" (fallback)
+    assert build_agent_mock.called, "build_agent should have been called even when users_info fails"
+    call_kwargs = build_agent_mock.call_args.kwargs
+    assert call_kwargs.get("sender_tz") == "UTC", (
+        f"Expected sender_tz='UTC' (fallback) when users_info raises. "
+        f"Got call kwargs: {call_kwargs!r}. "
+        "STORY-018-08 R7: users_info failure must not propagate; sender_tz must default to UTC."
     )

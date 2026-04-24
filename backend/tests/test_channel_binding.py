@@ -1,5 +1,10 @@
 """Hermetic unit tests for STORY-007-04 — Channel Binding REST Endpoints.
 
+Uses bare ``TestClient(app, raise_server_exceptions=False)`` (no context manager)
+to avoid triggering the FastAPI lifespan — which spawns drive/wiki/automation cron
+tasks that deadlock the event loop under pytest-asyncio auto mode (flashcard
+2026-04-24 #test-harness #fastapi).
+
 Covers all 6 Gherkin scenarios from §2.1:
   1. Bind a channel to a workspace — POST 201 with binding record
   2. Bind channel already bound — POST 409 with detail "channel_already_bound"
@@ -112,9 +117,12 @@ def app_client():
         return FAKE_USER_ID
 
     app.dependency_overrides[get_current_user_id] = _fake_user_id
-    with TestClient(app) as client:
+    # Use TestClient WITHOUT context manager — avoids triggering lifespan cron tasks.
+    client = TestClient(app, raise_server_exceptions=False)
+    try:
         yield client
-    app.dependency_overrides.clear()
+    finally:
+        app.dependency_overrides.clear()
 
 
 @pytest.fixture
@@ -130,9 +138,12 @@ def app_client_other_user():
         return FAKE_OTHER_USER_ID
 
     app.dependency_overrides[get_current_user_id] = _fake_other_user_id
-    with TestClient(app) as client:
+    # Use TestClient WITHOUT context manager — avoids triggering lifespan cron tasks.
+    client = TestClient(app, raise_server_exceptions=False)
+    try:
         yield client
-    app.dependency_overrides.clear()
+    finally:
+        app.dependency_overrides.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -184,6 +195,15 @@ def test_bind_channel_to_workspace_returns_201(app_client: TestClient) -> None:
 
             tbl.select.side_effect = _select
             tbl.insert.side_effect = _insert
+
+        elif name == "teemo_slack_teams":
+            # Seed a real slack-teams row so any decrypt path gets a string, not a MagicMock.
+            # Prevents TypeError: argument should be a bytes-like object or ASCII string.
+            sel = MagicMock()
+            sel.eq.return_value = sel
+            sel.limit.return_value = sel
+            sel.execute.return_value = _make_execute_result([FAKE_SLACK_TEAM_ROW])
+            tbl.select.return_value = sel
 
         return tbl
 
@@ -243,6 +263,14 @@ def test_bind_channel_already_bound_returns_409(app_client: TestClient) -> None:
 
             tbl.select.side_effect = _select
 
+        elif name == "teemo_slack_teams":
+            # Seed a real row so any decrypt path gets a string, not a MagicMock.
+            sel = MagicMock()
+            sel.eq.return_value = sel
+            sel.limit.return_value = sel
+            sel.execute.return_value = _make_execute_result([FAKE_SLACK_TEAM_ROW])
+            tbl.select.return_value = sel
+
         return tbl
 
     mock_sb.table.side_effect = _table
@@ -289,6 +317,14 @@ def test_bind_channel_to_workspace_not_owned_returns_403(
             sel.eq.return_value = sel
             sel.limit.return_value = sel
             sel.execute.return_value = _make_execute_result([])
+            tbl.select.return_value = sel
+
+        elif name == "teemo_slack_teams":
+            # Seed a real row so any decrypt path gets a string, not a MagicMock.
+            sel = MagicMock()
+            sel.eq.return_value = sel
+            sel.limit.return_value = sel
+            sel.execute.return_value = _make_execute_result([FAKE_SLACK_TEAM_ROW])
             tbl.select.return_value = sel
 
         return tbl
@@ -346,6 +382,14 @@ def test_unbind_channel_returns_204(app_client: TestClient) -> None:
 
             tbl.delete.side_effect = lambda: _delete()
 
+        elif name == "teemo_slack_teams":
+            # Seed a real row so any decrypt path gets a string, not a MagicMock.
+            sel = MagicMock()
+            sel.eq.return_value = sel
+            sel.limit.return_value = sel
+            sel.execute.return_value = _make_execute_result([FAKE_SLACK_TEAM_ROW])
+            tbl.select.return_value = sel
+
         return tbl
 
     mock_sb.table.side_effect = _table
@@ -401,6 +445,15 @@ def test_list_channel_bindings_returns_200_with_list(app_client: TestClient) -> 
             sel.execute.return_value = _make_execute_result([FAKE_BINDING_ROW, binding_two])
             tbl.select.return_value = sel
 
+        elif name == "teemo_slack_teams":
+            # Seed a real row so the enrichment path gets a string token, not a MagicMock.
+            # Prevents TypeError: argument should be a bytes-like object or ASCII string.
+            sel = MagicMock()
+            sel.eq.return_value = sel
+            sel.limit.return_value = sel
+            sel.execute.return_value = _make_execute_result([FAKE_SLACK_TEAM_ROW])
+            tbl.select.return_value = sel
+
         return tbl
 
     mock_sb.table.side_effect = _table
@@ -449,6 +502,14 @@ def test_list_channel_bindings_empty_returns_200_empty_list(app_client: TestClie
             sel.eq.return_value = sel
             sel.order.return_value = sel
             sel.execute.return_value = _make_execute_result([])
+            tbl.select.return_value = sel
+
+        elif name == "teemo_slack_teams":
+            # Seed a real row so any decrypt path gets a string, not a MagicMock.
+            sel = MagicMock()
+            sel.eq.return_value = sel
+            sel.limit.return_value = sel
+            sel.execute.return_value = _make_execute_result([FAKE_SLACK_TEAM_ROW])
             tbl.select.return_value = sel
 
         return tbl

@@ -69,6 +69,30 @@ const TIMEZONES = [
   'Pacific/Auckland',
 ];
 
+/**
+ * Browser-detected IANA timezone, computed once at module load.
+ * Falls back to 'UTC' if Intl is unavailable or returns an empty string
+ * (e.g. older runtimes, jsdom without locale data).
+ * (STORY-018-07 R1)
+ */
+const DETECTED_TZ = (() => {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return tz || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+})();
+
+/**
+ * Dropdown options for the Timezone selector.
+ * Detected zone is prepended so it's visible + pre-selected without duplicating when already in TIMEZONES.
+ * (STORY-018-07 R2)
+ */
+const tzOptions = TIMEZONES.includes(DETECTED_TZ)
+  ? TIMEZONES
+  : [DETECTED_TZ, ...TIMEZONES];
+
 /** Labels for day-of-week checkboxes. Index 0 = Sunday … 6 = Saturday (matches backend). */
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -388,13 +412,9 @@ export function AddAutomationModal({
   const [description, setDescription] = useState('');
   const [prompt, setPrompt] = useState('');
   const [schedule, setSchedule] = useState<ScheduleState>(DEFAULT_SCHEDULE);
-  const [timezone, setTimezone] = useState(
-    () =>
-      Intl.DateTimeFormat().resolvedOptions().timeZone in
-      Object.fromEntries(TIMEZONES.map((tz) => [tz, true]))
-        ? Intl.DateTimeFormat().resolvedOptions().timeZone
-        : 'UTC',
-  );
+  // STORY-018-07 R3: initialize to DETECTED_TZ — no runtime gate needed because
+  // tzOptions always contains the detected value (see module-scope tzOptions).
+  const [timezone, setTimezone] = useState(DETECTED_TZ);
   const [selectedChannelIds, setSelectedChannelIds] = useState<string[]>([]);
 
   // ---------------------------------------------------------------------------
@@ -419,7 +439,7 @@ export function AddAutomationModal({
     setDescription('');
     setPrompt('');
     setSchedule(DEFAULT_SCHEDULE);
-    setTimezone('UTC');
+    setTimezone(DETECTED_TZ); // STORY-018-07 R3: reset to detected zone, not hard-coded UTC
     setSelectedChannelIds([]);
     setErrors({});
     setServerError(null);
@@ -675,7 +695,7 @@ export function AddAutomationModal({
                   onChange={(e) => setTimezone(e.target.value)}
                   className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
                 >
-                  {TIMEZONES.map((tz) => (
+                  {tzOptions.map((tz) => (
                     <option key={tz} value={tz}>
                       {tz}
                     </option>

@@ -103,6 +103,8 @@ Feature: Clean Test Suite
 - In `test_channel_binding.py`: Add an `elif name == "teemo_slack_teams":` block inside the `_table` mock function and provide `FAKE_SLACK_TEAM_ROW` as its return data.
 - In `test_agent_factory.py`: Apply the exact same `teemo_slack_teams` patching fix to prevent `TypeError: argument should be a bytes-like object or ASCII string, not 'MagicMock'`.
 
+> **Post-impl note (2026-04-25, SPRINT-14 QA):** R3 and R4 were **defensive mock hardening** at the time of implementation — not pass-flipping fixes. The `TypeError: MagicMock` failure cited at port time (2026-04-10) is no longer observable at baseline `sprint/S-14@582ec84`; `test_agent_factory.py`'s 2 current failures are `AssertionError` on tool-count and prompt-section checks (unrelated to the slack-teams mock). `test_channel_binding.py`'s 2 current failures are HTTP 500 + 404 with different root causes (BUG-002 `teemo_slack_team_members` check + AES decrypt on `FAKE_SLACK_TEAM_ROW`'s ciphertext shape). **R3/R4 still land** because they align the mock's table-dispatch shape with the actual app code's usage of `teemo_slack_teams`, preventing future TypeError regressions if the test surface grows — but they do not flip any presently-failing test. **R1 + R2 are the real pass-flippers** (57→59 targeted, 464→466 full suite). Lesson flash-carded.
+
 ---
 
 ## 4. Quality Gates

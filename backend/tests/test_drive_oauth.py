@@ -495,15 +495,16 @@ class TestInitiateDriveConnect:
             f"Expected Google OAuth URL, got: {location}"
         )
 
-    def test_initiate_drive_connect_url_contains_drive_file_scope(
+    def test_initiate_drive_connect_url_contains_drive_readonly_scope(
         self,
         test_client: TestClient,
         override_current_user: str,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Redirect URL must contain 'drive.file' in the scope parameter.
+        """Redirect URL must contain 'drive.readonly' in the scope parameter.
 
-        RED: Fails with 404.
+        Flashcard 2026-04-13 #drive: backend uses drive.readonly (not drive.file)
+        for refresh-token flows — drive.file cannot refresh-token-read Picker files.
         """
         mock_sb = _make_supabase_mock()
         monkeypatch.setattr("app.core.db.get_supabase", lambda: mock_sb)
@@ -512,8 +513,8 @@ class TestInitiateDriveConnect:
 
         assert response.status_code == 307
         location = response.headers["location"]
-        assert "drive.file" in location, (
-            f"Expected 'drive.file' in scope, got location: {location}"
+        assert "drive.readonly" in location, (
+            f"Expected 'drive.readonly' in scope, got location: {location}"
         )
 
     def test_initiate_drive_connect_url_contains_access_type_offline(

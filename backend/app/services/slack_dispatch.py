@@ -333,6 +333,7 @@ async def _handle_app_mention(event: dict, *, _dispatch_start: float | None = No
     #     to a human-readable name. Fallback to "there" for greeting safety.
     sender_user_id: str = event.get("user", "")
     sender_name = "there"  # fallback — never expose raw user IDs
+    sender_tz = "UTC"  # R1/R7 (STORY-018-08): profile tz, default UTC on failure
     if sender_user_id:
         try:
             user_info = await client.users_info(user=sender_user_id)
@@ -341,8 +342,11 @@ async def _handle_app_mention(event: dict, *, _dispatch_start: float | None = No
             dn = (profile.get("display_name") or "").strip()
             rn = (user_data.get("real_name") or "").strip()
             sender_name = dn or rn or "there"
+            # R1: extract IANA tz from Slack profile. Strip whitespace; fallback to "UTC".
+            sender_tz = (user_data.get("tz") or "").strip() or "UTC"
         except Exception as e:
             logger.warning("Failed to resolve display name for %s: %s", sender_user_id, e)
+            # R7: users_info failure → sender_tz stays "UTC"; softer prompt variant renders.
 
     user_prompt = f"{sender_name}: {stripped_text}"
 
@@ -354,6 +358,7 @@ async def _handle_app_mention(event: dict, *, _dispatch_start: float | None = No
             workspace_id=workspace_id,
             user_id=owner_user_id,
             supabase=supabase,
+            sender_tz=sender_tz,
         )
         _agent_build_ms = round((_time.monotonic() - _agent_build_start) * 1000)
 
@@ -559,6 +564,7 @@ async def _handle_dm(event: dict, *, _dispatch_start: float | None = None) -> No
     # Resolve sender display name — never expose raw user IDs.
     sender_user_id: str = event.get("user", "")
     sender_name = "there"
+    sender_tz = "UTC"  # R1/R7 (STORY-018-08): profile tz, default UTC on failure
     if sender_user_id:
         try:
             user_info = await client.users_info(user=sender_user_id)
@@ -567,8 +573,10 @@ async def _handle_dm(event: dict, *, _dispatch_start: float | None = None) -> No
             dn = (profile.get("display_name") or "").strip()
             rn = (user_data.get("real_name") or "").strip()
             sender_name = dn or rn or "there"
+            # R1: extract IANA tz from Slack profile. Strip whitespace; fallback to "UTC".
+            sender_tz = (user_data.get("tz") or "").strip() or "UTC"
         except Exception:
-            pass
+            pass  # R7: users_info failure → sender_tz stays "UTC"
 
     user_prompt = f"{sender_name}: {text}"
 
@@ -579,6 +587,7 @@ async def _handle_dm(event: dict, *, _dispatch_start: float | None = None) -> No
             workspace_id=workspace_id,
             user_id=owner_user_id,
             supabase=supabase,
+            sender_tz=sender_tz,
         )
         _agent_build_ms = round((_time.monotonic() - _agent_build_start) * 1000)
 

@@ -1,5 +1,10 @@
 """Hermetic unit tests for STORY-008-02 — is_member Enrichment on list_channel_bindings.
 
+Uses bare ``TestClient(app, raise_server_exceptions=False)`` (no context manager)
+to avoid triggering the FastAPI lifespan — which spawns drive/wiki/automation cron
+tasks that deadlock the event loop under pytest-asyncio auto mode (flashcard
+2026-04-24 #test-harness #fastapi).
+
 Covers §2.1 Gherkin scenarios:
 
   Scenario: Backend enriches with is_member
@@ -109,9 +114,12 @@ def app_client():
         return FAKE_USER_ID
 
     app.dependency_overrides[get_current_user_id] = _fake_user_id
-    with TestClient(app) as client:
+    # Use TestClient WITHOUT context manager — avoids triggering lifespan cron tasks.
+    client = TestClient(app, raise_server_exceptions=False)
+    try:
         yield client
-    app.dependency_overrides.clear()
+    finally:
+        app.dependency_overrides.clear()
 
 
 def _make_supabase_mock_for_list_bindings(bindings: list[dict]) -> MagicMock:

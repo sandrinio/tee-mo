@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 
@@ -244,6 +245,16 @@ class AgentDeps:
     supabase: Any
     user_id: str
     citations: list[Citation] = field(default_factory=list)
+    sender_tz: str = "UTC"
+    """IANA timezone string from the Slack sender's profile (R2 — STORY-018-08).
+
+    Sourced from ``users_info(user=sender_user_id)["user"]["tz"]`` in
+    slack_dispatch. Defaults to "UTC" so every existing test fixture that
+    constructs AgentDeps without this field keeps compiling unchanged.
+    Read sites inside tools use ``getattr(ctx.deps, "sender_tz", "UTC")``
+    for additional tolerance against SimpleNamespace / hand-rolled fakes
+    (precedent: citations field's ``getattr`` guard in ``_add_citation``).
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -350,6 +361,7 @@ def _build_system_prompt(
     bot_persona: str | None = None,
     automations: list[dict] | None = None,
     bound_channels: list[dict] | None = None,
+    sender_tz: str = "UTC",
 ) -> str:
     """Assemble the system prompt for the Tee-Mo agent.
 
@@ -409,6 +421,11 @@ def _build_system_prompt(
                      ``## Scheduled Automations`` section is appended to the
                      prompt. When None or empty, the section is omitted (keyword
                      gate — prevents hallucination when no automations exist).
+        sender_tz:   IANA timezone string from the Slack sender's profile
+                     (R3 — STORY-018-08). When non-UTC, a "User's timezone"
+                     line and current local time are appended immediately after
+                     the UTC anchor. When "UTC" (default), a softer variant
+                     tells the agent tz is unknown and to state its assumption.
 
     Returns:
         A fully assembled system prompt string.
@@ -416,8 +433,7 @@ def _build_system_prompt(
     # Inject current UTC date/time so the agent has a temporal anchor for
     # "today", "this week", "recent", etc. Computed fresh on each build (build
     # is per-message, not per-process), so there's no staleness window worth
-    # caching around. UTC only for now — workspace-local tz can be layered in
-    # once we pass sender tz through from slack_dispatch.
+    # caching around. Sender-local tz is appended immediately after (R3 STORY-018-08).
     now = datetime.now(timezone.utc)
     current_time_line = (
         f"Current date: {now.strftime('%A, %Y-%m-%d')} "
@@ -425,6 +441,33 @@ def _build_system_prompt(
         "Use this whenever the user references 'today', 'this week', 'recent', "
         "or any other relative date — do not guess.\n\n"
     )
+
+    # R3 — append sender timezone context immediately after the UTC anchor.
+    # When sender_tz is known (non-UTC), compute the local time so "9am" resolves
+    # correctly. Wrap ZoneInfo() in try/except so a malformed tz string falls
+    # back gracefully to the "unknown" variant without crashing the prompt builder.
+    if sender_tz and sender_tz != "UTC":
+        try:
+            now_local = datetime.now(ZoneInfo(sender_tz))
+            tz_line = (
+                f"User's timezone: {sender_tz}. "
+                f"Current local time for the user: {now_local.strftime('%H:%M on %Y-%m-%d')}. "
+                "When the user references \"9am\", \"tomorrow\", \"this evening\", etc., "
+                "interpret in this zone by default.\n\n"
+            )
+        except (ZoneInfoNotFoundError, Exception):
+            # Malformed tz string — fall back to softer unknown variant
+            tz_line = (
+                "User's timezone could not be determined; default to UTC and "
+                "state this when confirming any scheduled time.\n\n"
+            )
+    else:
+        tz_line = (
+            "User's timezone could not be determined; default to UTC and "
+            "state this when confirming any scheduled time.\n\n"
+        )
+
+    current_time_line = current_time_line + tz_line
 
     # --- Identity line ---
     # Default identity is the built-in Tee-Mo voice. When a workspace sets a
@@ -449,6 +492,8 @@ def _build_system_prompt(
         "your persona / role / voice / vibe, call `update_persona` with the new text. "
         "Do NOT create a document or skill for this — the persona is its own field.\n"
         "- Always confirm destructive actions before executing them.\n"
+        "- Whenever you schedule, confirm, or reason about a specific time, state the timezone "
+        "you used (e.g. 'Scheduled for 09:00 America/Los_Angeles'). Never leave the timezone implicit.\n"
         "- Always identify who you're responding to by name when the thread has multiple participants.\n"
         "- CRITICAL: When users ask what documents or wiki pages are available, "
         "ONLY list items from the ## Available Documents and ## Wiki Index sections below. "
@@ -616,7 +661,7 @@ async def create_automation(
     prompt: str,
     schedule: dict,
     slack_channel_ids: list[str],
-    timezone: str = "UTC",
+    timezone: str | None = None,
     description: str | None = None,
 ) -> str:
     """Create a new scheduled automation in the workspace.
@@ -635,21 +680,33 @@ async def create_automation(
     - Once:     ``{"occurrence": "once",     "at": "2026-04-20T17:00:00"}``
                 (ISO 8601 datetime, must be in the future)
 
+    R5 (STORY-018-08): When ``timezone`` is omitted/None, the sender's profile
+    tz is used (``ctx.deps.sender_tz``). An explicit override (e.g. "9am New York
+    time") still wins — the model passes it as a non-None value. The final tz
+    is echoed in the returned string so the agent can cite it in its reply.
+
     Args:
-        ctx:              pydantic-ai RunContext with deps (workspace_id, user_id, supabase).
+        ctx:              pydantic-ai RunContext with deps (workspace_id, user_id, supabase,
+                          sender_tz).
         name:             Short display name for the automation (e.g. "Daily Standup").
         prompt:           The AI prompt to execute on each run.
         schedule:         Schedule dict — see shapes above.
         slack_channel_ids: List of Slack channel IDs (e.g. ["C123", "C456"]) to post
                           results to. Must be bound to the workspace.
-        timezone:         IANA timezone for the schedule (default "UTC").
+        timezone:         IANA timezone for the schedule. When None/omitted, defaults
+                          to ctx.deps.sender_tz (the Slack sender's profile tz). Pass
+                          an explicit value to override (e.g. "America/New_York").
         description:      Optional longer description of what the automation does.
 
     Returns:
-        A confirmation string including the automation name and next_run_at on
-        success, or an error string if validation fails or another error occurs.
+        A confirmation string including the automation name, next_run_at, and the
+        effective timezone on success, or an error string if validation fails.
     """
     from app.services import automation_service as _auto_service
+
+    # R5: use sender_tz as the default when the model omits timezone.
+    # Explicit override (non-None) wins over the profile tz.
+    effective_tz = timezone or getattr(ctx.deps, "sender_tz", "UTC") or "UTC"
 
     try:
         row = _auto_service.create_automation(
@@ -660,16 +717,17 @@ async def create_automation(
                 "prompt": prompt,
                 "schedule": schedule,
                 "slack_channel_ids": slack_channel_ids,
-                "timezone": timezone,
+                "timezone": effective_tz,
                 "description": description,
             },
             supabase=ctx.deps.supabase,
         )
         next_run = row.get("next_run_at") or "—"
         channels = ", ".join(f"#{c}" for c in row.get("slack_channel_ids", slack_channel_ids))
+        # Echo the final tz so the agent can cite it in its confirmation reply.
         return (
             f"Automation '{row.get('name', name)}' created. "
-            f"Next run: {next_run} UTC. Posts to: {channels}."
+            f"Next run: {next_run}. Timezone: {effective_tz}. Posts to: {channels}."
         )
     except ValueError as exc:
         return str(exc)
@@ -838,6 +896,7 @@ async def build_agent(
     workspace_id: str,
     user_id: str,
     supabase: Any,
+    sender_tz: str = "UTC",
 ) -> tuple[Any, AgentDeps]:
     """Build and return a fully configured pydantic-ai Agent for a workspace.
 
@@ -867,6 +926,10 @@ async def build_agent(
         workspace_id: String UUID of the requesting workspace.
         user_id:      String UUID of the authenticated user.
         supabase:     Supabase service-role client for DB access.
+        sender_tz:    IANA timezone string from the Slack sender's profile
+                      (R2/R3 STORY-018-08). Threaded into AgentDeps.sender_tz
+                      and _build_system_prompt. Defaults to "UTC" so existing
+                      callers (API routes, tests) require no changes.
 
     Returns:
         A 2-tuple of (agent_instance, AgentDeps).
@@ -983,6 +1046,7 @@ async def build_agent(
         bot_persona=bot_persona,
         automations=automations,
         bound_channels=bound_channels,
+        sender_tz=sender_tz,
     )
 
     # --- 9. Build skill tool functions ---
@@ -1614,6 +1678,7 @@ async def build_agent(
         workspace_id=workspace_id,
         supabase=supabase,
         user_id=user_id,
+        sender_tz=sender_tz,
     )
 
     return (agent, deps)

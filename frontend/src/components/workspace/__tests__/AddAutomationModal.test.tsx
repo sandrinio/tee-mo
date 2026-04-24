@@ -384,6 +384,127 @@ describe('AddAutomationModal', () => {
 });
 
 // ---------------------------------------------------------------------------
+// STORY-018-07: Browser timezone default tests
+//
+// DETECTED_TZ is a module-level IIFE evaluated at import time, so we must use
+// vi.resetModules() + dynamic import inside each test to re-run the IIFE with
+// the mocked Intl. The static import above (line ~82) is unaffected — it runs
+// once at file load with the real Intl.
+// ---------------------------------------------------------------------------
+
+describe('AddAutomationModal — browser timezone default (STORY-018-07)', () => {
+  beforeEach(() => {
+    // Reset module registry so dynamic imports re-evaluate DETECTED_TZ.
+    vi.resetModules();
+    // Re-register the hook mock after resetModules clears it.
+    vi.mock('../../../hooks/useAutomations', () => ({
+      useCreateAutomationMutation: () => mockCreateMutation,
+      useTestRunMutation: () => mockTestRunMutation,
+    }));
+    mockCreateMutation.isPending = false;
+    mockCreateMutation.error = null;
+    mockCreateMutation.data = undefined;
+    mockTestRunMutation.isPending = false;
+    mockTestRunMutation.error = null;
+    mockTestRunMutation.data = undefined;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
+  });
+
+  /**
+   * Renders AddAutomationModal (dynamically imported) with minimal required props
+   * and the modal open.
+   */
+  async function renderModalWithTz(
+    tzSpy: () => Partial<Intl.ResolvedDateTimeFormatOptions> | never,
+  ) {
+    vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockImplementation(
+      tzSpy as () => Intl.ResolvedDateTimeFormatOptions,
+    );
+    const { AddAutomationModal } = await import('../AddAutomationModal');
+    render(
+      <QueryClientProvider client={makeClient()}>
+        <AddAutomationModal
+          workspaceId={WORKSPACE_ID}
+          open={true}
+          onClose={vi.fn()}
+          channelBindings={[CHANNEL_A]}
+        />
+      </QueryClientProvider>,
+    );
+  }
+
+  // =========================================================================
+  // Scenario 1: Browser zone is in the curated list (Europe/Berlin)
+  // =========================================================================
+
+  it('pre-selects Europe/Berlin and does not duplicate it when it is in the curated list', async () => {
+    await renderModalWithTz(() => ({
+      timeZone: 'Europe/Berlin',
+      locale: 'en-US',
+      calendar: 'gregory',
+      numberingSystem: 'latn',
+      hour12: false,
+    }));
+
+    const select = screen.getByLabelText(/timezone/i) as HTMLSelectElement;
+    expect(select.value).toBe('Europe/Berlin');
+
+    // Europe/Berlin must appear exactly once (not duplicated).
+    const occurrences = Array.from(select.options).filter((o) => o.value === 'Europe/Berlin');
+    expect(occurrences).toHaveLength(1);
+  });
+
+  // =========================================================================
+  // Scenario 2: Browser zone NOT in the curated list (America/Phoenix)
+  // =========================================================================
+
+  it('prepends America/Phoenix and pre-selects it when it is not in the curated list', async () => {
+    await renderModalWithTz(() => ({
+      timeZone: 'America/Phoenix',
+      locale: 'en-US',
+      calendar: 'gregory',
+      numberingSystem: 'latn',
+      hour12: false,
+    }));
+
+    const select = screen.getByLabelText(/timezone/i) as HTMLSelectElement;
+
+    // Pre-selected.
+    expect(select.value).toBe('America/Phoenix');
+
+    // Present as a selectable option.
+    const occurrences = Array.from(select.options).filter((o) => o.value === 'America/Phoenix');
+    expect(occurrences).toHaveLength(1);
+
+    // Prepended — first option.
+    expect(select.options[0].value).toBe('America/Phoenix');
+  });
+
+  // =========================================================================
+  // Scenario 3: Detection throws → UTC fallback, no render exception
+  // =========================================================================
+
+  it('falls back to UTC and does not throw when resolvedOptions() throws', async () => {
+    expect(() =>
+      renderModalWithTz(() => {
+        throw new Error('Intl not available');
+      }),
+    ).not.toThrow();
+
+    // Wait for the async renderModalWithTz to settle.
+    await vi.waitFor(() => {
+      const select = screen.queryByLabelText(/timezone/i) as HTMLSelectElement | null;
+      expect(select).not.toBeNull();
+      expect(select!.value).toBe('UTC');
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Scenario 7: DryRunModal auto-fires on open
 // ---------------------------------------------------------------------------
 

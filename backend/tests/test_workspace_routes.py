@@ -1,5 +1,10 @@
 """Hermetic unit tests for STORY-003-B02 — Workspace REST routes.
 
+Uses bare ``TestClient(app, raise_server_exceptions=False)`` (no context manager)
+to avoid triggering the FastAPI lifespan — which spawns drive/wiki/automation cron
+tasks that deadlock the event loop under pytest-asyncio auto mode (flashcard
+2026-04-24 #test-harness #fastapi).
+
 Covers the minimum 2 acceptance criteria from STORY-003-B02 §4.1:
   1. POST /api/slack-teams/{team_id}/workspaces returns 201 for the first workspace
      and auto-sets is_default_for_team=True.
@@ -111,9 +116,12 @@ def app_client():
         return FAKE_USER_ID
 
     app.dependency_overrides[get_current_user_id] = _fake_user_id
-    with TestClient(app) as client:
+    # Use TestClient WITHOUT context manager — avoids triggering lifespan cron tasks.
+    client = TestClient(app, raise_server_exceptions=False)
+    try:
         yield client
-    app.dependency_overrides.clear()
+    finally:
+        app.dependency_overrides.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -891,9 +899,10 @@ def test_delete_workspace_unauthenticated_returns_401() -> None:
     """
     from app.main import app
 
-    # No dependency override — real get_current_user_id will raise 401
-    with TestClient(app) as unauthenticated_client:
-        resp = unauthenticated_client.delete(f"/api/workspaces/{FAKE_WORKSPACE_ID}")
+    # No dependency override — real get_current_user_id will raise 401.
+    # Use TestClient WITHOUT context manager — avoids triggering lifespan cron tasks.
+    unauthenticated_client = TestClient(app, raise_server_exceptions=False)
+    resp = unauthenticated_client.delete(f"/api/workspaces/{FAKE_WORKSPACE_ID}")
 
     assert resp.status_code == 401, (
         f"Expected 401 Unauthorized for unauthenticated DELETE, got {resp.status_code}: {resp.text}"

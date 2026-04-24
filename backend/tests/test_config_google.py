@@ -122,8 +122,10 @@ class TestGooglePickerApiKey:
         monkeypatch.setenv("GOOGLE_API_CLIENT_ID", "test-google-client-id-003")
         monkeypatch.setenv("GOOGLE_API_SECRET", "test-google-secret-003")
         monkeypatch.setenv("GOOGLE_OAUTH_REDIRECT_URI", "https://example.com/auth/google/callback")
-        # Explicitly remove picker key if it happens to be in env
-        monkeypatch.delenv("GOOGLE_PICKER_API_KEY", raising=False)
+        # Explicitly override to empty string so that live .env bleed cannot pollute this test.
+        # pydantic-settings resolves os.environ BEFORE the .env file, so setting the env var
+        # to "" wins over any GOOGLE_PICKER_API_KEY value on disk (env var priority > .env file).
+        monkeypatch.setenv("GOOGLE_PICKER_API_KEY", "")
 
         from app.core.config import Settings
         settings = Settings()  # type: ignore[call-arg]

@@ -1,5 +1,10 @@
 """RED PHASE tests for STORY-018-02 — Automations REST Endpoints.
 
+Uses bare ``TestClient(app, raise_server_exceptions=False)`` (no context manager)
+to avoid triggering the FastAPI lifespan — which spawns drive/wiki/automation cron
+tasks that deadlock the event loop under pytest-asyncio auto mode (flashcard
+2026-04-24 #test-harness #fastapi).
+
 Covers all 14 Gherkin scenarios from STORY-018-02 §2.1 using FastAPI
 TestClient with mocked Supabase (``_make_supabase_mock`` pattern from
 ``test_automation_service.py``) and dependency overrides for auth.
@@ -247,10 +252,12 @@ def app_client_owner(monkeypatch):
     app.dependency_overrides[get_current_user_id] = _fake_owner_id
     app.dependency_overrides[get_supabase] = lambda: mock_sb
 
-    with TestClient(app, raise_server_exceptions=False) as client:
+    # Use TestClient WITHOUT context manager — avoids triggering lifespan cron tasks.
+    client = TestClient(app, raise_server_exceptions=False)
+    try:
         yield client, mock_sb
-
-    app.dependency_overrides.clear()
+    finally:
+        app.dependency_overrides.clear()
 
 
 @pytest.fixture
@@ -268,10 +275,12 @@ def app_client_non_owner(monkeypatch):
     app.dependency_overrides[get_current_user_id] = _fake_other_id
     app.dependency_overrides[get_supabase] = lambda: mock_sb
 
-    with TestClient(app, raise_server_exceptions=False) as client:
+    # Use TestClient WITHOUT context manager — avoids triggering lifespan cron tasks.
+    client = TestClient(app, raise_server_exceptions=False)
+    try:
         yield client, mock_sb
-
-    app.dependency_overrides.clear()
+    finally:
+        app.dependency_overrides.clear()
 
 
 # ---------------------------------------------------------------------------

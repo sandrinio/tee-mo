@@ -604,3 +604,228 @@ class TestSystemPromptAutomationsAlwaysPresent:
             "create_automation tool must be documented in the system prompt so the LLM "
             "routes recurring-task requests to it instead of create_skill."
         )
+
+
+# ---------------------------------------------------------------------------
+# STORY-018-08 Unit Tests (R2, R3, R4, R5)
+# ---------------------------------------------------------------------------
+
+
+class TestAgentDepsSenderTzDefault:
+    """Unit A (STORY-018-08 R2): AgentDeps.sender_tz has default "UTC".
+
+    Constructing AgentDeps without the sender_tz kwarg must work without error
+    and the field value must be "UTC".
+    """
+
+    def test_agent_deps_sender_tz_default_is_utc(self) -> None:
+        """AgentDeps must expose sender_tz with a default of 'UTC'.
+
+        Verifies R2: existing test fixtures that construct AgentDeps without
+        sender_tz keep compiling — the default must be present.
+        """
+        from app.agents.agent import AgentDeps  # type: ignore[import]
+
+        deps = AgentDeps(
+            workspace_id=FAKE_WORKSPACE_ID,
+            user_id=FAKE_USER_ID,
+            supabase=MagicMock(),
+        )
+
+        assert hasattr(deps, "sender_tz"), (
+            "AgentDeps must have a sender_tz field (STORY-018-08 R2)."
+        )
+        assert deps.sender_tz == "UTC", (
+            f"AgentDeps.sender_tz default must be 'UTC'. Got: {deps.sender_tz!r}. "
+            "STORY-018-08 R2: default preserves backward compat."
+        )
+
+
+class TestBuildSystemPromptIncludesUserTzLine:
+    """Unit B (STORY-018-08 R3): _build_system_prompt includes user-tz line when set.
+
+    Calling _build_system_prompt with sender_tz="America/Los_Angeles" must
+    produce a prompt containing the user's timezone string and a local-time
+    line, plus the standing rule about stating the timezone in replies (R4).
+    """
+
+    def test_system_prompt_includes_user_tz_when_sender_tz_known(self) -> None:
+        """_build_system_prompt must include a 'User's timezone' line when sender_tz is non-UTC."""
+        from app.agents.agent import _build_system_prompt  # type: ignore[import]
+
+        prompt = _build_system_prompt(skills=[], sender_tz="America/Los_Angeles")
+
+        assert "User's timezone: America/Los_Angeles" in prompt, (
+            f"Expected 'User's timezone: America/Los_Angeles' in prompt. "
+            f"Got prompt slice (first 800 chars): {prompt[:800]!r}. "
+            "STORY-018-08 R3: known tz must produce per-user tz line."
+        )
+        assert "Current local time for the user:" in prompt, (
+            f"Expected 'Current local time for the user:' in prompt when sender_tz is set. "
+            f"Got prompt slice: {prompt[:800]!r}."
+        )
+
+    def test_system_prompt_includes_standing_timezone_rule(self) -> None:
+        """_build_system_prompt must include the standing 'state the timezone' rule (R4).
+
+        The rule applies on every run regardless of sender_tz — it goes in the
+        Rules block, not in the tz-conditional section.
+        """
+        from app.agents.agent import _build_system_prompt  # type: ignore[import]
+
+        prompt = _build_system_prompt(skills=[])
+
+        assert "state the timezone" in prompt.lower() or "timezone you used" in prompt.lower(), (
+            f"Expected the standing timezone-citation rule in prompt. "
+            f"Got prompt Rules section: {prompt[:1000]!r}. "
+            "STORY-018-08 R4: 'state the timezone you used' must appear in every prompt."
+        )
+
+    def test_system_prompt_softer_variant_when_sender_tz_utc(self) -> None:
+        """_build_system_prompt must emit the softer 'unknown tz' variant when sender_tz='UTC'."""
+        from app.agents.agent import _build_system_prompt  # type: ignore[import]
+
+        prompt = _build_system_prompt(skills=[], sender_tz="UTC")
+
+        assert "timezone could not be determined" in prompt, (
+            f"Expected softer 'timezone could not be determined' variant when sender_tz='UTC'. "
+            f"Got prompt slice: {prompt[:800]!r}. "
+            "STORY-018-08 R3: UTC fallback must use softer wording."
+        )
+
+
+class TestCreateAutomationUsesSenderTz:
+    """Unit C (STORY-018-08 R5): create_automation uses sender_tz when caller omits timezone.
+
+    When the agent calls create_automation without passing timezone,
+    the tool must use ctx.deps.sender_tz as the effective timezone.
+    """
+
+    @pytest.mark.asyncio
+    async def test_create_automation_uses_sender_tz_when_timezone_omitted(self) -> None:
+        """create_automation must use ctx.deps.sender_tz when timezone kwarg is absent.
+
+        Verifies R5: the row written to the service has the sender's profile tz,
+        not the hardcoded "UTC" default.
+        """
+        import app.agents.agent as agent_module  # type: ignore[import]
+
+        create_automation_fn = getattr(agent_module, "create_automation")
+
+        captured_payloads: list[dict] = []
+
+        def _fake_create(workspace_id: str, owner_user_id: str, payload: dict, supabase: Any) -> dict:
+            captured_payloads.append(payload)
+            return {
+                "id": FAKE_AUTOMATION_ID,
+                "name": FAKE_AUTOMATION_NAME,
+                "next_run_at": FAKE_NEXT_RUN_AT,
+                "slack_channel_ids": [FAKE_CHANNEL_ID],
+                "timezone": payload.get("timezone"),
+            }
+
+        with patch(
+            "app.services.automation_service.create_automation",
+            side_effect=_fake_create,
+        ):
+            # Construct context with sender_tz set to a non-UTC zone
+            from app.agents.agent import AgentDeps  # type: ignore[import]
+            deps = AgentDeps(
+                workspace_id=FAKE_WORKSPACE_ID,
+                user_id=FAKE_USER_ID,
+                supabase=MagicMock(),
+                sender_tz="America/Los_Angeles",
+            )
+            ctx = MagicMock()
+            ctx.deps = deps
+
+            # Call without passing timezone — tool must fall back to deps.sender_tz
+            result = await create_automation_fn(
+                ctx,
+                name=FAKE_AUTOMATION_NAME,
+                prompt="Daily standup",
+                schedule=FAKE_SCHEDULE_DAILY,
+                slack_channel_ids=[FAKE_CHANNEL_ID],
+            )
+
+        assert captured_payloads, "automation_service.create_automation must have been called"
+        effective_tz = captured_payloads[0].get("timezone")
+        assert effective_tz == "America/Los_Angeles", (
+            f"Expected timezone='America/Los_Angeles' in service payload (from deps.sender_tz). "
+            f"Got: {effective_tz!r}. "
+            "STORY-018-08 R5: create_automation must use sender_tz when caller omits timezone."
+        )
+
+        # The tool result string must echo the final tz so the agent can cite it.
+        assert isinstance(result, str)
+        assert "America/Los_Angeles" in result, (
+            f"Expected tz echoed in tool result string for agent citation. Got: {result!r}."
+        )
+
+
+class TestCreateAutomationHonorsExplicitOverride:
+    """Unit D (STORY-018-08 R5): create_automation honors an explicit timezone override.
+
+    When the agent passes timezone="America/New_York" explicitly, that value
+    must win over ctx.deps.sender_tz="America/Los_Angeles".
+    """
+
+    @pytest.mark.asyncio
+    async def test_create_automation_explicit_timezone_overrides_sender_tz(self) -> None:
+        """Explicit timezone parameter must override ctx.deps.sender_tz.
+
+        Verifies R5: the model can always override the profile default by
+        passing an explicit IANA string (e.g. "9am New York time").
+        """
+        import app.agents.agent as agent_module  # type: ignore[import]
+
+        create_automation_fn = getattr(agent_module, "create_automation")
+
+        captured_payloads: list[dict] = []
+
+        def _fake_create(workspace_id: str, owner_user_id: str, payload: dict, supabase: Any) -> dict:
+            captured_payloads.append(payload)
+            return {
+                "id": FAKE_AUTOMATION_ID,
+                "name": FAKE_AUTOMATION_NAME,
+                "next_run_at": FAKE_NEXT_RUN_AT,
+                "slack_channel_ids": [FAKE_CHANNEL_ID],
+                "timezone": payload.get("timezone"),
+            }
+
+        with patch(
+            "app.services.automation_service.create_automation",
+            side_effect=_fake_create,
+        ):
+            from app.agents.agent import AgentDeps  # type: ignore[import]
+            deps = AgentDeps(
+                workspace_id=FAKE_WORKSPACE_ID,
+                user_id=FAKE_USER_ID,
+                supabase=MagicMock(),
+                sender_tz="America/Los_Angeles",
+            )
+            ctx = MagicMock()
+            ctx.deps = deps
+
+            # Explicit override — must win over sender_tz
+            result = await create_automation_fn(
+                ctx,
+                name=FAKE_AUTOMATION_NAME,
+                prompt="5pm New York standup",
+                schedule=FAKE_SCHEDULE_DAILY,
+                slack_channel_ids=[FAKE_CHANNEL_ID],
+                timezone="America/New_York",
+            )
+
+        assert captured_payloads, "automation_service.create_automation must have been called"
+        effective_tz = captured_payloads[0].get("timezone")
+        assert effective_tz == "America/New_York", (
+            f"Expected explicit override timezone='America/New_York' in service payload. "
+            f"Got: {effective_tz!r}. "
+            "STORY-018-08 R5: explicit timezone must override ctx.deps.sender_tz."
+        )
+
+        assert isinstance(result, str)
+        assert "America/New_York" in result, (
+            f"Expected override tz echoed in tool result string. Got: {result!r}."
+        )

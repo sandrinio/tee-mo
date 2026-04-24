@@ -43,22 +43,64 @@ WORKSPACE_ID = "ws-test-0001"
 USER_ID = "user-test-0001"
 DECRYPTED_KEY = "plaintext-test-api-key-001"
 
+# Minimal teemo_slack_teams row — seeded so any decrypt call on the encrypted
+# bot-token field gets a real string instead of a MagicMock, preventing:
+#   TypeError: argument should be a bytes-like object or ASCII string, not 'MagicMock'
+FAKE_SLACK_TEAM_ROW_AF: dict = {
+    "slack_team_id": "T_AGENT_FACTORY_001",
+    "owner_user_id": USER_ID,
+    "encrypted_slack_bot_token": "encrypted-agent-factory-bot-token",
+}
+
+
+def _make_execute_result_af(data: list) -> MagicMock:
+    """Return a MagicMock whose .data holds the given list (agent-factory local helper)."""
+    r = MagicMock()
+    r.data = data
+    return r
+
 
 def _make_supabase_mock(workspace_row: dict | None) -> MagicMock:
-    """Build a Supabase client mock that returns `workspace_row` for the
-    teemo_workspaces maybe_single() call. If None is passed the query returns
-    empty (workspace not found)."""
+    """Build a Supabase client mock that dispatches table queries by name.
+
+    - teemo_workspaces  → returns workspace_row via maybe_single().execute()
+    - teemo_slack_teams → returns FAKE_SLACK_TEAM_ROW_AF via select().eq().limit().execute()
+    - all other tables  → return a generic chain (data defaults to workspace_row dict)
+
+    Seeding teemo_slack_teams prevents the TypeError that arises when
+    encryption.decrypt receives a MagicMock instead of a bytes-like string.
+    """
     mock_result = MagicMock()
     mock_result.data = workspace_row
 
-    chain = MagicMock()
-    chain.maybe_single.return_value = chain
-    chain.execute.return_value = mock_result
-    chain.eq.return_value = chain
-    chain.select.return_value = chain
+    # Workspace chain (maybe_single path used by build_agent step 1)
+    ws_chain = MagicMock()
+    ws_chain.maybe_single.return_value = ws_chain
+    ws_chain.execute.return_value = mock_result
+    ws_chain.eq.return_value = ws_chain
+    ws_chain.select.return_value = ws_chain
+
+    # Slack-teams chain (seeded row — prevents MagicMock decrypt TypeError)
+    st_chain = MagicMock()
+    st_chain.eq.return_value = st_chain
+    st_chain.limit.return_value = st_chain
+    st_chain.execute.return_value = _make_execute_result_af([FAKE_SLACK_TEAM_ROW_AF])
+    st_chain.select.return_value = st_chain
 
     supabase = MagicMock()
-    supabase.table.return_value = chain
+
+    def _dispatch(table_name: str) -> MagicMock:
+        """Route supabase.table() calls to the appropriate mock chain."""
+        if table_name == "teemo_workspaces":
+            return ws_chain
+        if table_name == "teemo_slack_teams":
+            return st_chain
+        # Generic fallback: return the workspace chain — it handles the
+        # .select().eq().execute() and .execute() patterns gracefully
+        # (data = workspace_row; isinstance check guards against non-list).
+        return ws_chain
+
+    supabase.table.side_effect = _dispatch
     return supabase
 
 
@@ -524,10 +566,19 @@ def _make_supabase_mock_with_documents(
 
     supabase = MagicMock()
 
+    # Slack-teams chain (seeded row — prevents MagicMock decrypt TypeError)
+    st_chain_doc = MagicMock()
+    st_chain_doc.eq.return_value = st_chain_doc
+    st_chain_doc.limit.return_value = st_chain_doc
+    st_chain_doc.execute.return_value = _make_execute_result_af([FAKE_SLACK_TEAM_ROW_AF])
+    st_chain_doc.select.return_value = st_chain_doc
+
     def _table_router(table_name: str) -> MagicMock:
         """Route supabase.table() calls to the correct chain by table name."""
         if table_name == "teemo_documents":
             return docs_chain
+        if table_name == "teemo_slack_teams":
+            return st_chain_doc
         return workspace_chain
 
     supabase.table.side_effect = _table_router
@@ -705,6 +756,13 @@ def _make_doc_tool_supabase(
     # Track call sequence to route multiple teemo_documents calls correctly.
     _docs_call_count = [0]
 
+    # Slack-teams chain (seeded row — prevents MagicMock decrypt TypeError)
+    st_chain_dt = MagicMock()
+    st_chain_dt.eq.return_value = st_chain_dt
+    st_chain_dt.limit.return_value = st_chain_dt
+    st_chain_dt.execute.return_value = _make_execute_result_af([FAKE_SLACK_TEAM_ROW_AF])
+    st_chain_dt.select.return_value = st_chain_dt
+
     def _table_router(table_name: str) -> MagicMock:
         """Return appropriate chain based on table name and call order."""
         if table_name == "teemo_workspaces":
@@ -714,6 +772,8 @@ def _make_doc_tool_supabase(
             if _docs_call_count[0] == 1:
                 return docs_build_chain  # catalog fetch during build_agent
             return doc_read_chain  # content fetch during read_document call
+        if table_name == "teemo_slack_teams":
+            return st_chain_dt
         return MagicMock()
 
     supabase.table.side_effect = _table_router

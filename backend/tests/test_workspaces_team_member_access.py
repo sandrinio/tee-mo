@@ -419,3 +419,123 @@ def test_owner_get_workspaces_still_returns_200_with_own_workspaces() -> None:
     assert body[0]["user_id"] == USER_A_ID, (
         f"Expected workspace owned by user A ({USER_A_ID}), got user_id={body[0].get('user_id')}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Scenario 4 — Member POST does NOT collide with owner's default workspace
+# ---------------------------------------------------------------------------
+
+
+def test_member_post_workspace_does_not_claim_team_default_when_one_exists() -> None:
+    """Regression: second member's workspace must not set is_default_for_team=True.
+
+    Follow-on to BUG-002: once any member can POST, the "is this the first
+    workspace?" check in create_workspace had been scoped by (user_id, team_id),
+    so a new member's first workspace always carried is_default_for_team=True.
+    The DB constraint ``one_default_per_team`` then rejected the insert with
+    duplicate-key on slack_team_id, surfacing as HTTP 500.
+
+    The fix scopes the check by team_id only: if any workspace for the team
+    already has is_default_for_team=True, the new workspace is inserted with
+    is_default_for_team=False.
+
+    Given user B is a member of a team where user A already owns the default workspace,
+    When user B calls POST /api/slack-teams/{team_id}/workspaces {"name": "B-ws"},
+    Then the insert payload has is_default_for_team=False and the response is 201.
+    """
+    from app.main import app
+    from app.api.deps import get_current_user_id
+
+    async def _fake_user_b() -> str:
+        return USER_B_ID
+
+    app.dependency_overrides[get_current_user_id] = _fake_user_b
+    client = TestClient(app, raise_server_exceptions=False)
+
+    captured_payload: dict[str, Any] = {}
+    mock_sb = MagicMock()
+
+    def _table(name: str) -> MagicMock:
+        tbl = MagicMock()
+        if name == "teemo_slack_teams":
+            sel = MagicMock()
+            sel.eq.return_value = sel
+            sel.limit.return_value = sel
+            sel.execute.return_value = _make_execute_result([])
+            tbl.select.return_value = sel
+        elif name == "teemo_slack_team_members":
+            sel = MagicMock()
+            sel.eq.return_value = sel
+            sel.limit.return_value = sel
+            sel.execute.return_value = _make_execute_result(
+                [{"slack_team_id": FAKE_TEAM_ID}]
+            )
+            tbl.select.return_value = sel
+        elif name == "teemo_workspaces":
+            # The select chain builds up .eq() filters and the final .execute() returns
+            # different rows based on which column was filtered:
+            #   - Pre-fix code filters by user_id=USER_B_ID → returns [] (B has no
+            #     workspaces) → is_first=True → insert tries is_default=True → collision.
+            #   - Post-fix code filters by is_default_for_team=True → returns [A's row]
+            #     → is_first=False → insert uses is_default=False → succeeds.
+            def _make_select() -> MagicMock:
+                sel = MagicMock()
+                filters: dict[str, Any] = {}
+
+                def _eq(col: str, value: Any) -> MagicMock:
+                    filters[col] = value
+                    return sel
+
+                def _execute() -> MagicMock:
+                    if filters.get("user_id") == USER_B_ID:
+                        return _make_execute_result([])  # B owns nothing yet
+                    if filters.get("is_default_for_team") is True:
+                        return _make_execute_result([{"id": WORKSPACE_A_ROW["id"]}])
+                    return _make_execute_result([])
+
+                sel.eq.side_effect = _eq
+                sel.limit.return_value = sel
+                sel.order.return_value = sel
+                sel.execute.side_effect = _execute
+                return sel
+
+            tbl.select.side_effect = lambda *a, **kw: _make_select()
+
+            def _insert(payload: dict) -> MagicMock:
+                captured_payload.update(payload)
+                inserted_row = {
+                    **WORKSPACE_B_ROW,
+                    "is_default_for_team": payload.get("is_default_for_team", False),
+                }
+                ins = MagicMock()
+                ins.execute.return_value = _make_execute_result([inserted_row])
+                return ins
+
+            tbl.insert.side_effect = _insert
+        else:
+            sel = MagicMock()
+            sel.eq.return_value = sel
+            sel.limit.return_value = sel
+            sel.execute.return_value = _make_execute_result([])
+            tbl.select.return_value = sel
+        return tbl
+
+    mock_sb.table.side_effect = _table
+
+    try:
+        with patch("app.api.routes.workspaces.get_supabase", return_value=mock_sb):
+            resp = client.post(
+                f"/api/slack-teams/{FAKE_TEAM_ID}/workspaces",
+                json={"name": "B-ws"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 201, (
+        f"Expected 201 for member POST when team default exists, got {resp.status_code}: {resp.text}"
+    )
+    assert captured_payload.get("is_default_for_team") is False, (
+        "Member's new workspace must not claim team-default when one already exists; "
+        f"insert payload was {captured_payload}"
+    )
+    assert resp.json()["is_default_for_team"] is False

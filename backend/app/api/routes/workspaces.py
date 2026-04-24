@@ -177,8 +177,14 @@ async def create_workspace(
 ) -> WorkspaceResponse:
     """Create a new workspace within a Slack team.
 
-    If this is the first workspace for the (user, team) pair, it is
-    automatically set as the default (``is_default_for_team=True``).
+    If no workspace in the team is marked default yet, the new workspace
+    becomes the team default (``is_default_for_team=True``). Otherwise it
+    is created as non-default — the existing team default keeps the flag.
+
+    The check is scoped to the team, not to the (user, team) pair: under
+    BUG-002 any team member can create workspaces, and the
+    ``one_default_per_team`` unique constraint permits only one default
+    row per ``slack_team_id``.
 
     ``created_at`` and ``updated_at`` are intentionally omitted from the
     insert payload — they use ``DEFAULT NOW()`` in the migration and must
@@ -200,16 +206,18 @@ async def create_workspace(
 
     sb = get_supabase()
 
-    # Determine if this is the first workspace for this (user, team) pair.
-    existing = (
+    # Is there already a default workspace for this team? (team-scoped, not user-scoped —
+    # BUG-002 lets any member create workspaces, and the one_default_per_team constraint
+    # allows exactly one default row per slack_team_id.)
+    existing_default = (
         await execute_async(sb.table("teemo_workspaces")
         .select("id")
         .eq("slack_team_id", team_id)
-        .eq("user_id", user_id)
+        .eq("is_default_for_team", True)
         .limit(1)
         )
     )
-    is_first = not existing.data
+    is_first = not existing_default.data
 
     payload: dict[str, Any] = {
         "name": body.name,

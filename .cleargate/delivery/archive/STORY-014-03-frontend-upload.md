@@ -1,7 +1,10 @@
 ---
 story_id: "STORY-014-03-frontend-upload"
 parent_epic_ref: "EPIC-014"
-status: "Draft"
+status: "Shipped"
+approved: true
+shipping_commit: "e36e74c"
+shipping_sprint: "SPRINT-15"
 ambiguity: "🟢"
 context_source: "PROPOSAL-001-teemo-platform.md"
 actor: "Workspace Admin"

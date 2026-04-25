@@ -1,7 +1,10 @@
 ---
 story_id: "STORY-014-01-extraction-service-refactor"
 parent_epic_ref: "EPIC-014"
-status: "Draft"
+status: "Shipped"
+approved: true
+shipping_commit: "bfd82e4"
+shipping_sprint: "SPRINT-15"
 ambiguity: "🟢"
 context_source: "PROPOSAL-001-teemo-platform.md"
 actor: "Backend Developer"

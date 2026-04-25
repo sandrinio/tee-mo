@@ -1,14 +1,21 @@
 ---
 epic_id: "EPIC-014"
-status: "Active"
+status: "Shipped"
 ambiguity: "🟢"
 context_source: "PROPOSAL-001-teemo-platform.md"
 owner: "Solo dev"
 target_date: "2026-04-15"
+shipped_at: "2026-04-25"
+shipping_sprint: "SPRINT-15"
+shipping_commit: "3f87e9a"
+children:
+  - "STORY-014-01-extraction-service-refactor"
+  - "STORY-014-02-upload-endpoint"
+  - "STORY-014-03-frontend-upload"
 created_at: "2026-04-13T00:00:00Z"
-updated_at: "2026-04-24T00:00:00Z"
+updated_at: "2026-04-25T08:00:00Z"
 created_at_version: "vbounce-backlog"
-updated_at_version: "cleargate-migration-2026-04-24"
+updated_at_version: "cleargate-post-S15-close"
 server_pushed_at_version: null
 draft_tokens:
   input: null
@@ -324,3 +331,4 @@ Feature: Local Document Upload
 |------|--------|-----|
 | 2026-04-13 | Epic created. 4 stories identified. Schema migration designed. All questions resolved at planning time. | Claude (doc-manager) |
 | 2026-04-25 | Re-scoped pre-SPRINT-15. Discovered EPIC-015 / migration 010 already shipped the schema + agent integration the V-Bounce-era epic was designed for. Reduced from 4 stories to 3 (extraction refactor + multipart endpoint + frontend UI). Added top-of-file warning, "Dead — already shipped" subsection in §5, refreshed §9 story links. §4.3 migration SQL preserved as dead code for historical context — flagged in §5. | Claude |
+| 2026-04-25 | **Shipped.** All three re-scoped stories landed on SPRINT-15: STORY-014-01 (`bfd82e4`), STORY-014-02 (`1c4ccb1`), STORY-014-03 (`e36e74c`). Squash-merged to main as `3f87e9a`. Status flipped Active → Shipped at sprint close. | Claude |

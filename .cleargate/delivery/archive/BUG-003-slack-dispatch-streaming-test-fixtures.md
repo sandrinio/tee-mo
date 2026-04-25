@@ -1,14 +1,16 @@
 ---
 bug_id: "BUG-003"
 parent_ref: "EPIC-007"
-status: "Draft"
+status: "Shipped"
 severity: "P2-Medium"
 reporter: "@sandrinio"
-approved: false
+approved: true
 created_at: "2026-04-25T00:00:00Z"
 updated_at: "2026-04-25T00:00:00Z"
 created_at_version: "cleargate-pre-S15"
-updated_at_version: "cleargate-pre-S15"
+updated_at_version: "cleargate-post-S15-close"
+shipping_commit: "8205079"
+shipping_sprint: "SPRINT-15"
 server_pushed_at_version: null
 draft_tokens:
   input: null

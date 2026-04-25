@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tee-Mo — Workspace (redesign)</title>
+<link rel="icon" href="../../assets/logo-mark.svg" type="image/svg+xml">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        brand: { 50:'#FFF1F2',100:'#FFE4E6',200:'#FECDD3',500:'#F43F5E',600:'#E11D48',700:'#BE123C' },
+      },
+      fontFamily: {
+        sans: ['Inter','ui-sans-serif','system-ui','sans-serif'],
+        mono: ['"JetBrains Mono"','ui-monospace','monospace'],
+      },
+    },
+  },
+};
+</script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<script src="https://unpkg.com/lucide@latest"></script>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+  html { font-feature-settings: 'cv11','ss01','ss03'; }
+  body { font-family: 'Inter', system-ui, sans-serif; margin: 0; }
+  .font-mono { font-family: 'JetBrains Mono', monospace; }
+  /* Density variants */
+  .density-compact section { margin-bottom: 12px; }
+  .density-compact .p-5 { padding: 14px 18px; }
+  .density-comfortable .p-5 { padding: 22px 22px; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased">
+<div id="root"></div>
+
+<script type="text/babel" src="Primitives.jsx"></script>
+<script type="text/babel" src="AppNav.jsx"></script>
+<script type="text/babel" src="WorkspaceV2Modules.jsx"></script>
+<script type="text/babel" src="WorkspaceV2A.jsx"></script>
+<script type="text/babel" src="WorkspaceV2B.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+
+<script type="text/babel" data-screen-label="Workspace v2">
+const { useState, useEffect } = React;
+
+const SAMPLE_FILES = [
+  { id:'f1', title:'Q1 Budget.xlsx',       icon:'file-spreadsheet', description:'Q1 2026 marketing spend by channel; variance vs plan; CMO review notes.' },
+  { id:'f2', title:'Refund Policy.docx',   icon:'file-text',        description:'Return windows, eligibility, exception cases for digital vs physical.' },
+  { id:'f3', title:'Onboarding Guide.pdf', icon:'file-text',        description:'New hire checklist — IT setup, team intros, first-week deliverables.' },
+];
+const SAMPLE_CHANNELS = [
+  { name: 'general',     bound: true  },
+  { name: 'product',     bound: true  },
+  { name: 'engineering', bound: false },
+  { name: 'design',      bound: false },
+];
+
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "layout": "sidebar",
+  "density": "balanced"
+}/*EDITMODE-END*/;
+
+function App() {
+  const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const { layout, density } = t;
+
+  useEffect(() => { lucide.createIcons(); });
+
+  return (
+    <div className={`density-${density}`}>
+      <AppNav userEmail="alex@acme.com" onLogout={() => {}} />
+
+      {layout === 'sidebar'
+        ? <VariationA files={SAMPLE_FILES} channels={SAMPLE_CHANNELS} />
+        : <VariationB files={SAMPLE_FILES} channels={SAMPLE_CHANNELS} />
+      }
+
+      <TweaksPanel>
+        <TweakSection label="Layout">
+          <TweakRadio
+            label="Navigation"
+            value={layout}
+            onChange={(v) => setTweak('layout', v)}
+            options={[
+              { value: 'sidebar', label: 'Sidebar' },
+              { value: 'tabs',    label: 'Sticky tabs' },
+            ]}
+          />
+        </TweakSection>
+        <TweakSection label="Density">
+          <TweakRadio
+            label="Spacing"
+            value={density}
+            onChange={(v) => setTweak('density', v)}
+            options={[
+              { value: 'comfortable', label: 'Comfy' },
+              { value: 'balanced',    label: 'Balanced' },
+              { value: 'compact',     label: 'Compact' },
+            ]}
+          />
+        </TweakSection>
+      </TweaksPanel>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

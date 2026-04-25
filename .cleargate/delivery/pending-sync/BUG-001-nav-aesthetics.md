@@ -1,14 +1,18 @@
 ---
 bug_id: "BUG-001"
 parent_ref: "EPIC-023"
-status: "Draft"
+status: "Resolved"
 severity: "P3-Low"
 reporter: "@sandrinio"
-approved: false
+approved: true
+approved_at: "2026-04-25T00:00:00Z"
+target_sprint: "S-16"
+resolved_at: "2026-04-25T00:00:00Z"
+resolution: "verified-shipped-no-commit"
 created_at: "2026-04-21T00:00:00Z"
-updated_at: "2026-04-24T00:00:00Z"
+updated_at: "2026-04-25T00:00:00Z"
 created_at_version: "vbounce-hotfix-L1"
-updated_at_version: "cleargate-migration-2026-04-24"
+updated_at_version: "cleargate-s16-kickoff"
 server_pushed_at_version: null
 draft_tokens:
   input: null
@@ -24,6 +28,8 @@ cached_gate_result:
 ---
 
 # BUG-001: Navigation Bar — Glassmorphism Polish
+
+> **Status: RESOLVED 2026-04-25 (SPRINT-16 kickoff pre-flight).** All implementation markers from §"Implementation Notes" already present in `frontend/src/components/layout/AppNav.tsx` on `main` at sprint start: `bg-white/70 backdrop-blur-md` (line 55), logo + Workspaces flex cluster (lines 57-74), `hover:text-brand-600` transition (line 67), `<ul>/<li>` structure (lines 63-72). Closed without commit. Architect confirmed during W01 blueprint pre-flight; OQ-1 resolved (a) at kickoff. Removes one slot from SPRINT-16 scope; freed slot not re-allocated.
 
 > **Provenance.** Ported from V-Bounce `HOTFIX-20260421-NavAesthetics` (L1 Trivial). The V-Bounce hotfix template was closer to a small scoped CR than a bug report; this port preserves the scope but reshapes to ClearGate's Bug template. Parented to EPIC-023 (UX Production Readiness) since that's where visual polish belongs in ClearGate's hierarchy.
 

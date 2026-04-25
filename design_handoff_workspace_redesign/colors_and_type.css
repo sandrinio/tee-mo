@@ -1,0 +1,163 @@
+/*
+ * Tee-Mo Design System — colors & type tokens
+ * Source: frontend/src/app.css + product_plans/strategy/tee_mo_design_guide.md
+ *
+ * Philosophy: Asana-inspired warm minimalism. One coral accent, slate neutrals,
+ * Inter typography. Use semantic tokens (h1, body, code) in designs; use base
+ * tokens (brand-500, text-heading) when assembling your own components.
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  /* ---------- BRAND (coral / rose) ---------- */
+  --color-brand-50:  #FFF1F2;  /* hover bg, selected-row tint */
+  --color-brand-100: #FFE4E6;  /* subtle fills, avatar bg */
+  --color-brand-500: #F43F5E;  /* primary brand — buttons, links, focus rings */
+  --color-brand-600: #E11D48;  /* hover, pressed */
+  --color-brand-700: #BE123C;  /* text on light brand bg */
+
+  /* ---------- NEUTRALS (slate) ---------- */
+  --surface-0:       #FFFFFF;  /* cards, modals, inputs */
+  --surface-50:      #F8FAFC;  /* page bg */
+  --surface-100:     #F1F5F9;  /* hover, muted sections */
+  --border-subtle:   #E2E8F0;  /* dividers, input borders */
+  --border-strong:   #CBD5E1;  /* hover border, card outline */
+  --text-muted:      #64748B;  /* secondary, placeholder, caption */
+  --text-body:       #334155;  /* body copy */
+  --text-heading:    #0F172A;  /* headings, emphasized text */
+
+  /* ---------- SEMANTIC ---------- */
+  --color-success:   #10B981;  /* emerald-500 — key valid, file indexed */
+  --color-success-bg:#ECFDF5;
+  --color-success-fg:#047857;
+  --color-warning:   #F59E0B;  /* amber-500 — rate limit, truncation */
+  --color-warning-bg:#FFFBEB;
+  --color-warning-fg:#B45309;
+  --color-danger:    #E11D48;  /* rose-600 — errors, destructive */
+  --color-danger-bg: #FFF1F2;
+  --color-danger-fg: #BE123C;
+  --color-info:      #0EA5E9;  /* sky-500 — info banners */
+  --color-info-bg:   #F0F9FF;
+  --color-info-fg:   #0369A1;
+
+  /* ---------- TYPE ---------- */
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+  --font-feature-settings: 'cv11', 'ss01', 'ss03';
+
+  /* Scale (design guide §3.2) */
+  --text-display:   36px / 40px var(--font-sans);  /* 600 */
+  --text-page:      24px / 32px var(--font-sans);  /* 600 */
+  --text-section:   18px / 28px var(--font-sans);  /* 600 */
+  --text-subtitle:  16px / 24px var(--font-sans);  /* 500 */
+  --text-body-size: 14px / 20px var(--font-sans);  /* 400 */
+  --text-caption:   12px / 16px var(--font-sans);  /* 400 */
+
+  /* ---------- SPACING (4px grid) ---------- */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* ---------- RADIUS ---------- */
+  --radius-sm:   6px;   /* inputs, small buttons */
+  --radius-md:   8px;   /* cards, modals, large buttons */
+  --radius-lg:  12px;   /* sheets, major containers */
+  --radius-full: 9999px;/* pills, avatars */
+
+  /* ---------- SHADOW (subtle, 4 tiers) ---------- */
+  --shadow-flat:     none;
+  --shadow-subtle:   0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-elevated: 0 4px 6px -1px rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.06);
+  --shadow-modal:    0 20px 25px -5px rgb(0 0 0 / 0.10), 0 8px 10px -6px rgb(0 0 0 / 0.08);
+
+  /* ---------- MOTION ---------- */
+  --dur-hover:  150ms;
+  --dur-focus:  100ms;
+  --dur-modal-in:  200ms;
+  --dur-modal-out: 150ms;
+  --dur-toast: 250ms;
+  --easing: cubic-bezier(0.16, 1, 0.3, 1); /* ease-out */
+}
+
+/* ---------- SEMANTIC HTML ---------- */
+
+html {
+  font-family: var(--font-sans);
+  font-feature-settings: var(--font-feature-settings);
+  color: var(--text-heading);
+  background: var(--surface-50);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1 {
+  font-size: 36px;
+  line-height: 40px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--text-heading);
+}
+
+h2 {
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--text-heading);
+}
+
+h3 {
+  font-size: 18px;
+  line-height: 28px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+h4 {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 500;
+  color: var(--text-heading);
+}
+
+p {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 400;
+  color: var(--text-body);
+}
+
+small, .caption {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-muted);
+}
+
+code, pre, .mono {
+  font-family: var(--font-mono);
+  font-size: 14px;
+}
+
+a {
+  color: var(--color-brand-500);
+  text-decoration: none;
+  transition: color var(--dur-hover) var(--easing);
+}
+a:hover { color: var(--color-brand-600); }
+
+/* ---------- FORBIDDEN ---------- */
+/* Do NOT use: font-weight: 700 (bold feels shouty on Inter; max is 600).
+ * Do NOT use: dark mode (out of scope v1).
+ * Do NOT use: decorative color as page bg (only neutrals).
+ * Do NOT use: rounded-2xl or higher on UI chrome.
+ * Do NOT combine shadow + border on the same element — pick one.
+ * Do NOT use animations > 300ms, bounce, spring, or scale > 1.05.
+ */

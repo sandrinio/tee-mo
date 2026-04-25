@@ -951,6 +951,38 @@ export function testRunAutomation(
   );
 }
 
+/**
+ * POST /api/workspaces/{workspaceId}/documents/upload
+ * Uploads a local file to the workspace knowledge base (STORY-014-03).
+ *
+ * Sends a multipart/form-data request with a single `file` field.
+ * The Content-Type header is intentionally NOT set manually — the browser
+ * automatically sets `multipart/form-data` with the correct boundary when
+ * the body is a FormData instance.
+ *
+ * @param workspaceId - UUID of the workspace to upload the file into.
+ * @param file        - File object selected by the user.
+ * @returns The created KnowledgeFile record (same shape as the Drive index rows).
+ * @throws Error with backend `detail` message on non-2xx (e.g. 400, 409, 413).
+ */
+export async function uploadKnowledgeFile(workspaceId: string, file: File): Promise<KnowledgeFile> {
+  const form = new FormData();
+  form.append('file', file);
+  const r = await fetchWithAuth(
+    `${API_URL}/api/workspaces/${encodeURIComponent(workspaceId)}/documents/upload`,
+    {
+      method: 'POST',
+      body: form,
+      // Content-Type is NOT set — browser sets multipart/form-data with boundary automatically.
+    },
+  );
+  if (!r.ok) {
+    const payload = await r.json().catch(() => ({}));
+    throw new Error(payload?.detail ?? `HTTP ${r.status}`);
+  }
+  return r.json() as Promise<KnowledgeFile>;
+}
+
 // ---------------------------------------------------------------------------
 // Skills wrappers (STORY-023-01)
 // ---------------------------------------------------------------------------

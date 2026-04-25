@@ -11,6 +11,7 @@ Endpoints:
   GET    /api/workspaces/{workspace_id}/drive/picker-token     — mint a Picker access token
   POST   /api/workspaces/{workspace_id}/knowledge/reindex      — re-index Drive documents
   POST   /api/workspaces/{workspace_id}/documents              — create an agent/upload document
+  POST   /api/workspaces/{workspace_id}/documents/upload       — multipart local file upload (STORY-014-02)
 
 ADR compliance:
   - ADR-005: Drive content read at index time (real-time, not cached).
@@ -33,14 +34,17 @@ Import notes (FLASHCARDS.md):
 import asyncio
 import inspect
 import logging
+import os
 
 import httpx  # MUST be at module level — tests monkeypatch httpx.AsyncClient (FLASHCARDS.md)
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import JSONResponse
 
 import app.core.db as _db  # module import so monkeypatch works (FLASHCARDS.md)
 import app.services.drive_service as _drive_service  # module import for monkeypatching
 import app.services.document_service as _document_service  # module import for monkeypatching
+import app.services.extraction_service as _extraction_service  # module import for monkeypatching (STORY-014-02)
 import app.services.scan_service as _scan_service  # module import for monkeypatching
 from app.api.deps import get_current_user_id
 from app.core.config import get_settings
@@ -79,6 +83,30 @@ MIME_TO_DOC_TYPE: dict[str, str] = {
     "application/vnd.google-apps.presentation": "google_slides",
     "text/plain": "text",
 }
+
+# ---------------------------------------------------------------------------
+# STORY-014-02: Upload allowlist + MIME → doc_type mapping for local file uploads
+# Google MIME types (vnd.google-apps.*) are intentionally excluded — those flow
+# only through the Drive-index route.
+# ---------------------------------------------------------------------------
+
+UPLOAD_ALLOWED_MIME_TYPES: set[str] = {
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "text/plain",
+    "text/markdown",
+}
+
+UPLOAD_MIME_TO_DOC_TYPE: dict[str, str] = {
+    "application/pdf": "pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+    "text/plain": "text",
+    "text/markdown": "markdown",
+}
+
+_UPLOAD_MAX_BYTES = 10 * 1024 * 1024  # 10MB
 
 # ---------------------------------------------------------------------------
 # R8: Per-workspace asyncio.Lock store for sequential indexing
@@ -626,3 +654,136 @@ async def create_document(
         )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return doc
+
+
+# ---------------------------------------------------------------------------
+# POST /api/workspaces/{workspace_id}/documents/upload — multipart local upload
+# ---------------------------------------------------------------------------
+
+
+@router.post("/api/workspaces/{workspace_id}/documents/upload")
+async def upload_document(
+    workspace_id: str,
+    file: UploadFile = File(...),
+    user_id: str = Depends(get_current_user_id),
+) -> JSONResponse:
+    """Upload a local PDF / DOCX / XLSX / TXT / MD file to the workspace knowledge store.
+
+    Validation order (STORY-014-02 §1.2 R2):
+      1. 401 — auth (handled by Depends(get_current_user_id))
+      2. 404 — workspace ownership (_assert_workspace_owner)
+      3. 400 "BYOK key required" — encrypted_api_key check
+      4. 400 — empty/null filename rejected
+      5. 400 "File size exceeds 10MB limit" — len(bytes_) > 10MB
+      6. 400 "Unsupported file type" — content_type not in UPLOAD_ALLOWED_MIME_TYPES
+      7. Inside _get_workspace_lock(workspace_id):
+         a. 400 "Maximum 100 files per workspace. Remove a file before adding another." — count >= 100
+         b. 409 "File already uploaded" — duplicate (workspace_id, original_filename, source='upload')
+         c. dispatch extractor / UTF-8 decode
+         d. maybe_truncate
+         e. document_service.create_document(source='upload', ...)
+      8. Return 201 with the created row dict.
+
+    Args:
+        workspace_id: Path parameter — target workspace UUID.
+        file: Uploaded file via multipart/form-data.
+        user_id: Injected by get_current_user_id; raises 401 if missing/invalid.
+
+    Returns:
+        JSONResponse with status 201 containing the created teemo_documents row.
+
+    Raises:
+        HTTPException(400): BYOK key missing, empty filename, file too large,
+            unsupported MIME type, or file cap exceeded.
+        HTTPException(401): No valid auth cookie/token.
+        HTTPException(404): Workspace not found or not owned by user.
+        HTTPException(409): File with same original_filename already uploaded.
+    """
+    # Step 2: Assert workspace ownership (raises 404 if not owner)
+    workspace = await _assert_workspace_owner(workspace_id, user_id)
+
+    # Step 3: BYOK key check
+    encrypted_api_key = workspace.get("encrypted_api_key")
+    if not encrypted_api_key:
+        raise HTTPException(status_code=400, detail="BYOK key required")
+
+    # Step 4: Filename check — reject empty/null
+    raw_filename = file.filename or ""
+    fname = os.path.basename(raw_filename)
+    if not fname:
+        raise HTTPException(status_code=400, detail="Filename is required")
+
+    # Step 5: Read bytes once; enforce 10MB size limit
+    bytes_ = await file.read()
+    if len(bytes_) > _UPLOAD_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="File size exceeds 10MB limit")
+
+    # Step 6: MIME type validation against upload allowlist
+    content_type = file.content_type or ""
+    if content_type not in UPLOAD_ALLOWED_MIME_TYPES:
+        raise HTTPException(status_code=400, detail="Unsupported file type")
+
+    # Steps 7a-7e: inside per-workspace lock to prevent TOCTOU races
+    lock = _get_workspace_lock(workspace_id)
+    async with lock:
+        supabase = _db.get_supabase()
+
+        # Step 7a: 100-document cap check — inside lock to prevent TOCTOU
+        count_result = (
+            supabase
+            .table("teemo_documents")
+            .select("*", count="exact")
+            .eq("workspace_id", workspace_id)
+            .execute()
+        )
+        current_count = count_result.count or 0
+        if current_count >= 100:
+            raise HTTPException(
+                status_code=400,
+                detail="Maximum 100 files per workspace. Remove a file before adding another.",
+            )
+
+        # Step 7b: Duplicate check — same filename + source='upload' in this workspace
+        dup_result = (
+            supabase
+            .table("teemo_documents")
+            .select("id")
+            .eq("workspace_id", workspace_id)
+            .eq("original_filename", fname)
+            .eq("source", "upload")
+            .limit(1)
+            .execute()
+        )
+        if dup_result.data:
+            raise HTTPException(status_code=409, detail="File already uploaded")
+
+        # Step 7c: Dispatch to extractor based on MIME type
+        if content_type == "application/pdf":
+            extracted = _extraction_service.extract_pdf(bytes_)
+        elif content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+            extracted = _extraction_service.extract_docx(bytes_)
+        elif content_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+            extracted = _extraction_service.extract_xlsx(bytes_)
+        else:
+            # text/plain or text/markdown — UTF-8 decode with latin-1 fallback
+            try:
+                extracted = bytes_.decode("utf-8")
+            except UnicodeDecodeError:
+                extracted = bytes_.decode("latin-1")
+
+        # Step 7d: Apply truncation
+        extracted = _extraction_service.maybe_truncate(extracted)
+
+        # Step 7e: Map MIME type to doc_type and create document
+        doc_type = UPLOAD_MIME_TO_DOC_TYPE[content_type]
+        row = await _document_service.create_document(
+            supabase=supabase,
+            workspace_id=workspace_id,
+            title=fname,
+            content=extracted,
+            doc_type=doc_type,
+            source="upload",
+            original_filename=fname,
+        )
+
+    return JSONResponse(status_code=201, content=row)

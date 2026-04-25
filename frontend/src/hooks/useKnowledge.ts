@@ -22,7 +22,9 @@ import {
   indexKnowledgeFile,
   removeKnowledgeFile,
   reindexKnowledge,
+  uploadKnowledgeFile,
   type IndexFileRequest,
+  type KnowledgeFile,
 } from '../lib/api';
 
 // -----------------------------------------------------------------------------
@@ -119,6 +121,29 @@ export function useReindexKnowledgeMutation(workspaceId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => reindexKnowledge(workspaceId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['knowledge', workspaceId] });
+    },
+  });
+}
+
+/**
+ * Uploads a local file to the workspace knowledge base (STORY-014-03).
+ *
+ * Sends the file as multipart/form-data to POST /api/workspaces/{id}/documents/upload.
+ * On success, invalidates the same `['knowledge', workspaceId]` query key so the
+ * knowledge list re-renders with the newly uploaded document.
+ *
+ * Show `isPending` state while the mutation is in flight (uploads are usually <5s).
+ * On error, the mutation's `error.message` carries the backend's `detail` string.
+ *
+ * @param workspaceId - UUID of the workspace to upload the file into.
+ * @returns TanStack Mutation object. Call `.mutate(file)` with a File instance.
+ */
+export function useUploadKnowledgeMutation(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation<KnowledgeFile, Error, File>({
+    mutationFn: (file: File) => uploadKnowledgeFile(workspaceId, file),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['knowledge', workspaceId] });
     },

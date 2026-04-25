@@ -81,8 +81,9 @@ except ImportError as exc:
 class FakeAsyncWebClient:
     """Minimal fake matching the AsyncWebClient interface used by slack_dispatch.
 
-    Captures ``chat_postMessage`` calls in ``self.post_message_calls`` so tests
-    can assert on the arguments passed (channel, text, thread_ts).
+    Captures ``chat_postMessage`` calls in ``self.post_message_calls`` and
+    ``chat_update`` calls in ``self.update_calls`` so tests can assert on the
+    arguments passed (channel, text, thread_ts, ts).
 
     ``users_info_response`` controls what ``users_info(user=...)`` returns.
     Set to a dict to return that response, to an Exception subclass instance
@@ -91,12 +92,18 @@ class FakeAsyncWebClient:
 
     def __init__(self, users_info_response: Any = None) -> None:
         self.post_message_calls: list[dict[str, Any]] = []
+        self.update_calls: list[dict[str, Any]] = []
         self.users_info_response = users_info_response
 
     async def chat_postMessage(self, **kwargs: Any) -> dict[str, Any]:
         """Capture kwargs and return a fake Slack API success response."""
         self.post_message_calls.append(kwargs)
         return {"ok": True, "ts": "9999.0001"}
+
+    async def chat_update(self, **kwargs: Any) -> dict[str, Any]:
+        """Capture kwargs and return a fake Slack API success response."""
+        self.update_calls.append(kwargs)
+        return {"ok": True, "ts": "9999.0002"}
 
     async def users_info(self, **kwargs: Any) -> dict[str, Any]:
         """Return the configured users_info response or raise if it is an Exception."""
@@ -105,6 +112,42 @@ class FakeAsyncWebClient:
         if self.users_info_response is not None:
             return self.users_info_response
         return {"ok": True, "user": {"real_name": "Test User", "profile": {}}}
+
+
+# ---------------------------------------------------------------------------
+# Streaming agent mock helpers (BUG-003)
+#
+# Production slack_dispatch calls:
+#   async with agent.run_stream(user_prompt, **run_kwargs) as stream:
+#       async for chunk in stream.stream_text(delta=True): ...
+#
+# These helpers satisfy that interface so end-to-end streaming runs and
+# client.chat_update() calls are captured by FakeAsyncWebClient.update_calls.
+# ---------------------------------------------------------------------------
+
+
+class _FakeStream:
+    """Async generator of string chunks mimicking pydantic-ai StreamedRunResult."""
+
+    def __init__(self, chunks: list[str]) -> None:
+        self._chunks = chunks
+
+    async def stream_text(self, delta: bool = True):  # noqa: ANN201
+        for c in self._chunks:
+            yield c
+
+
+class _FakeStreamCtx:
+    """Async context manager returning a _FakeStream — satisfies ``async with agent.run_stream(...)``."""
+
+    def __init__(self, chunks: list[str]) -> None:
+        self._stream = _FakeStream(chunks)
+
+    async def __aenter__(self) -> _FakeStream:
+        return self._stream
+
+    async def __aexit__(self, *args: Any) -> bool:
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -317,11 +360,10 @@ async def test_app_mention_bound_channel_happy_path(
     monkeypatch.setattr(enc_module, "decrypt", lambda _ciphertext: "xoxb-fake-bot-token")
 
     # --- Mock agent ---
-    mock_agent_result = MagicMock()
-    mock_agent_result.output ="Hello from agent!"
-
     mock_agent = MagicMock()
-    mock_agent.run = AsyncMock(return_value=mock_agent_result)
+    mock_agent.run_stream = MagicMock(
+        return_value=_FakeStreamCtx(["Hello ", "from agent!"])
+    )
 
     from app.agents.agent import AgentDeps
     mock_deps = AgentDeps(workspace_id="ws-W1", supabase=mock_supabase, user_id="UBOT")
@@ -337,7 +379,7 @@ async def test_app_mention_bound_channel_happy_path(
         thread_module, "fetch_thread_history", AsyncMock(return_value=canned_history)
     )
 
-    # --- Mock AsyncWebClient for chat.postMessage ---
+    # --- Mock AsyncWebClient for chat.postMessage and chat_update ---
     fake_slack_client = FakeAsyncWebClient()
 
     import app.services.slack_dispatch as dispatch_module  # type: ignore[import]
@@ -350,15 +392,21 @@ async def test_app_mention_bound_channel_happy_path(
     payload = _app_mention_payload(channel="C001", text="<@UBOT> hello", ts="1234.5678")
     await handle_slack_event(payload)
 
-    # Assert agent was invoked
-    assert mock_agent.run.called, "build_agent's agent.run() should have been called"
+    # Assert agent was invoked via run_stream
+    assert mock_agent.run_stream.called, "build_agent's agent.run_stream() should have been called"
 
-    # Assert chat.postMessage was called with thread_ts
+    # Assert chat.postMessage was called once (initial placeholder) with thread_ts
     assert len(fake_slack_client.post_message_calls) == 1
-    call_kwargs = fake_slack_client.post_message_calls[0]
-    assert call_kwargs.get("channel") == "C001"
-    assert call_kwargs.get("thread_ts") == "1234.5678"
-    assert "Hello from agent!" in call_kwargs.get("text", "")
+    initial_kwargs = fake_slack_client.post_message_calls[0]
+    assert initial_kwargs.get("channel") == "C001"
+    assert initial_kwargs.get("thread_ts") == "1234.5678"
+
+    # Final agent text arrives via chat_update (last call contains full concatenated response)
+    assert len(fake_slack_client.update_calls) >= 1, "chat_update should have been called with final text"
+    final_kwargs = fake_slack_client.update_calls[-1]
+    assert "Hello from agent!" in final_kwargs.get("text", ""), (
+        f"Expected 'Hello from agent!' in final update text, got: {final_kwargs.get('text')!r}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -459,10 +507,10 @@ async def test_dm_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     import app.core.encryption as enc_module
     monkeypatch.setattr(enc_module, "decrypt", lambda _: "xoxb-fake-bot-token")
 
-    mock_agent_result = MagicMock()
-    mock_agent_result.output ="DM reply from agent"
     mock_agent = MagicMock()
-    mock_agent.run = AsyncMock(return_value=mock_agent_result)
+    mock_agent.run_stream = MagicMock(
+        return_value=_FakeStreamCtx(["DM reply from agent"])
+    )
 
     from app.agents.agent import AgentDeps
     mock_deps = AgentDeps(workspace_id="ws-default", supabase=mock_supabase, user_id="UBOT")
@@ -477,14 +525,20 @@ async def test_dm_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     payload = _dm_payload(user="U001", team="T001")
     await handle_slack_event(payload)
 
-    # Agent should have run
-    assert mock_agent.run.called, "agent.run() should have been called for DM"
+    # Agent should have run via run_stream
+    assert mock_agent.run_stream.called, "agent.run_stream() should have been called for DM"
 
-    # Reply should be posted to DM channel
+    # Initial placeholder posted to DM channel via chat_postMessage
     assert len(fake_slack_client.post_message_calls) == 1
-    call_kwargs = fake_slack_client.post_message_calls[0]
-    assert call_kwargs.get("channel") == "D001"
-    assert "DM reply from agent" in call_kwargs.get("text", "")
+    initial_kwargs = fake_slack_client.post_message_calls[0]
+    assert initial_kwargs.get("channel") == "D001"
+
+    # Final agent text arrives via chat_update
+    assert len(fake_slack_client.update_calls) >= 1, "chat_update should have been called with final text"
+    final_kwargs = fake_slack_client.update_calls[-1]
+    assert "DM reply from agent" in final_kwargs.get("text", ""), (
+        f"Expected 'DM reply from agent' in final update text, got: {final_kwargs.get('text')!r}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -784,11 +838,11 @@ async def test_mention_prefix_stripped_before_agent(monkeypatch: pytest.MonkeyPa
     import app.core.encryption as enc_module
     monkeypatch.setattr(enc_module, "decrypt", lambda _: "xoxb-fake-bot-token")
 
-    # Capture the argument passed to agent.run()
-    mock_agent_result = MagicMock()
-    mock_agent_result.output ="stripped prefix response"
+    # Capture the argument passed to agent.run_stream()
     mock_agent = MagicMock()
-    mock_agent.run = AsyncMock(return_value=mock_agent_result)
+    mock_agent.run_stream = MagicMock(
+        return_value=_FakeStreamCtx(["stripped prefix response"])
+    )
 
     from app.agents.agent import AgentDeps
     mock_deps = AgentDeps(workspace_id="ws-W1", supabase=mock_supabase, user_id="UBOT123")
@@ -810,19 +864,16 @@ async def test_mention_prefix_stripped_before_agent(monkeypatch: pytest.MonkeyPa
     payload = _app_mention_payload(channel="C001", text=raw_text, ts="1234.5678")
     await handle_slack_event(payload)
 
-    # agent.run() must have been called
-    assert mock_agent.run.called, "agent.run() should have been called"
+    # agent.run_stream() must have been called
+    assert mock_agent.run_stream.called, "agent.run_stream() should have been called"
 
     # The first positional argument (user prompt) must NOT include the mention prefix
-    call_args = mock_agent.run.call_args
-    # agent.run(user_prompt, ...) — check first positional arg
+    # Production calls: agent.run_stream(user_prompt, **run_kwargs)
+    call_args = mock_agent.run_stream.call_args
     if call_args.args:
         user_prompt_arg = call_args.args[0]
     else:
-        # Might be passed as keyword arg depending on implementation
-        user_prompt_arg = call_args.kwargs.get(
-            "user_prompt", call_args.kwargs.get("message_history", "")
-        )
+        user_prompt_arg = call_args.kwargs.get("user_prompt", "")
 
     assert "<@UBOT123>" not in str(user_prompt_arg), (
         f"Mention prefix must be stripped before passing to agent. Got: {user_prompt_arg!r}"

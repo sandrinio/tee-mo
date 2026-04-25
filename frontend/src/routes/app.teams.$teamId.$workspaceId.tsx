@@ -31,7 +31,7 @@
  *   `useKeyQuery(workspaceId).data.has_key !== true`.
  * 15-file cap (R5): picker button disabled with count badge when files.length >= 15.
  */
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
@@ -40,7 +40,7 @@ import { Card } from '../components/ui/Card';
 import { useWorkspaceQuery, useUpdateWorkspaceMutation } from '../hooks/useWorkspaces';
 import { useKeyQuery } from '../hooks/useKey';
 import { useDriveStatusQuery, useDisconnectDriveMutation } from '../hooks/useDrive';
-import { useKnowledgeQuery, useAddKnowledgeMutation, useRemoveKnowledgeMutation, useReindexKnowledgeMutation } from '../hooks/useKnowledge';
+import { useKnowledgeQuery, useAddKnowledgeMutation, useRemoveKnowledgeMutation, useReindexKnowledgeMutation, useUploadKnowledgeMutation } from '../hooks/useKnowledge';
 import { useSkillsQuery } from '../hooks/useSkills';
 import { getPickerToken, deleteWorkspace, type KnowledgeFile, type DocumentSource, type Skill } from '../lib/api';
 import { SetupStepper } from '../components/workspace/SetupStepper';
@@ -309,9 +309,14 @@ function PickerSection({
   const [indexing, setIndexing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reindexFeedback, setReindexFeedback] = useState<ReindexFeedback | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const addKnowledgeMutation = useAddKnowledgeMutation(workspaceId);
   const reindexMutation = useReindexKnowledgeMutation(workspaceId);
+  const uploadMutation = useUploadKnowledgeMutation(workspaceId);
+
+  /** Ref to the hidden file input for direct-upload. */
+  const uploadInputRef = useRef<HTMLInputElement>(null);
 
   const atCap = fileCount >= MAX_FILES;
   const buttonDisabled = !driveConnected || !hasKey || atCap || indexing;
@@ -388,6 +393,23 @@ function PickerSection({
     }
   }, [reindexMutation]);
 
+  /** Handles file selection from the hidden upload input. */
+  const handleUploadSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setUploadError(null);
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // Client-side size guard: reject files over 10MB before hitting the backend.
+    if (file.size > 10 * 1024 * 1024) {
+      setUploadError('File exceeds 10MB limit');
+      // Reset the input so the same file can be re-selected after error is resolved.
+      e.target.value = '';
+      return;
+    }
+    uploadMutation.mutate(file);
+    // Reset the input so the same filename can be re-uploaded after a removal.
+    e.target.value = '';
+  }, [uploadMutation]);
+
   /** Re-index button is disabled when there are no files, Drive/key missing, or pending. */
   const reindexDisabled =
     fileCount === 0 || !driveConnected || !hasKey || reindexMutation.isPending || indexing;
@@ -435,6 +457,33 @@ function PickerSection({
           >
             {indexing ? 'Indexing…' : 'Add File'}
           </button>
+
+          {/* Upload File button — does NOT require Drive connection (STORY-014-03) */}
+          <button
+            type="button"
+            onClick={() => uploadInputRef.current?.click()}
+            disabled={!hasKey || atCap || uploadMutation.isPending}
+            title={
+              !hasKey
+                ? 'Configure an API key first'
+                : atCap
+                  ? `${MAX_FILES} file limit reached`
+                  : undefined
+            }
+            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {uploadMutation.isPending ? 'Uploading…' : 'Upload File'}
+          </button>
+
+          {/* Hidden file input for direct upload */}
+          <input
+            ref={uploadInputRef}
+            type="file"
+            accept=".pdf,.docx,.xlsx,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/plain,text/markdown"
+            onChange={handleUploadSelect}
+            className="hidden"
+            aria-hidden="true"
+          />
         </div>
       </div>
 
@@ -449,6 +498,13 @@ function PickerSection({
       {error && (
         <p className="text-xs text-rose-600 mt-1" role="alert">
           {error}
+        </p>
+      )}
+
+      {/* Upload error — client-side size guard or backend rejection (STORY-014-03) */}
+      {(uploadError || uploadMutation.error) && (
+        <p className="text-xs text-rose-600 mt-1" role="alert">
+          {uploadError ?? uploadMutation.error?.message ?? 'Upload failed. Please try again.'}
         </p>
       )}
 

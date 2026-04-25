@@ -52,10 +52,17 @@ import pytest
 # ---------------------------------------------------------------------------
 
 drive_service = None
+extraction_service = None
 
 try:
     import app.services.drive_service as _ds  # type: ignore[import]
     drive_service = _ds
+except ImportError:
+    pass  # Expected during RED phase — implementation not yet written
+
+try:
+    import app.services.extraction_service as _es  # type: ignore[import]
+    extraction_service = _es
 except ImportError:
     pass  # Expected during RED phase — implementation not yet written
 
@@ -271,7 +278,7 @@ class TestFetchFileContentGoogleSheets:
         mock_wb.sheetnames = ["Sheet1"]
         mock_wb.__getitem__ = MagicMock(return_value=mock_ws)
         mock_load_workbook = MagicMock(return_value=mock_wb)
-        monkeypatch.setattr(drive_service, "load_workbook", mock_load_workbook)
+        monkeypatch.setattr(extraction_service, "load_workbook", mock_load_workbook)
 
         fake_xlsx_bytes = b"PK\x03\x04fake-xlsx-content"
         drive_client = _make_drive_client_mock(export_content=fake_xlsx_bytes)
@@ -304,7 +311,7 @@ class TestFetchFileContentGoogleSheets:
         mock_wb = MagicMock()
         mock_wb.sheetnames = ["Sales"]
         mock_wb.__getitem__ = MagicMock(return_value=mock_ws)
-        monkeypatch.setattr(drive_service, "load_workbook", MagicMock(return_value=mock_wb))
+        monkeypatch.setattr(extraction_service, "load_workbook", MagicMock(return_value=mock_wb))
 
         drive_client = _make_drive_client_mock(export_content=b"fake-xlsx")
 
@@ -335,7 +342,7 @@ class TestFetchFileContentGoogleSheets:
         mock_wb = MagicMock()
         mock_wb.sheetnames = ["Q1", "Q2"]
         mock_wb.__getitem__ = _getitem
-        monkeypatch.setattr(drive_service, "load_workbook", MagicMock(return_value=mock_wb))
+        monkeypatch.setattr(extraction_service, "load_workbook", MagicMock(return_value=mock_wb))
 
         drive_client = _make_drive_client_mock(export_content=b"fake-xlsx")
 
@@ -438,8 +445,8 @@ class TestFetchFileContentPDF:
         mock_pymupdf4llm_module = MagicMock()
         mock_pymupdf4llm_module.to_markdown.return_value = markdown_output
 
-        monkeypatch.setattr(drive_service, "pymupdf", mock_pymupdf_module)
-        monkeypatch.setattr(drive_service, "pymupdf4llm", mock_pymupdf4llm_module)
+        monkeypatch.setattr(extraction_service, "pymupdf", mock_pymupdf_module)
+        monkeypatch.setattr(extraction_service, "pymupdf4llm", mock_pymupdf4llm_module)
 
         _make_downloader_mock(monkeypatch)
         drive_client = _make_binary_drive_client()
@@ -476,8 +483,8 @@ class TestFetchFileContentPDF:
         mock_pymupdf4llm_module = MagicMock()
         mock_pymupdf4llm_module.to_markdown.return_value = table_markdown
 
-        monkeypatch.setattr(drive_service, "pymupdf", mock_pymupdf_module)
-        monkeypatch.setattr(drive_service, "pymupdf4llm", mock_pymupdf4llm_module)
+        monkeypatch.setattr(extraction_service, "pymupdf", mock_pymupdf_module)
+        monkeypatch.setattr(extraction_service, "pymupdf4llm", mock_pymupdf4llm_module)
 
         _make_downloader_mock(monkeypatch)
         drive_client = _make_binary_drive_client()
@@ -507,8 +514,8 @@ class TestFetchFileContentPDF:
         mock_pymupdf4llm_module = MagicMock()
         mock_pymupdf4llm_module.to_markdown.return_value = heading_markdown
 
-        monkeypatch.setattr(drive_service, "pymupdf", mock_pymupdf_module)
-        monkeypatch.setattr(drive_service, "pymupdf4llm", mock_pymupdf4llm_module)
+        monkeypatch.setattr(extraction_service, "pymupdf", mock_pymupdf_module)
+        monkeypatch.setattr(extraction_service, "pymupdf4llm", mock_pymupdf4llm_module)
 
         _make_downloader_mock(monkeypatch)
         drive_client = _make_binary_drive_client()
@@ -581,7 +588,7 @@ class TestFetchFileContentDocx:
         mock_doc.element.body.__iter__ = MagicMock(return_value=iter([para_elem, tbl_elem]))
 
         mock_document_cls = MagicMock(return_value=mock_doc)
-        monkeypatch.setattr(drive_service, "DocxDocument", mock_document_cls)
+        monkeypatch.setattr(extraction_service, "DocxDocument", mock_document_cls)
         _make_downloader_mock(monkeypatch)
         drive_client = _make_binary_drive_client()
 
@@ -626,7 +633,7 @@ class TestFetchFileContentDocx:
         mock_doc.tables = [mock_table]
         mock_doc.element.body.__iter__ = MagicMock(return_value=iter([tbl_elem]))
 
-        monkeypatch.setattr(drive_service, "DocxDocument", MagicMock(return_value=mock_doc))
+        monkeypatch.setattr(extraction_service, "DocxDocument", MagicMock(return_value=mock_doc))
         _make_downloader_mock(monkeypatch)
         drive_client = _make_binary_drive_client()
 
@@ -669,7 +676,7 @@ class TestFetchFileContentDocx:
         mock_doc.tables = []
         mock_doc.element.body.__iter__ = MagicMock(return_value=iter([para_elem_1, para_elem_2]))
 
-        monkeypatch.setattr(drive_service, "DocxDocument", MagicMock(return_value=mock_doc))
+        monkeypatch.setattr(extraction_service, "DocxDocument", MagicMock(return_value=mock_doc))
         _make_downloader_mock(monkeypatch)
         drive_client = _make_binary_drive_client()
 
@@ -718,7 +725,7 @@ class TestFetchFileContentXlsx:
             "Q1": [("Revenue", "Profit"), ("100", "20"), ("200", "50")],
             "Q2": [("Revenue", "Profit"), ("300", "70")],
         })
-        monkeypatch.setattr(drive_service, "load_workbook", MagicMock(return_value=mock_wb))
+        monkeypatch.setattr(extraction_service, "load_workbook", MagicMock(return_value=mock_wb))
         _make_downloader_mock(monkeypatch)
         drive_client = _make_binary_drive_client()
 
@@ -743,7 +750,7 @@ class TestFetchFileContentXlsx:
                 ("Beta", "2"),
             ],
         })
-        monkeypatch.setattr(drive_service, "load_workbook", MagicMock(return_value=mock_wb))
+        monkeypatch.setattr(extraction_service, "load_workbook", MagicMock(return_value=mock_wb))
         _make_downloader_mock(monkeypatch)
         drive_client = _make_binary_drive_client()
 
@@ -769,7 +776,7 @@ class TestFetchFileContentXlsx:
             "Data": [("Col1", "Col2"), ("row1a", "row1b")],
             "Empty": [],  # no rows
         })
-        monkeypatch.setattr(drive_service, "load_workbook", MagicMock(return_value=mock_wb))
+        monkeypatch.setattr(extraction_service, "load_workbook", MagicMock(return_value=mock_wb))
         _make_downloader_mock(monkeypatch)
         drive_client = _make_binary_drive_client()
 
@@ -796,7 +803,7 @@ class TestFetchFileContentXlsx:
                 (None, "val2", None),
             ],
         })
-        monkeypatch.setattr(drive_service, "load_workbook", MagicMock(return_value=mock_wb))
+        monkeypatch.setattr(extraction_service, "load_workbook", MagicMock(return_value=mock_wb))
         _make_downloader_mock(monkeypatch)
         drive_client = _make_binary_drive_client()
 
@@ -823,7 +830,7 @@ class TestFetchFileContentXlsx:
             "February": [("Item", "Sales"), ("Gadget", "300")],
             "March": [("Item", "Sales"), ("Doohickey", "700")],
         })
-        monkeypatch.setattr(drive_service, "load_workbook", MagicMock(return_value=mock_wb))
+        monkeypatch.setattr(extraction_service, "load_workbook", MagicMock(return_value=mock_wb))
         _make_downloader_mock(monkeypatch)
         drive_client = _make_binary_drive_client()
 
@@ -900,8 +907,8 @@ class TestContentTruncation:
         mock_pymupdf4llm_module = MagicMock()
         mock_pymupdf4llm_module.to_markdown.return_value = long_markdown
 
-        monkeypatch.setattr(drive_service, "pymupdf", mock_pymupdf_module)
-        monkeypatch.setattr(drive_service, "pymupdf4llm", mock_pymupdf4llm_module)
+        monkeypatch.setattr(extraction_service, "pymupdf", mock_pymupdf_module)
+        monkeypatch.setattr(extraction_service, "pymupdf4llm", mock_pymupdf4llm_module)
         _make_downloader_mock(monkeypatch)
         drive_client = _make_binary_drive_client()
 
@@ -1035,12 +1042,12 @@ def _make_scanned_pdf_mocks(monkeypatch, raw_bytes: bytes = _SMALL_PDF_BYTES) ->
     mock_pymupdf_doc = MagicMock()
     mock_pymupdf_module = MagicMock()
     mock_pymupdf_module.open.return_value = mock_pymupdf_doc
-    monkeypatch.setattr(drive_service, "pymupdf", mock_pymupdf_module)
+    monkeypatch.setattr(extraction_service, "pymupdf", mock_pymupdf_module)
 
     # Mock pymupdf4llm — to_markdown returns short text (<100 chars) to simulate scanned PDF
     mock_pymupdf4llm_module = MagicMock()
     mock_pymupdf4llm_module.to_markdown.return_value = "img"  # well under 100 chars
-    monkeypatch.setattr(drive_service, "pymupdf4llm", mock_pymupdf4llm_module)
+    monkeypatch.setattr(extraction_service, "pymupdf4llm", mock_pymupdf4llm_module)
 
     # Mock MediaIoBaseDownload so _download_media returns `raw_bytes`
     def _fake_downloader(buffer, _request):
@@ -1066,12 +1073,12 @@ def _make_normal_pdf_mocks(monkeypatch, raw_bytes: bytes = _SMALL_PDF_BYTES) -> 
     mock_pymupdf_doc = MagicMock()
     mock_pymupdf_module = MagicMock()
     mock_pymupdf_module.open.return_value = mock_pymupdf_doc
-    monkeypatch.setattr(drive_service, "pymupdf", mock_pymupdf_module)
+    monkeypatch.setattr(extraction_service, "pymupdf", mock_pymupdf_module)
 
     long_text = "A" * 200  # above the 100-char threshold
     mock_pymupdf4llm_module = MagicMock()
     mock_pymupdf4llm_module.to_markdown.return_value = long_text
-    monkeypatch.setattr(drive_service, "pymupdf4llm", mock_pymupdf4llm_module)
+    monkeypatch.setattr(extraction_service, "pymupdf4llm", mock_pymupdf4llm_module)
 
     def _fake_downloader(buffer, _request):
         buffer.write(raw_bytes)

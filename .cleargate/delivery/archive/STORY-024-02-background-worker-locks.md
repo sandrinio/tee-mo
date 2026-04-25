@@ -1,17 +1,20 @@
 ---
 story_id: "STORY-024-02"
 parent_epic_ref: "EPIC-024"
-status: "Draft"
+status: "Shipped (R1+R3) / Retired (R2)"
+approved: true
 ambiguity: "🟢"
 context_source: "PROPOSAL-001-teemo-platform.md"
 complexity_label: "L2"
 parallel_eligible: false
 expected_bounce_exposure: "low"
 created_at: "2026-04-10T00:00:00Z"
-updated_at: "2026-04-24T00:00:00Z"
+updated_at: "2026-04-25T00:00:00Z"
 created_at_version: "vbounce-backlog"
-updated_at_version: "cleargate-migration-2026-04-24"
+updated_at_version: "cleargate-pre-S15-hygiene"
 server_pushed_at_version: null
+shipping_commit: "bd2b8a4"
+shipping_date: "2026-04-21"
 draft_tokens:
   input: null
   output: null
@@ -25,6 +28,15 @@ cached_gate_result:
   last_gate_check: null
 ---
 > **Ported from V-Bounce.** Original: `product_plans.vbounce-archive/backlog/EPIC-024_concurrency_hardening/STORY-024-02-background-worker-locks.md`. Carried forward during ClearGate migration 2026-04-24.
+
+> **⚠ Closed during pre-SPRINT-15 hygiene (2026-04-25).** Discovered via `git log` that this story is already largely shipped:
+>
+> - **R1 — `wiki_ingest_cron.py` claims via `claim_pending_documents` RPC.** Shipped at commit `bd2b8a4` (2026-04-21) alongside STORY-024-01 (the migration) and STORY-024-03 (FastAPI threadpool wrapper). Verified at `backend/app/services/wiki_ingest_cron.py:217`.
+> - **R3 — `try/except` resets failed docs to `'error'`.** Shipped in the same commit. Verified at `backend/app/services/wiki_ingest_cron.py:251–256`.
+> - **R4 — success transitions to `'synced'`.** Already handled by `wiki_service` per the cron's docstring (line 19).
+> - **R2 — apply same refactor to `drive_sync_cron.py`.** **Retired.** Premise drift: `drive_sync_cron` walks Drive-source rows to detect content changes — it is **not** a pending-doc claim queue. The race condition R2 imagined doesn't apply (worst case: two redundant idempotent Drive API reads + matching SHA-256 hashes → harmless idempotent UPDATEs; no duplicate paid LLM calls). Adding a row-level lock to `drive_sync_cron` would be a "could be nicer" optimization without the cost-control urgency that motivated R1.
+>
+> **Net effect:** EPIC-024's worker-locks objective is met. No additional engineering work required. ClearGate ledger lagged repo state because the V-Bounce → ClearGate migration did not flip `pending-sync/` story files when `bd2b8a4` shipped. Flashcarded as a `#process #ambiguity` lesson alongside the same pattern's S-14 occurrence.
 
 # STORY-024-02-background-worker-locks: Background Worker Locks Refactor
 

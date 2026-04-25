@@ -1,6 +1,6 @@
 ---
 epic_id: "EPIC-024"
-status: "Draft"
+status: "Shipped"
 children:
   - "STORY-024-01-database-queue-rpc"
   - "STORY-024-02-background-worker-locks"
@@ -10,11 +10,15 @@ children:
 ambiguity: "🟢"
 context_source: "PROPOSAL-001-teemo-platform.md"
 owner: "DevOps & Backend Lead"
-target_date: "TBD"
+target_date: "2026-04-25"
+shipped_at: "2026-04-25"
+shipping_commits:
+  - "bd2b8a4 — STORY-024-01 + STORY-024-02 (R1+R3) + STORY-024-03 (2026-04-21)"
+  - "ac71245 — STORY-024-04 + STORY-024-05 (SPRINT-14 squash, 2026-04-25)"
 created_at: "2026-04-10T00:00:00Z"
-updated_at: "2026-04-24T00:00:00Z"
+updated_at: "2026-04-25T00:00:00Z"
 created_at_version: "vbounce-backlog"
-updated_at_version: "cleargate-migration-2026-04-24"
+updated_at_version: "cleargate-pre-S15-hygiene"
 server_pushed_at_version: null
 draft_tokens:
   input: null
@@ -29,6 +33,18 @@ cached_gate_result:
   last_gate_check: null
 ---
 > **Ported from V-Bounce.** Original: `product_plans.vbounce-archive/backlog/EPIC-024_concurrency_hardening/EPIC-024_concurrency_hardening.md`. Carried forward during ClearGate migration 2026-04-24.
+
+> **✅ Shipped 2026-04-25 (closed during pre-SPRINT-15 hygiene).** All five children are in production:
+>
+> | Child | Status | Commit / Sprint |
+> |---|---|---|
+> | STORY-024-01 (database queue RPC) | Shipped | `bd2b8a4` (2026-04-21) |
+> | STORY-024-02 (background worker locks) | Shipped (R1+R3) / Retired (R2 — premise drift; see story close-out note) | `bd2b8a4` (2026-04-21) |
+> | STORY-024-03 (FastAPI thread wrapper) | Shipped | `bd2b8a4` (2026-04-21) |
+> | STORY-024-04 (fix legacy backend tests) | Shipped | SPRINT-14 (`ac71245`, 2026-04-25) |
+> | STORY-024-05 (TestClient lifespan unblock) | Shipped | SPRINT-14 (`ac71245`, 2026-04-25) |
+>
+> **Net effect:** event-loop blocking eliminated via threadpool wrappers across 6 routes; background-cron LLM-billing race eliminated via `claim_pending_documents` RPC + try/except → 'error' reset. The `drive_sync_cron` half of the original 024-02 plan was found unnecessary (different concurrency profile — Drive API reads are idempotent and don't trigger paid LLM calls). EPIC-024's North-Star metrics are met or no longer relevant; further perf work belongs in a fresh epic if and when 50–80 concurrent users surface a measurable issue.
 
 # EPIC-024: Concurrency Hardening (50-80 User Scale)
 

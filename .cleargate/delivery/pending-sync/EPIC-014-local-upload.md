@@ -25,6 +25,8 @@ cached_gate_result:
 
 > **Ported from V-Bounce.** Original: `product_plans.vbounce-archive/backlog/EPIC-014_local_upload/EPIC-014_local_upload.md`. Carried forward during ClearGate migration 2026-04-24.
 
+> **⚠ Re-scoped 2026-04-25 (pre-SPRINT-15 triage).** EPIC-015 (shipped via migration `010_teemo_documents.sql`) replaced the legacy `teemo_knowledge_index` table with `teemo_documents`, which **already includes** the `source` column (`google_drive | upload | agent`), `original_filename`, `text`/`markdown` doc_types, the shared 15-doc cap, and a source-agnostic `read_document` agent tool. ~70% of this epic's original IN-SCOPE list is already shipped as a side effect. The schema migration in §4.3 below is **dead code** — kept for historical context only. Remaining work is the multipart upload endpoint, the extraction-service refactor, and the frontend upload UI. See §5 (re-scoped) and Change Log entry 2026-04-25.
+
 # EPIC-014: Local Document Upload
 
 ## 1. Problem & Value
@@ -125,7 +127,9 @@ flowchart LR
 
 ### 4.3 Data Changes
 
-**Migration: `010_knowledge_upload_support.sql`**
+> **DEAD — already shipped via migration `010_teemo_documents.sql` (EPIC-015).** The block below targets the legacy `teemo_knowledge_index` table and is preserved only for historical context. Do not re-implement. See top-of-file re-scope note.
+
+**Migration: `010_knowledge_upload_support.sql`** (NOT BUILT — superseded)
 
 ```sql
 -- 1. Add source column (defaults to 'google_drive' for existing rows)
@@ -203,30 +207,37 @@ ALTER TABLE teemo_knowledge_index
 
 ## 5. Decomposition Guidance
 
-### Suggested Sequencing
+> **Re-scoped 2026-04-25.** Original 4-story plan reduced to 3 — schema work absorbed by EPIC-015 / migration 010, agent integration absorbed by STORY-015-03 (`read_document` tool is source-agnostic).
 
-1. **STORY-014-01: Schema migration + extraction service refactor** (L2)
-   - Write migration `010_knowledge_upload_support.sql`
-   - Extract `_extract_pdf`, `_extract_docx`, `_extract_xlsx`, `_maybe_truncate`, `_rows_to_markdown_table`, `_docx_table_to_markdown` from `drive_service.py` into `extraction_service.py`
-   - Update `drive_service.py` to import from `extraction_service.py`
-   - Verify all existing Drive tests still pass
+### Re-scoped Sequencing (SPRINT-15 candidates)
 
-2. **STORY-014-02: Upload endpoint** (L3)
-   - `POST /api/workspaces/{id}/knowledge/upload` with multipart form
-   - File size validation (10MB), MIME type validation, BYOK gate, file count cap
-   - Extract text using `extraction_service`, generate AI description, insert row
-   - Duplicate filename check for uploads
-   - Tests with mocked extraction + scan services
+1. **STORY-014-01: Extraction service refactor** (L1)
+   - Move `_extract_pdf`, `_extract_docx`, `_extract_xlsx`, `_maybe_truncate`, `_rows_to_markdown_table`, `_docx_table_to_markdown` from `drive_service.py` into a new `backend/app/services/extraction_service.py`
+   - Update `drive_service.py` to import from the new module (no behavior change)
+   - All existing Drive tests still pass
 
-3. **STORY-014-03: Agent integration** (L1)
-   - Update system prompt to list uploaded files alongside Drive files (use `id` as identifier)
-   - Update `read_drive_file` tool to handle uploaded files (match by `id`, return `cached_content`)
+2. **STORY-014-02: Multipart upload endpoint** (L2)
+   - `POST /api/workspaces/{id}/documents/upload` — multipart form, single file
+   - Validations: workspace ownership, BYOK key present, doc count < 15, MIME allowlist (PDF/DOCX/XLSX/TXT/MD), file size ≤ 10MB
+   - Extracts text via `extraction_service`, generates AI description via `scan_service`, calls `document_service.create_document(source='upload', ...)`
+   - Duplicate filename returns 409
+   - Physical file bytes never persisted to disk
 
-4. **STORY-014-04: Frontend upload UI** (L2)
-   - "Upload File" button alongside "Add from Drive"
-   - File input (click or drag-and-drop) with 10MB size check
-   - Upload progress indicator
-   - Source badge ("Drive" / "Upload") in KnowledgeList
+3. **STORY-014-03: Frontend upload UI + source badge** (L2)
+   - "Upload File" button alongside "Add from Drive" in workspace card
+   - File input with progress indicator + 10MB client-side size check
+   - Source badge ("Drive" / "Upload") rendered from existing `source` field on documents list
+   - Read-only verification: agent system prompt lists upload rows correctly + `read_document` returns content for uploaded docs (no fixes expected — already shipped via EPIC-015)
+
+### Dead — already shipped (do NOT re-implement)
+
+- ~~Migration `010_knowledge_upload_support.sql`~~ — superseded by `010_teemo_documents.sql` (EPIC-015)
+- ~~`source` column with `'upload'` value~~ — shipped in migration 010
+- ~~`original_filename` column~~ — shipped in migration 010
+- ~~Relax MIME for `text/plain` / `text/markdown`~~ — `doc_type` constraint includes `'text'` and `'markdown'`
+- ~~Shared 15-file cap~~ — DB trigger on `teemo_documents` already covers all sources
+- ~~Agent system prompt update for upload rows~~ — already source-agnostic (STORY-015-03)
+- ~~Agent `read_drive_file` tool change~~ — replaced by source-agnostic `read_document` tool (STORY-015-03)
 
 ---
 
@@ -297,11 +308,10 @@ Feature: Local Document Upload
 
 ## 9. Artifact Links
 
-**Stories (Status Tracking):**
-- [ ] [STORY-014-01-schema-extraction](./STORY-014-01-schema-extraction.md) (L2) — Backlog — Migration + extraction service refactor
-- [ ] [STORY-014-02-upload-endpoint](./STORY-014-02-upload-endpoint.md) (L3) — Backlog — Upload multipart endpoint with validation
-- [ ] [STORY-014-03-agent-integration](./STORY-014-03-agent-integration.md) (L1) — Backlog — Agent system prompt + tool update for uploaded files
-- [ ] [STORY-014-04-frontend-upload](./STORY-014-04-frontend-upload.md) (L2) — Backlog — Upload UI + source badge
+**Stories (Status Tracking — re-scoped 2026-04-25):**
+- [ ] [STORY-014-01-extraction-service-refactor](./STORY-014-01-extraction-service-refactor.md) (L1) — Draft — Move extractors out of `drive_service.py` into shared `extraction_service.py`
+- [ ] [STORY-014-02-upload-endpoint](./STORY-014-02-upload-endpoint.md) (L2) — Draft — Multipart `POST /documents/upload` with validation + extraction + AI description
+- [ ] [STORY-014-03-frontend-upload](./STORY-014-03-frontend-upload.md) (L2) — Draft — Upload UI + source badge + agent path verification
 
 **References:**
 - Depends on: EPIC-006 (Google Drive, Done), EPIC-004 (BYOK, Done), STORY-006-10 (Cached Content, Done)
@@ -313,3 +323,4 @@ Feature: Local Document Upload
 | Date | Change | By |
 |------|--------|-----|
 | 2026-04-13 | Epic created. 4 stories identified. Schema migration designed. All questions resolved at planning time. | Claude (doc-manager) |
+| 2026-04-25 | Re-scoped pre-SPRINT-15. Discovered EPIC-015 / migration 010 already shipped the schema + agent integration the V-Bounce-era epic was designed for. Reduced from 4 stories to 3 (extraction refactor + multipart endpoint + frontend UI). Added top-of-file warning, "Dead — already shipped" subsection in §5, refreshed §9 story links. §4.3 migration SQL preserved as dead code for historical context — flagged in §5. | Claude |

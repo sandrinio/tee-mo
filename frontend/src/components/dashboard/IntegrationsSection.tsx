@@ -351,50 +351,65 @@ export function IntegrationsSection({ workspaceId }: IntegrationsSectionProps) {
   const createError =
     createMutation.error instanceof Error ? createMutation.error.message : null;
 
+  function openAddModal() {
+    createMutation.reset();
+    setAddModalOpen(true);
+  }
+
   return (
     <>
-      <div className="space-y-3" data-testid="integrations-section">
-        {/* Action row — ModuleSection provides the heading; we render only the action. */}
-        <div className="flex items-center justify-end">
-          <button
-            type="button"
-            onClick={() => {
-              createMutation.reset();
-              setAddModalOpen(true);
-            }}
-            data-testid="add-integration-button"
-            className="text-xs font-semibold text-brand-600 hover:opacity-70 shrink-0"
-          >
-            + Add Integration
-          </button>
-        </div>
-
-        {/* Server list or empty state */}
+      <div className="p-5 space-y-3" data-testid="integrations-section">
+        {/* Server list or empty-state CTA */}
         {servers.length === 0 ? (
-          <p className="text-xs text-slate-400" data-testid="empty-state">
-            No integrations connected yet. Add one to give the agent extra tools.
-          </p>
+          <div
+            className="flex flex-col items-start gap-2 py-2"
+            data-testid="empty-state"
+          >
+            <p className="text-xs text-slate-500">
+              No integrations connected yet. Add one to give the agent extra tools.
+            </p>
+            <button
+              type="button"
+              onClick={openAddModal}
+              data-testid="add-integration-button"
+              className="text-xs font-semibold text-brand-600 hover:opacity-70"
+            >
+              + Add Integration
+            </button>
+          </div>
         ) : (
-          <ul className="space-y-0 divide-y divide-slate-100" data-testid="server-list">
-            {servers.map((server) => {
-              const status = computeStatus(server, testResults);
-              const testResult = testResults.get(server.name);
-              return (
-                <ServerCard
-                  key={server.name}
-                  server={server}
-                  status={status}
-                  testResult={testResult}
-                  onTest={() => handleTest(server.name)}
-                  onToggle={(active) => handleToggle(server.name, active)}
-                  onDelete={() => handleDelete(server.name)}
-                  isTestPending={testingName === server.name}
-                  isTogglePending={togglingName === server.name}
-                  isDeletePending={deletingName === server.name}
-                />
-              );
-            })}
-          </ul>
+          <>
+            <ul className="space-y-0 divide-y divide-slate-100" data-testid="server-list">
+              {servers.map((server) => {
+                const status = computeStatus(server, testResults);
+                const testResult = testResults.get(server.name);
+                return (
+                  <ServerCard
+                    key={server.name}
+                    server={server}
+                    status={status}
+                    testResult={testResult}
+                    onTest={() => handleTest(server.name)}
+                    onToggle={(active) => handleToggle(server.name, active)}
+                    onDelete={() => handleDelete(server.name)}
+                    isTestPending={testingName === server.name}
+                    isTogglePending={togglingName === server.name}
+                    isDeletePending={deletingName === server.name}
+                  />
+                );
+              })}
+            </ul>
+            <div className="-mx-5 px-5 pt-2 border-t border-slate-100 flex justify-end">
+              <button
+                type="button"
+                onClick={openAddModal}
+                data-testid="add-integration-button"
+                className="text-xs font-semibold text-brand-600 hover:opacity-70"
+              >
+                + Add Integration
+              </button>
+            </div>
+          </>
         )}
       </div>
 

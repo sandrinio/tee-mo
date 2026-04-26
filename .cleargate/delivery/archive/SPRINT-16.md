@@ -2,13 +2,13 @@
 sprint_id: "SPRINT-16"
 remote_id: "local:SPRINT-16"
 source_tool: "cleargate-native"
-status: "Active"
+status: "Completed"
 start_date: "2026-04-25"
 end_date: null
 activated_at: "2026-04-25T00:00:00Z"
 human_approved_at: "2026-04-25T00:00:00Z"
-completed_at: null
-shipping_commit: null
+completed_at: "2026-04-26T02:35:00Z"
+shipping_commit: "7fc4ba6"
 synced_at: null
 created_at: "2026-04-25T00:00:00Z"
 updated_at: "2026-04-25T00:00:00Z"

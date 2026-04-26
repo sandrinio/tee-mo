@@ -1,6 +1,6 @@
 ---
 epic_id: "EPIC-025"
-status: "Active"
+status: "Shipped"
 ambiguity: "🟢 Low"
 active_sprint: "S-16"
 human_approved_at: "2026-04-25T00:00:00Z"

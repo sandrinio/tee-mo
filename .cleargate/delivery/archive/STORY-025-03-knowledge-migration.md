@@ -1,7 +1,7 @@
 ---
 story_id: "STORY-025-03"
 parent_epic_ref: "EPIC-025"
-status: "Draft"
+status: "Shipped"
 ambiguity: "🟢 Low"
 context_source: "EPIC-025-workspace-v2-redesign.md"
 actor: "Workspace admin"

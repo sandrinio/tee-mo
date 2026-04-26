@@ -1,7 +1,7 @@
 ---
 cr_id: "CR-001"
 parent_ref: "EPIC-005-phase-a"
-status: "Approved"
+status: "Shipped"
 approved: true
 approved_at: "2026-04-25T00:00:00Z"
 severity: "P3-Low"

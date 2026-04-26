@@ -77,6 +77,43 @@ async def _resolve_channel_name(
         return None
 
 
+def _format_user_prompt(
+    *,
+    sender_name: str,
+    text: str,
+    channel_id: str | None,
+    channel_name: str | None,
+) -> str:
+    """Wrap the user's text with an inline channel-context prefix.
+
+    Models follow user-message context FAR more reliably than instructions
+    buried in ``## Section`` headers in the system prompt. Putting the literal
+    channel id (and name when ``conversations.info`` succeeded) right next to
+    the question prevents the LLM from confabulating a similar-looking but
+    fabricated channel id when it echoes the channel back to the user.
+
+    Resulting shape::
+
+        [context: in #ai-news, channel_id=C0B0BMH3Q1X]
+        sandro.suladze: schedule a daily news digest...
+
+    When the channel name is unknown (``conversations.info`` failed or the
+    caller is not Slack), the name segment is dropped but the id is still
+    inlined. When neither is available, the prefix is omitted entirely so
+    non-Slack callers get the legacy shape unchanged.
+    """
+    parts: list[str] = []
+    if channel_name:
+        parts.append(f"in #{channel_name}")
+    if channel_id:
+        parts.append(f"channel_id={channel_id}")
+
+    if not parts:
+        return f"{sender_name}: {text}"
+
+    return f"[context: {', '.join(parts)}]\n{sender_name}: {text}"
+
+
 async def _stream_agent_to_slack(
     agent: object,
     user_prompt: str,
@@ -384,8 +421,6 @@ async def _handle_app_mention(event: dict, *, _dispatch_start: float | None = No
             logger.warning("Failed to resolve display name for %s: %s", sender_user_id, e)
             # R7: users_info failure → sender_tz stays "UTC"; softer prompt variant renders.
 
-    user_prompt = f"{sender_name}: {stripped_text}"
-
     # Await the channel-name lookup. It's been running in parallel with the
     # users_info/sender_tz work above, so this almost always resolves
     # immediately without adding wall-clock latency.
@@ -393,6 +428,18 @@ async def _handle_app_mention(event: dict, *, _dispatch_start: float | None = No
         current_channel_name = await _channel_info_task
     except Exception:
         current_channel_name = None
+
+    # Inline channel context in the user prompt itself. Models follow
+    # user-message context far more reliably than ``## Section`` headers
+    # in the system prompt — this puts the literal channel id (and name
+    # when available) right next to the user's question so the LLM
+    # cannot fabricate a different ID when echoing it back.
+    user_prompt = _format_user_prompt(
+        sender_name=sender_name,
+        text=stripped_text,
+        channel_id=channel,
+        channel_name=current_channel_name,
+    )
 
     try:
         # 7. Build agent first — raises ValueError("no_key_configured") if no BYOK key
@@ -628,12 +675,20 @@ async def _handle_dm(event: dict, *, _dispatch_start: float | None = None) -> No
         except Exception:
             pass  # R7: users_info failure → sender_tz stays "UTC"
 
-    user_prompt = f"{sender_name}: {text}"
-
     try:
         current_channel_name = await _channel_info_task
     except Exception:
         current_channel_name = None
+
+    # Same inline-context wrapper as _handle_app_mention — keeps the channel
+    # id literal next to the user's question so Gemini-class models don't
+    # confabulate a different ID when echoing it back.
+    user_prompt = _format_user_prompt(
+        sender_name=sender_name,
+        text=text,
+        channel_id=channel,
+        channel_name=current_channel_name,
+    )
 
     try:
         # 5. Build agent first — raises ValueError("no_key_configured") if no BYOK key

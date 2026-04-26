@@ -1056,3 +1056,61 @@ async def test_app_mention_users_info_failure_falls_back_to_utc(
         f"Got call kwargs: {call_kwargs!r}. "
         "STORY-018-08 R7: users_info failure must not propagate; sender_tz must default to UTC."
     )
+
+
+# ---------------------------------------------------------------------------
+# _format_user_prompt — inline channel-context wrapper (2026-04-27 hotfix)
+# ---------------------------------------------------------------------------
+#
+# The agent was citing fabricated channel ids in its replies because Gemini
+# class models don't reliably copy literal strings out of ``## Section``
+# headers in the system prompt. Inlining the channel id+name in the user
+# message itself gives the model the data adjacent to the question, where
+# it follows context far more reliably.
+
+
+def test_format_user_prompt_with_channel_id_and_name() -> None:
+    """When both id and name are known, both appear in the [context: ...] prefix."""
+    from app.services.slack_dispatch import _format_user_prompt
+
+    out = _format_user_prompt(
+        sender_name="sandro.suladze",
+        text="schedule a daily news digest",
+        channel_id="C0B0BMH3Q1X",
+        channel_name="ai-news",
+    )
+    assert "C0B0BMH3Q1X" in out
+    assert "#ai-news" in out
+    assert "sandro.suladze: schedule a daily news digest" in out
+    # The prefix must precede the user's text, not be appended.
+    assert out.index("C0B0BMH3Q1X") < out.index("sandro.suladze:")
+
+
+def test_format_user_prompt_with_channel_id_only() -> None:
+    """Name lookup failures (missing scope, network blip) drop the name part
+    but the id MUST still be inlined — that's the part the LLM was fabricating.
+    """
+    from app.services.slack_dispatch import _format_user_prompt
+
+    out = _format_user_prompt(
+        sender_name="alice",
+        text="hello",
+        channel_id="C0B0BMH3Q1X",
+        channel_name=None,
+    )
+    assert "C0B0BMH3Q1X" in out
+    assert "#" not in out
+    assert "alice: hello" in out
+
+
+def test_format_user_prompt_no_channel_falls_back_to_legacy_shape() -> None:
+    """Non-Slack callers (REST, cron, tests) get the unchanged legacy shape."""
+    from app.services.slack_dispatch import _format_user_prompt
+
+    out = _format_user_prompt(
+        sender_name="alice",
+        text="hello",
+        channel_id=None,
+        channel_name=None,
+    )
+    assert out == "alice: hello"

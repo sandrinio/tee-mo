@@ -536,8 +536,10 @@ sequenceDiagram
     Note over API: Event processing (Phase B)
 ```
 
-**7 Required Scopes (ADR-021 + ADR-025):**
-`app_mentions:read`, `channels:history`, `channels:read`, `chat:write`, `groups:history`, `groups:read`, `im:history`
+**8 Required Scopes (ADR-021 + ADR-025):**
+`app_mentions:read`, `channels:history`, `channels:read`, `chat:write`, `groups:history`, `groups:read`, `im:history`, `users:read`
+
+(`users:read` added 2026-04-27 — needed for sender display-name + tz resolution. Existing installs must re-authorize.)
 
 ---
 

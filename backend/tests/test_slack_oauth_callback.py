@@ -60,7 +60,7 @@ MOCK_OAUTH_V2_ACCESS_OK = {
     "token_type": "bot",
     "scope": (
         "app_mentions:read,channels:history,channels:read,"
-        "chat:write,groups:history,groups:read,im:history"
+        "chat:write,groups:history,groups:read,im:history,users:read"
     ),
     "bot_user_id": "UBOT_TEST_001",
     "app_id": "A_TEST_001",

@@ -32,12 +32,19 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/slack", tags=["slack"])
 
-# ADR-021 + ADR-025: exact 7-scope tuple required for Tee-Mo Slack app install.
+# ADR-021 + ADR-025: exact 8-scope tuple required for Tee-Mo Slack app install.
 # Do NOT add or remove scopes without an ADR amendment — the Slack app manifest
 # must stay in sync with this list.
+#
+# users:read added 2026-04-27 — needed by ``slack_dispatch._handle_app_mention``
+# to resolve the sender's display name + IANA timezone via ``users.info``.
+# Without it the agent sees the sender as the placeholder string "there" and
+# loses tz-aware automation scheduling. EXISTING INSTALLS MUST RE-AUTHORIZE
+# the Tee-Mo Slack app from the dashboard to pick up the new scope; Slack
+# does NOT auto-extend granted scopes.
 SLACK_SCOPES = (
     "app_mentions:read,channels:history,channels:read,"
-    "chat:write,groups:history,groups:read,im:history"
+    "chat:write,groups:history,groups:read,im:history,users:read"
 )
 
 

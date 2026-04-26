@@ -295,7 +295,7 @@ async def create_mcp_server(
     }
 
     result = await execute_async(
-        supabase.table("teemo_mcp_servers").insert(payload).select("*")
+        supabase.table("teemo_mcp_servers").insert(payload)
     )
     return _row_to_record(result.data[0])
 
@@ -445,7 +445,6 @@ async def update_mcp_server(
         .update(patch)
         .eq("workspace_id", str(workspace_id))
         .eq("name", name)
-        .select("*")
     )
     if not result.data:
         raise ValueError(f"MCP server {name!r} not found in workspace {workspace_id}")
@@ -473,7 +472,6 @@ async def delete_mcp_server(
         .delete()
         .eq("workspace_id", str(workspace_id))
         .eq("name", name)
-        .select("id")
     )
     return bool(result.data)
 

@@ -715,3 +715,150 @@ def test_validate_invalid_transport_raises():
                 transport="stdio",  # not allowed
                 url="https://mcp.example.com/",
             )
+
+
+# ---------------------------------------------------------------------------
+# Regression: supabase-py v2 query-builder shape
+# ---------------------------------------------------------------------------
+#
+# The v2 client returns a ``SyncQueryRequestBuilder`` from ``.insert()``,
+# ``.update()``, and ``.delete()``. That builder has NO ``.select()`` method
+# — chaining ``.insert(...).select("*")`` raises AttributeError at runtime.
+# An earlier shape used a fluent mock whose ``.insert()`` returned the SAME
+# object as ``.select()``, papering over the real bug. Lock this down with
+# a builder mock that only exposes terminal verbs (``insert``/``update``/
+# ``delete``) — calling ``.select()`` after them would AttributeError.
+
+
+class _RealisticBuilder:
+    """Minimal shape mirroring supabase-py v2 query builders.
+
+    ``table()`` returns this; ``select()`` returns a SELECT-builder that
+    accepts ``.eq/.order/.limit``; ``insert()``/``update()``/``delete()``
+    return a MUTATION-builder that does NOT expose ``.select()`` — matching
+    the v2 client. ``execute()`` is a no-op since tests stub
+    ``execute_async``; the value of this class is enforcing the surface
+    shape that real supabase-py exposes.
+    """
+
+    def __init__(self):
+        self._select = MagicMock()
+        for meth in ("eq", "order", "limit"):
+            setattr(self._select, meth, MagicMock(return_value=self._select))
+        self._select.execute = MagicMock(return_value=_exec_result([]))
+
+        self._mutation = MagicMock(spec=["eq", "execute"])
+        self._mutation.eq = MagicMock(return_value=self._mutation)
+        self._mutation.execute = MagicMock(return_value=_exec_result([]))
+
+    def select(self, *_args, **_kwargs):
+        return self._select
+
+    def insert(self, *_args, **_kwargs):
+        return self._mutation
+
+    def update(self, *_args, **_kwargs):
+        return self._mutation
+
+    def delete(self, *_args, **_kwargs):
+        return self._mutation
+
+
+def _make_realistic_supabase() -> MagicMock:
+    sb = MagicMock()
+    sb.table.return_value = _RealisticBuilder()
+    return sb
+
+
+@pytest.mark.asyncio
+async def test_create_does_not_chain_select_on_insert():
+    """Regression: supabase-py v2 .insert() returns a builder without .select().
+
+    A previous bug chained ``.insert(payload).select("*")`` — fine against the
+    fluent test mock, AttributeError against real supabase-py. This test uses
+    a builder shape that mirrors the real client (``.insert()`` returns a
+    mutation builder with NO ``.select`` method) so any reintroduction of the
+    bad chain trips ``AttributeError``.
+    """
+    from app.services.mcp_service import create_mcp_server
+
+    sb = _make_realistic_supabase()
+    new_row = {
+        "id": "11111111-1111-1111-1111-111111111111",
+        "workspace_id": "00000000-0000-0000-0000-000000000001",
+        "name": "github",
+        "transport": "streamable_http",
+        "url": "https://api.example.com/mcp/",
+        "headers_encrypted": {},
+        "is_active": True,
+        "created_at": "2026-04-26T00:00:00+00:00",
+    }
+
+    with patch(
+        "app.services.mcp_service.execute_async",
+        _make_execute_async([new_row]),
+    ), patch(
+        "app.core.url_safety.socket.getaddrinfo",
+        return_value=[(0, 0, 0, "", ("1.2.3.4", 0))],
+    ):
+        record = await create_mcp_server(
+            "00000000-0000-0000-0000-000000000001",
+            name="github",
+            transport="streamable_http",
+            url="https://api.example.com/mcp/",
+            supabase=sb,
+        )
+
+    assert record.name == "github"
+
+
+@pytest.mark.asyncio
+async def test_update_does_not_chain_select_on_update():
+    """Same regression for ``.update().eq().select("*")`` — invalid in v2."""
+    from app.services.mcp_service import update_mcp_server
+
+    sb = _make_realistic_supabase()
+    updated_row = {
+        "id": "11111111-1111-1111-1111-111111111111",
+        "workspace_id": "00000000-0000-0000-0000-000000000001",
+        "name": "github",
+        "transport": "streamable_http",
+        "url": "https://api.example.com/mcp/",
+        "headers_encrypted": {},
+        "is_active": False,
+        "created_at": "2026-04-26T00:00:00+00:00",
+    }
+
+    with patch(
+        "app.services.mcp_service.execute_async",
+        _make_execute_async([updated_row]),
+    ):
+        record = await update_mcp_server(
+            "00000000-0000-0000-0000-000000000001",
+            "github",
+            is_active=False,
+            supabase=sb,
+        )
+
+    assert record.is_active is False
+
+
+@pytest.mark.asyncio
+async def test_delete_does_not_chain_select_on_delete():
+    """Same regression for ``.delete().eq().select("id")`` — invalid in v2."""
+    from app.services.mcp_service import delete_mcp_server
+
+    sb = _make_realistic_supabase()
+    deleted_row = {"id": "11111111-1111-1111-1111-111111111111"}
+
+    with patch(
+        "app.services.mcp_service.execute_async",
+        _make_execute_async([deleted_row]),
+    ):
+        result = await delete_mcp_server(
+            "00000000-0000-0000-0000-000000000001",
+            "github",
+            supabase=sb,
+        )
+
+    assert result is True

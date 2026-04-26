@@ -48,9 +48,30 @@ vi.mock('../../../hooks/useAutomations', () => ({
   useUpdateAutomationMutation: mockUseUpdateAutomationMutation,
   useDeleteAutomationMutation: mockUseDeleteAutomationMutation,
   useAutomationHistoryQuery: mockUseAutomationHistoryQuery,
+  // HOTFIX 2026-04-26: section now mounts AddAutomationModal + DryRunModal
+  // internally; their hooks must be stubbed too.
+  useCreateAutomationMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }),
+  useTestRunMutation: () => ({ mutate: vi.fn(), isPending: false, error: null, data: null, reset: vi.fn() }),
   automationsKey: (wsId: string) => ['automations', wsId],
   automationHistoryKey: (wsId: string, aid: string) => ['automationHistory', wsId, aid],
 }));
+
+// HOTFIX 2026-04-26: section now mounts the 3 modals. Stub them out so
+// shell-level tests don't have to satisfy each modal's internal contracts.
+// AutomationHistoryDrawer's mock renders the automation name so the
+// "opens history drawer" scenario can assert on visible text.
+vi.mock('../AddAutomationModal', () => ({
+  AddAutomationModal: ({ open }: { open: boolean }) =>
+    open ? React.createElement('div', { 'data-testid': 'mock-add-automation-modal' }, 'Add modal') : null,
+}));
+vi.mock('../DryRunModal', () => ({
+  DryRunModal: ({ open, automationName }: { open: boolean; automationName: string }) =>
+    open ? React.createElement('div', { 'data-testid': 'mock-dryrun-modal' }, `Dry run — ${automationName}`) : null,
+}));
+// Note: AutomationHistoryDrawer is NOT mocked — its hook
+// (useAutomationHistoryQuery) is already mocked above, so the real drawer
+// renders fine. The "AutomationHistoryDrawer" describe block at the bottom
+// of this file imports + tests the real drawer directly.
 
 // ---------------------------------------------------------------------------
 // Import components after mocks are registered
@@ -170,13 +191,11 @@ function Wrapper({ children }: { children: React.ReactNode }) {
   return <QueryClientProvider client={makeClient()}>{children}</QueryClientProvider>;
 }
 
-/** Default prop values for AutomationsSection. */
+/** Default prop values for AutomationsSection.
+ *  HOTFIX 2026-04-26: callback props removed — section is now self-contained. */
 const defaultProps = {
   workspaceId: WORKSPACE_ID,
   channelBindings: [CHANNEL_BINDING_C1],
-  onAddClick: vi.fn(),
-  onDryRunClick: vi.fn(),
-  onHistoryClick: vi.fn(),
 };
 
 function renderAutomationsSection(props = {}) {
@@ -195,6 +214,14 @@ describe('AutomationsSection', () => {
   beforeEach(() => {
     mockUseUpdateAutomationMutation.mockReturnValue(stubUpdateMutation);
     mockUseDeleteAutomationMutation.mockReturnValue(stubDeleteMutation);
+    // HOTFIX 2026-04-26: section now self-mounts AutomationHistoryDrawer.
+    // Default mock so the drawer renders without crashing on opening.
+    mockUseAutomationHistoryQuery.mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: false,
+      error: null,
+    });
   });
 
   afterEach(() => {
@@ -326,20 +353,24 @@ describe('AutomationsSection', () => {
   // Scenario 5: History drawer opens with automationId on click
   // =========================================================================
 
-  it('calls onHistoryClick with automationId when History button is clicked', () => {
-    const onHistoryClick = vi.fn();
-
+  it('opens the history drawer when History button is clicked', () => {
+    // HOTFIX 2026-04-26: section is self-contained — clicking History sets
+    // internal state and mounts the AutomationHistoryDrawer with that id.
     mockUseAutomationsQuery.mockReturnValue({
       data: [AUTOMATION_DAILY],
       isLoading: false,
       isError: false,
     });
 
-    renderAutomationsSection({ onHistoryClick });
+    renderAutomationsSection();
+
+    // Drawer not yet open — its visible heading element shouldn't be present.
+    expect(screen.queryByText(/History — Daily Standup/i)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('history-button-auto-001'));
 
-    expect(onHistoryClick).toHaveBeenCalledWith('auto-001', 'Daily Standup');
+    // Drawer opens with the automation name in its header.
+    expect(screen.getByText(/History — Daily Standup/i)).toBeInTheDocument();
   });
 });
 

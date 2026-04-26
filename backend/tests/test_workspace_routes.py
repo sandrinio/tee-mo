@@ -294,6 +294,11 @@ def test_get_workspace_by_id_returns_200(app_client: TestClient) -> None:
     When the user GETs /api/workspaces/{id},
     Then the response is HTTP 200 OK,
     And the returned body contains the workspace data.
+
+    STORY-025-05 extension: GET now also queries teemo_slack_team_members
+    (for is_owner) and teemo_slack_teams (for slack_team_name). Both are mocked
+    to return empty data here (is_owner=False, slack_team_name=None) — the
+    main assertion is that the endpoint returns 200.
     """
     mock_sb = MagicMock()
 
@@ -304,6 +309,14 @@ def test_get_workspace_by_id_returns_200(app_client: TestClient) -> None:
             sel.eq.return_value = sel
             sel.limit.return_value = sel
             sel.execute.return_value = _make_execute_result([FAKE_WORKSPACE_ROW])
+            tbl.select.return_value = sel
+        else:
+            # Catch-all for teemo_slack_team_members (is_owner) and
+            # teemo_slack_teams (slack_team_name) — both return empty (defaults).
+            sel = MagicMock()
+            sel.eq.return_value = sel
+            sel.limit.return_value = sel
+            sel.execute.return_value = _make_execute_result([])
             tbl.select.return_value = sel
         return tbl
 
@@ -590,6 +603,10 @@ def test_get_workspace_response_omits_secret_fields(app_client: TestClient) -> N
     that _to_response() and WorkspaceResponse strip them from the API output.
     This is defense-in-depth: the response model excludes them at the Pydantic
     level, and _to_response() never passes them to the constructor.
+
+    STORY-025-05 extension: GET now also queries teemo_slack_team_members
+    (for is_owner) and teemo_slack_teams (for slack_team_name). Both are mocked
+    to return empty data so the endpoint still returns 200.
     """
     mock_sb = MagicMock()
 
@@ -601,6 +618,13 @@ def test_get_workspace_response_omits_secret_fields(app_client: TestClient) -> N
             sel.limit.return_value = sel
             # Return a row that includes secret columns
             sel.execute.return_value = _make_execute_result([FAKE_WORKSPACE_ROW_WITH_SECRET])
+            tbl.select.return_value = sel
+        else:
+            # Catch-all for teemo_slack_team_members + teemo_slack_teams — return empty.
+            sel = MagicMock()
+            sel.eq.return_value = sel
+            sel.limit.return_value = sel
+            sel.execute.return_value = _make_execute_result([])
             tbl.select.return_value = sel
         return tbl
 

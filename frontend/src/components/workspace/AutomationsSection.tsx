@@ -25,6 +25,11 @@
  */
 
 import { useState } from 'react';
+import { Zap } from 'lucide-react';
+import { ModuleAvatarTile } from './SlackSection';
+import { AddAutomationModal } from './AddAutomationModal';
+import { DryRunModal } from './DryRunModal';
+import { AutomationHistoryDrawer } from './AutomationHistoryDrawer';
 import {
   useAutomationsQuery,
   useUpdateAutomationMutation,
@@ -40,6 +45,11 @@ import type { Automation } from '../../types/automation';
 
 /**
  * Props for AutomationsSection.
+ *
+ * HOTFIX 2026-04-26: callback props (onAddClick / onDryRunClick / onHistoryClick)
+ * removed. AutomationsSection now owns the modal state and renders the modals
+ * itself — registry-driven shells can't easily inject parent callbacks, and
+ * the modals only ever lived next to this section anyway.
  */
 export interface AutomationsSectionProps {
   /** UUID of the workspace to list automations for. */
@@ -49,21 +59,6 @@ export interface AutomationsSectionProps {
    * from Slack channel IDs stored in `automation.slack_channel_ids`.
    */
   channelBindings: ChannelBinding[];
-  /**
-   * Callback fired when the user clicks "Add" — parent opens AddAutomationModal.
-   * Declared here so 018-06 can wire it up without re-declaring state.
-   */
-  onAddClick: () => void;
-  /**
-   * Callback fired when the user clicks "Dry Run" — parent opens DryRunModal.
-   * Receives the automation's prompt and name as context for the modal.
-   */
-  onDryRunClick: (prompt: string, name: string) => void;
-  /**
-   * Callback fired when the user clicks "History" on an automation card.
-   * Parent updates its `historyAutomationId` state which controls the drawer.
-   */
-  onHistoryClick: (automationId: string, automationName: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -81,18 +76,17 @@ export interface AutomationsSectionProps {
 export function AutomationsSection({
   workspaceId,
   channelBindings,
-  onAddClick,
-  onDryRunClick,
-  onHistoryClick,
 }: AutomationsSectionProps) {
-  /**
-   * ID of the automation currently awaiting delete confirmation.
-   * null = no delete in progress.
-   * Non-null = the Delete button on that card shows "Confirm?".
-   *
-   * Copied exactly from ChannelSection.tsx's `confirmingUnbind` state machine.
-   */
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
+
+  // HOTFIX 2026-04-26: self-contained modal state.
+  const [addOpen, setAddOpen] = useState(false);
+  const [dryRunCtx, setDryRunCtx] = useState<{ prompt: string; name: string } | null>(null);
+  const [historyCtx, setHistoryCtx] = useState<{ id: string; name: string } | null>(null);
+
+  const onAddClick = () => setAddOpen(true);
+  const onDryRunClick = (prompt: string, name: string) => setDryRunCtx({ prompt, name });
+  const onHistoryClick = (id: string, name: string) => setHistoryCtx({ id, name });
 
   const { data: automations = [], isLoading } = useAutomationsQuery(workspaceId);
   const updateMutation = useUpdateAutomationMutation(workspaceId);
@@ -166,14 +160,10 @@ export function AutomationsSection({
 
   return (
     <div data-testid="automations-section">
-      {/* Section header */}
-      <div className="flex items-center justify-between mb-3">
-        <div>
-          <h2 className="text-base font-semibold text-slate-900">Automations</h2>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Scheduled AI messages delivered to Slack on a recurring or one-time basis.
-          </p>
-        </div>
+      {/* HOTFIX 2026-04-26: section title + caption removed — ModuleSection
+          wrapper already provides them per W01 §5.1. Only the +Add action
+          remains, right-aligned via an empty flex spacer. */}
+      <div className="flex items-center justify-end mb-3">
         <button
           type="button"
           data-testid="add-automation-button"
@@ -184,16 +174,28 @@ export function AutomationsSection({
         </button>
       </div>
 
-      {/* Empty state */}
+      {/* Empty state — per W01 §3 STORY-025-04 handoff spec */}
       {automations.length === 0 && (
         <div
           data-testid="automations-empty-state"
-          className="rounded-lg border border-slate-200 bg-white py-10 text-center"
+          className="rounded-lg border border-slate-200 bg-white"
         >
-          <p className="text-sm text-slate-500">No automations yet.</p>
-          <p className="text-xs text-slate-400 mt-1">
-            Click "+ Add" to create your first scheduled automation.
-          </p>
+          <div className="flex flex-col items-center gap-3 py-8">
+            {/* 40×40 slate-100 zap-icon tile — shared primitive per W01 §5.6 */}
+            <ModuleAvatarTile icon={Zap} data-testid="automations-empty-zap-tile" />
+            <h3 className="text-base font-semibold text-slate-900">No automations yet</h3>
+            <p className="text-sm text-slate-500 text-center px-4">
+              Trigger Tee-Mo on a schedule, on a Slack event, or from a webhook.
+            </p>
+            <button
+              type="button"
+              data-testid="create-automation-button"
+              onClick={onAddClick}
+              className="rounded-md bg-white text-slate-900 border border-slate-300 px-3 py-1.5 text-sm font-medium hover:bg-slate-50 hover:border-slate-400"
+            >
+              Create automation
+            </button>
+          </div>
         </div>
       )}
 
@@ -351,6 +353,29 @@ export function AutomationsSection({
           );
         })}
       </div>
+
+      {/* HOTFIX 2026-04-26: self-mounted modals + drawer (previously rendered
+          by the legacy route — got dropped during 025-06 cutover). */}
+      <AddAutomationModal
+        workspaceId={workspaceId}
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        channelBindings={channelBindings}
+      />
+      <DryRunModal
+        workspaceId={workspaceId}
+        automationName={dryRunCtx?.name ?? ''}
+        prompt={dryRunCtx?.prompt ?? ''}
+        open={dryRunCtx !== null}
+        onClose={() => setDryRunCtx(null)}
+      />
+      <AutomationHistoryDrawer
+        workspaceId={workspaceId}
+        automationId={historyCtx?.id ?? null}
+        automationName={historyCtx?.name ?? ''}
+        onClose={() => setHistoryCtx(null)}
+        channelBindings={channelBindings}
+      />
     </div>
   );
 }

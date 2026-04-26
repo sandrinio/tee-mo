@@ -143,9 +143,11 @@ describe('ChannelSection', () => {
   // Scenario: Empty state
   // -------------------------------------------------------------------------
 
-  it('shows empty state message when no channels are bound', () => {
+  it('shows empty state message when no channels exist in Slack team', () => {
+    // v2 re-skin: empty state only when allChannels is empty (not just bindings empty).
+    // When channels exist but none are bound, they appear as rows with Bind buttons.
     mockUseSlackChannelsQuery.mockReturnValue({
-      data: [CHANNEL_GENERAL, CHANNEL_ENGINEERING, CHANNEL_MARKETING],
+      data: [],
       isLoading: false,
       isError: false,
     });
@@ -159,7 +161,7 @@ describe('ChannelSection', () => {
 
     // Empty state guidance text must appear
     expect(screen.getByTestId('channel-empty-state')).toBeInTheDocument();
-    // The empty state should suggest adding a channel
+    // The empty state should mention channels
     expect(screen.getByTestId('channel-empty-state')).toHaveTextContent(/no channels/i);
   });
 
@@ -257,13 +259,17 @@ describe('ChannelSection', () => {
     // Click "Add channel" button to open picker
     fireEvent.click(screen.getByTestId('add-channel-button'));
 
-    // Picker is now open — engineering and marketing are clickable, general is shown as "bound" (disabled)
+    // HOTFIX 2026-04-26: picker now shows ONLY unbound channels (was: all
+    // channels with bound ones disabled). #general is bound, so it should be
+    // entirely absent from the picker. #engineering and #marketing are unbound
+    // and appear as clickable pick rows.
     expect(screen.getByTestId('channel-picker')).toBeInTheDocument();
-    expect(screen.getByText('#engineering')).toBeInTheDocument();
-    expect(screen.getByText('#marketing')).toBeInTheDocument();
-    // #general is visible but not clickable (no pick-channel button for it)
-    expect(screen.queryByTestId('pick-channel-C001')).not.toBeInTheDocument();
-    expect(screen.getByText('bound')).toBeInTheDocument();
+    expect(screen.getByTestId('pick-channel-C002')).toBeInTheDocument(); // engineering
+    expect(screen.getByTestId('pick-channel-C003')).toBeInTheDocument(); // marketing
+    expect(screen.queryByTestId('pick-channel-C001')).not.toBeInTheDocument(); // general (bound)
+    // The legacy "bound" indicator inside the picker is gone — bound channels
+    // are no longer rendered there at all.
+    expect(screen.queryByText('bound')).not.toBeInTheDocument();
   });
 
   // -------------------------------------------------------------------------
@@ -434,5 +440,112 @@ describe('ChannelSection', () => {
         /already bound to another workspace/i,
       );
     });
+  });
+
+  // -------------------------------------------------------------------------
+  // CR-001 Scenario 1: Search input visible + full list when query is empty
+  // -------------------------------------------------------------------------
+
+  it('renders search input and full channel list with total count when query is empty', () => {
+    mockUseSlackChannelsQuery.mockReturnValue({
+      data: [CHANNEL_GENERAL, CHANNEL_ENGINEERING, CHANNEL_MARKETING],
+      isLoading: false,
+      isError: false,
+    });
+    mockUseChannelBindingsQuery.mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: false,
+    });
+
+    renderChannelSection();
+
+    // Open picker to reveal search UI
+    fireEvent.click(screen.getByTestId('add-channel-button'));
+
+    // Search input must be present
+    expect(screen.getByTestId('channel-search-input')).toBeInTheDocument();
+
+    // All 3 channels visible in the picker (pick-channel buttons for unbound ones)
+    expect(screen.getByTestId('pick-channel-C001')).toBeInTheDocument();
+    expect(screen.getByTestId('pick-channel-C002')).toBeInTheDocument();
+    expect(screen.getByTestId('pick-channel-C003')).toBeInTheDocument();
+
+    // Count badge shows total only (no filter active)
+    const badge = screen.getByTestId('channel-count-badge');
+    expect(badge).toHaveTextContent('3 channels');
+  });
+
+  // -------------------------------------------------------------------------
+  // CR-001 Scenario 2: Typing filters list and updates count badge
+  // -------------------------------------------------------------------------
+
+  it('filters channel list by case-insensitive substring and updates count badge', () => {
+    const CHANNEL_GENERAL_NOTICE = { id: 'C004', name: 'general-notices', is_private: false };
+    mockUseSlackChannelsQuery.mockReturnValue({
+      data: [CHANNEL_GENERAL, CHANNEL_ENGINEERING, CHANNEL_MARKETING, CHANNEL_GENERAL_NOTICE],
+      isLoading: false,
+      isError: false,
+    });
+    mockUseChannelBindingsQuery.mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: false,
+    });
+
+    renderChannelSection();
+
+    // Open picker
+    fireEvent.click(screen.getByTestId('add-channel-button'));
+
+    // Type "gen" — should match "general" and "general-notices" (case-insensitive)
+    fireEvent.change(screen.getByTestId('channel-search-input'), {
+      target: { value: 'gen' },
+    });
+
+    // Only matching channels visible (pick-channel buttons)
+    expect(screen.getByTestId('pick-channel-C001')).toBeInTheDocument(); // general
+    expect(screen.getByTestId('pick-channel-C004')).toBeInTheDocument(); // general-notices
+    expect(screen.queryByTestId('pick-channel-C002')).not.toBeInTheDocument(); // engineering hidden
+    expect(screen.queryByTestId('pick-channel-C003')).not.toBeInTheDocument(); // marketing hidden
+
+    // Count badge shows filtered/total
+    const badge = screen.getByTestId('channel-count-badge');
+    expect(badge).toHaveTextContent('2 of 4 channels');
+  });
+
+  // -------------------------------------------------------------------------
+  // CR-001 Scenario 3: Zero-match query shows in-overlay empty state
+  // -------------------------------------------------------------------------
+
+  it('renders empty-state copy with query text when no channels match the search', () => {
+    mockUseSlackChannelsQuery.mockReturnValue({
+      data: [CHANNEL_GENERAL, CHANNEL_ENGINEERING, CHANNEL_MARKETING],
+      isLoading: false,
+      isError: false,
+    });
+    mockUseChannelBindingsQuery.mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: false,
+    });
+
+    renderChannelSection();
+
+    // Open picker
+    fireEvent.click(screen.getByTestId('add-channel-button'));
+
+    // Type a substring that matches nothing
+    fireEvent.change(screen.getByTestId('channel-search-input'), {
+      target: { value: 'zzznomatch' },
+    });
+
+    // In-overlay empty state must show the query text
+    expect(screen.getByTestId('channel-search-empty')).toBeInTheDocument();
+    expect(screen.getByTestId('channel-search-empty')).toHaveTextContent('No channels match "zzznomatch"');
+
+    // The global "No channels found in this Slack team." must NOT render
+    // (allChannels.length > 0, so we're in the filter-mismatch branch)
+    expect(screen.queryByText('No channels found in this Slack team.')).not.toBeInTheDocument();
   });
 });

@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -48,6 +48,32 @@ router = APIRouter(prefix="/api", tags=["workspaces"])
 # ---------------------------------------------------------------------------
 # Authorization helper
 # ---------------------------------------------------------------------------
+
+
+async def is_team_owner(team_id: str, user_id: str) -> bool:
+    """Return True when *user_id* has role='owner' in *team_id*.
+
+    New helper for STORY-025-05 owner-gate on DELETE.  Intentionally separate
+    from ``assert_team_member`` — the two helpers serve different purposes and
+    must not be merged (BUG-002 regression risk).
+
+    Args:
+        team_id: The Slack team ID.
+        user_id: The authenticated user's UUID string.
+
+    Returns:
+        True if the user is a team owner, False otherwise.
+    """
+    sb = get_supabase()
+    result = await execute_async(
+        sb.table("teemo_slack_team_members")
+        .select("role")
+        .eq("slack_team_id", team_id)
+        .eq("user_id", user_id)
+        .eq("role", "owner")
+        .limit(1)
+    )
+    return bool(result.data)
 
 
 async def assert_team_member(team_id: str, user_id: str) -> None:
@@ -90,7 +116,12 @@ async def assert_team_member(team_id: str, user_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _to_response(row: dict[str, Any]) -> WorkspaceResponse:
+def _to_response(
+    row: dict[str, Any],
+    *,
+    is_owner: bool = False,
+    slack_team_name: Optional[str] = None,
+) -> WorkspaceResponse:
     """Deserialize a raw Supabase row dict into a WorkspaceResponse.
 
     Explicitly passes only the fields declared on WorkspaceResponse, so that
@@ -98,8 +129,15 @@ def _to_response(row: dict[str, Any]) -> WorkspaceResponse:
     present in the DB row are silently discarded — defense in depth on top of
     the model-level guard (see WorkspaceResponse docstring).
 
+    The ``is_owner`` and ``slack_team_name`` kwargs are detail-only fields set by
+    ``get_workspace``; list endpoints always use the defaults (False / None).
+
     Args:
         row: Raw dict returned by PostgREST / supabase-py.
+        is_owner: True when the calling user has role='owner' in the workspace team.
+        slack_team_name: Human-readable Slack workspace name from
+            teemo_slack_teams.slack_team_name, populated at OAuth install
+            (slack_oauth.py). None when no install row found.
 
     Returns:
         A validated WorkspaceResponse instance.
@@ -115,6 +153,8 @@ def _to_response(row: dict[str, Any]) -> WorkspaceResponse:
         bot_persona=row.get("bot_persona"),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        is_owner=is_owner,
+        slack_team_name=slack_team_name,
     )
 
 
@@ -252,12 +292,20 @@ async def get_workspace(
     The ``user_id`` filter ensures users can only retrieve their own workspaces,
     preventing cross-user data access without requiring a separate team ownership check.
 
+    STORY-025-05: response is extended with two detail-only fields:
+    - ``is_owner``: True when the caller has role='owner' in the workspace's Slack team.
+    - ``slack_team_name``: Human-readable Slack workspace name from
+      teemo_slack_teams.slack_team_name, populated at OAuth install (null if
+      no install row found). Hotfix 2026-04-26: replaced ``slack_domain``
+      since teemo_slack_teams has no ``domain`` column in the current schema.
+    These fields are NOT included in the list endpoint (GET /api/slack-teams/{id}/workspaces).
+
     Args:
         workspace_id: UUID of the workspace from the path.
         user_id: Injected by ``get_current_user_id``; raises 401 if invalid.
 
     Returns:
-        The ``WorkspaceResponse`` for the requested workspace.
+        The ``WorkspaceResponse`` for the requested workspace (with is_owner + slack_team_name).
 
     Raises:
         HTTPException(401): No or invalid auth token.
@@ -274,7 +322,28 @@ async def get_workspace(
     )
     if not result.data:
         raise HTTPException(status_code=404, detail="Workspace not found.")
-    return _to_response(result.data[0])
+
+    row = result.data[0]
+    slack_team_id = row.get("slack_team_id")
+
+    # Resolve is_owner: check whether caller has role='owner' in the workspace's team.
+    owner_flag = False
+    if slack_team_id:
+        owner_flag = await is_team_owner(slack_team_id, user_id)
+
+    # Resolve slack_team_name: lookup teemo_slack_teams.slack_team_name (null-safe).
+    team_name: Optional[str] = None
+    if slack_team_id:
+        team_result = await execute_async(
+            sb.table("teemo_slack_teams")
+            .select("slack_team_name")
+            .eq("slack_team_id", slack_team_id)
+            .limit(1)
+        )
+        if team_result.data:
+            team_name = team_result.data[0].get("slack_team_name")
+
+    return _to_response(row, is_owner=owner_flag, slack_team_name=team_name)
 
 
 # ---------------------------------------------------------------------------
@@ -421,11 +490,13 @@ async def delete_workspace(
     PostgreSQL ON DELETE CASCADE removes child rows from:
     teemo_skills, teemo_knowledge_index, teemo_workspace_channels.
 
-    Authorization is enforced by filtering on both ``id`` AND ``user_id`` —
-    if the workspace does not exist or is owned by another user, the Supabase
-    DELETE returns empty data and we raise HTTP 404. Returning 404 (rather than
-    403) for cross-user access is intentional: it avoids leaking existence
-    information (ADR-024).
+    STORY-025-05 — Authorization model (creator OR team-owner OR semantics, OQ-2=C):
+    - 204: caller is the workspace creator (user_id == workspace.user_id) OR a team owner.
+    - 403: workspace exists, caller IS a team member, but is neither creator nor owner.
+           Body: {"detail": "Only the workspace creator or a team owner can delete this workspace."}
+    - 404: workspace row missing OR caller is not a member of the team at all.
+           Body: {"detail": "Workspace not found."}
+           (ADR-024 existence-leak guard: non-members cannot distinguish missing from forbidden.)
 
     Args:
         workspace_id: UUID of the workspace to delete.
@@ -433,17 +504,49 @@ async def delete_workspace(
 
     Raises:
         HTTPException(401): No or invalid auth token.
-        HTTPException(404): Workspace not found or not owned by the current user.
+        HTTPException(403): Workspace exists, caller is a team member but lacks delete authority.
+        HTTPException(404): Workspace not found or caller is not a team member.
     """
     sb = get_supabase()
-    result = (
-        await execute_async(sb.table("teemo_workspaces")
+
+    # 1. Fetch workspace row (no user filter) to know creator + team.
+    row_result = await execute_async(
+        sb.table("teemo_workspaces")
+        .select("user_id, slack_team_id")
+        .eq("id", str(workspace_id))
+        .limit(1)
+    )
+    if not row_result.data:
+        raise HTTPException(status_code=404, detail="Workspace not found.")
+
+    workspace_row = row_result.data[0]
+    is_creator = workspace_row["user_id"] == user_id
+    owner_flag = await is_team_owner(workspace_row["slack_team_id"], user_id)
+
+    if not (is_creator or owner_flag):
+        # Distinguish team-member (403) from non-member (404, existence-leak guard).
+        membership = await execute_async(
+            sb.table("teemo_slack_team_members")
+            .select("role")
+            .eq("slack_team_id", workspace_row["slack_team_id"])
+            .eq("user_id", user_id)
+            .limit(1)
+        )
+        if not membership.data:
+            raise HTTPException(status_code=404, detail="Workspace not found.")
+        raise HTTPException(
+            status_code=403,
+            detail="Only the workspace creator or a team owner can delete this workspace.",
+        )
+
+    # CASCADE removes children (skills, knowledge_index, channels).
+    result = await execute_async(
+        sb.table("teemo_workspaces")
         .delete()
         .eq("id", str(workspace_id))
-        .eq("user_id", user_id)
-        )
     )
     if not result.data:
+        # Defensive: should not happen since we just SELECTed it.
         raise HTTPException(status_code=404, detail="Workspace not found.")
 
 

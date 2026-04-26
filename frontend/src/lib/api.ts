@@ -245,6 +245,14 @@ export interface Workspace {
   bot_persona?: string | null;
   created_at: string;
   updated_at: string;
+  /**
+   * Detail-only fields (STORY-025-05) — present on GET /api/workspaces/{id} only.
+   * List endpoint (GET /api/slack-teams/{id}/workspaces) omits these; optional here.
+   */
+  /** True when the authenticated user has role='owner' in the workspace's Slack team. */
+  is_owner?: boolean;
+  /** Human-readable Slack workspace name from teemo_slack_teams.slack_team_name (set at OAuth install). Null when no install row found. */
+  slack_team_name?: string | null;
 }
 
 /**

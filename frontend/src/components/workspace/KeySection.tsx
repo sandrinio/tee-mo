@@ -1,27 +1,25 @@
 /**
- * KeySection.tsx — Standalone BYOK key management section (STORY-008-01 R1).
+ * KeySection.tsx — BYOK key management module (STORY-025-02 re-skin).
  *
- * Extracted from WorkspaceCard.tsx so it can be reused inside SetupStepper
- * (step 2 content) without duplicating logic. Zero behavior changes from the
- * original inline implementation.
+ * Re-skinned from the stacked form to a segmented control + masked-key box
+ * per the workspace v2 design handoff (WorkspaceV2Modules.jsx KeyBody).
  *
- * States:
- *   - Loading: skeleton pulse while key status is fetched.
- *   - Collapsed / no key: warning label + "+ Add key" button.
- *   - Collapsed / has key: masked key + provider badge + Update / Delete buttons.
- *   - Expanded form: provider dropdown, password input, Validate → Save flow.
- *   - Delete confirm: inline "Sure? [Yes, Delete] [Cancel]" row.
+ * Changes (chrome only — zero behavior changes):
+ *   - 3-button segmented control (Google / OpenAI / Anthropic) replacing the dropdown.
+ *   - Masked key rendered in `rounded-md bg-slate-50 p-3 font-mono text-xs` box.
+ *   - "Update" renamed to "Rotate" (design §KeyBody).
+ *   - AES-256-GCM caption added.
+ *   - Outer container removes redundant border (ModuleSection provides the card).
  *
- * Design rules (ADR-022 + Design Guide):
- *   - Section border: `border border-slate-200 rounded-lg p-3 mt-3`
- *   - Coral accent: `text-rose-500`
- *   - No Lucide icons — plain text/emoji only
- *   - Max font weight: `font-semibold` (600)
+ * Behaviour preserved verbatim:
+ *   - useKeyQuery, useSaveKeyMutation, useDeleteKeyMutation hooks unchanged.
+ *   - Validate → Save flow unchanged.
+ *   - Delete confirm flow unchanged.
  *
  * ADR-002 hard rule: plaintext key is NEVER stored in component state beyond
  * the controlled input value. It is sent directly to the API and discarded.
  */
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { ValidateKeyResponse } from '../../lib/api';
 import { validateKey } from '../../lib/api';
 import { useKeyQuery, useSaveKeyMutation, useDeleteKeyMutation } from '../../hooks/useKey';
@@ -31,13 +29,13 @@ import { useKeyQuery, useSaveKeyMutation, useDeleteKeyMutation } from '../../hoo
 // ---------------------------------------------------------------------------
 
 /**
- * Provider options for the BYOK key dropdown.
+ * Provider options for the BYOK key segmented control.
  * Values must match the backend's `SupportedProvider` enum in ADR-002.
  */
 const PROVIDERS = [
-  { value: 'openai' as const, label: 'OpenAI' },
+  { value: 'google' as const,    label: 'Google' },
+  { value: 'openai' as const,    label: 'OpenAI' },
   { value: 'anthropic' as const, label: 'Anthropic' },
-  { value: 'google' as const, label: 'Google (Gemini)' },
 ] as const;
 
 /** Provider union type derived from PROVIDERS to keep it DRY. */
@@ -48,10 +46,7 @@ type Provider = (typeof PROVIDERS)[number]['value'];
 // ---------------------------------------------------------------------------
 
 /**
- * KeySection — compact component for BYOK key management.
- *
- * Can be embedded in WorkspaceCard (collapsed summary view) or in
- * SetupStepper step 2 (guided setup flow). Same logic and UI in both cases.
+ * KeySection — BYOK key management for the workspace v2 connections group.
  *
  * @param workspaceId - UUID of the workspace this key belongs to.
  * @param teamId      - Slack team ID — passed to mutations for cache invalidation.
@@ -69,6 +64,16 @@ export function KeySection({ workspaceId, teamId }: { workspaceId: string; teamI
   const [validating, setValidating] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
+  // Sync local provider state from saved key data when it loads.
+  // This ensures the segmented control reflects the persisted provider immediately
+  // without requiring the user to open the form first.
+  useEffect(() => {
+    if (keyData?.provider && !showForm) {
+      const match = PROVIDERS.find((p) => p.value === keyData.provider);
+      if (match) setProvider(match.value);
+    }
+  }, [keyData?.provider, showForm]);
+
   /** Reset all transient form state back to defaults. */
   function resetForm() {
     setShowForm(false);
@@ -78,7 +83,7 @@ export function KeySection({ workspaceId, teamId }: { workspaceId: string; teamI
     setValidating(false);
   }
 
-  /** Open the form, pre-selecting the current provider when updating. */
+  /** Open the form, pre-selecting the current provider when rotating. */
   function openForm() {
     if (keyData?.provider) {
       const match = PROVIDERS.find((p) => p.value === keyData.provider);
@@ -124,7 +129,7 @@ export function KeySection({ workspaceId, teamId }: { workspaceId: string; teamI
 
   if (isLoading) {
     return (
-      <div className="border border-slate-200 rounded-lg p-3 mt-3 animate-pulse">
+      <div className="p-5 animate-pulse">
         <div className="h-3 w-1/3 rounded bg-slate-100" />
       </div>
     );
@@ -132,71 +137,105 @@ export function KeySection({ workspaceId, teamId }: { workspaceId: string; teamI
 
   const hasKey = keyData?.has_key === true;
 
-  // Human-readable provider label for the badge (e.g. "openai" → "OpenAI")
-  const providerLabel =
-    PROVIDERS.find((p) => p.value === keyData?.provider)?.label ?? keyData?.provider ?? '';
+  // The segmented control always reflects local `provider` state,
+  // which is synced from keyData.provider via useEffect above.
+  const activeProvider = provider;
 
   return (
-    <div className="border border-slate-200 rounded-lg p-3 mt-3">
+    <div className="p-5 space-y-4">
+      {/* ------------------------------------------------------------------ */}
+      {/* Segmented control — provider selection                              */}
+      {/* ------------------------------------------------------------------ */}
+      <div className="flex gap-2">
+        {PROVIDERS.map((p) => {
+          const isActive = activeProvider === p.value;
+          return (
+            <button
+              key={p.value}
+              type="button"
+              onClick={() => {
+                setProvider(p.value);
+                setValidationResult(null);
+              }}
+              data-testid={`provider-segment-${p.value}`}
+              className={[
+                'h-8 px-3 rounded-md text-xs font-medium border transition-colors',
+                isActive
+                  ? 'bg-brand-50 text-brand-700 border-brand-200'
+                  : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300',
+              ].join(' ')}
+            >
+              {p.label}
+            </button>
+          );
+        })}
+      </div>
+
       {/* ------------------------------------------------------------------ */}
       {/* Collapsed display — no form open                                    */}
       {/* ------------------------------------------------------------------ */}
       {!showForm && (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-slate-500 font-semibold">API Key:</span>
-
+        <div className="space-y-3">
           {hasKey ? (
             <>
-              {/* Provider badge */}
-              <span className="text-xs bg-slate-100 text-slate-700 rounded px-1.5 py-0.5 font-semibold">
-                {providerLabel}
-              </span>
-              {/* Masked key */}
-              <span className="text-xs font-mono text-slate-700" data-testid="key-mask">
-                {keyData?.key_mask}
-              </span>
-
-              {/* Update / Delete buttons */}
-              <button
-                type="button"
-                onClick={openForm}
-                className="text-xs font-semibold text-slate-500 hover:text-slate-800"
-              >
-                Update
-              </button>
-
-              {!showDeleteConfirm ? (
+              {/* Masked key box */}
+              <div className="flex items-center justify-between gap-3">
+                <div
+                  className="rounded-md bg-slate-50 border border-slate-200 p-3 font-mono text-xs text-slate-700 flex-1 truncate"
+                  data-testid="key-mask"
+                >
+                  {keyData?.key_mask}
+                </div>
                 <button
                   type="button"
-                  onClick={() => setShowDeleteConfirm(true)}
-                  className="text-xs font-semibold text-rose-500 hover:opacity-70"
+                  onClick={openForm}
+                  className="text-xs font-semibold text-slate-500 hover:text-slate-800 whitespace-nowrap"
+                  data-testid="rotate-button"
                 >
-                  Delete
+                  Rotate
                 </button>
-              ) : (
-                <>
-                  <span className="text-xs text-slate-500">Sure?</span>
+              </div>
+
+              {/* Caption */}
+              <p className="text-xs text-slate-500">
+                Encrypted with AES-256-GCM.
+              </p>
+
+              {/* Delete control */}
+              <div className="flex items-center gap-2">
+                {!showDeleteConfirm ? (
                   <button
                     type="button"
-                    onClick={handleDelete}
-                    disabled={deleteMutation.isPending}
-                    className="text-xs font-semibold text-rose-500 hover:opacity-70 disabled:opacity-40"
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className="text-xs font-semibold text-rose-500 hover:opacity-70"
                   >
-                    {deleteMutation.isPending ? 'Deleting…' : 'Yes, Delete'}
+                    Delete
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowDeleteConfirm(false)}
-                    className="text-xs font-semibold text-slate-500 hover:text-slate-800"
-                  >
-                    Cancel
-                  </button>
-                </>
-              )}
+                ) : (
+                  <>
+                    <span className="text-xs text-slate-500">Sure?</span>
+                    <button
+                      type="button"
+                      onClick={handleDelete}
+                      disabled={deleteMutation.isPending}
+                      className="text-xs font-semibold text-rose-500 hover:opacity-70 disabled:opacity-40"
+                    >
+                      {deleteMutation.isPending ? 'Deleting…' : 'Yes, Delete'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowDeleteConfirm(false)}
+                      className="text-xs font-semibold text-slate-500 hover:text-slate-800"
+                    >
+                      Cancel
+                    </button>
+                  </>
+                )}
+              </div>
             </>
           ) : (
-            <>
-              {/* No key state */}
+            /* No key state */
+            <div className="flex items-center gap-2">
               <span className="text-xs text-rose-500" data-testid="no-key-label">
                 ⚠ No key configured
               </span>
@@ -208,35 +247,18 @@ export function KeySection({ workspaceId, teamId }: { workspaceId: string; teamI
               >
                 + Add key
               </button>
-            </>
+            </div>
           )}
         </div>
       )}
 
       {/* ------------------------------------------------------------------ */}
-      {/* Expanded add/update form                                            */}
+      {/* Expanded add/rotate form                                            */}
       {/* ------------------------------------------------------------------ */}
       {showForm && (
         <div className="flex flex-col gap-2">
-          {/* Form row: provider dropdown + key input + validate */}
+          {/* Form row: key input + validate + save + cancel */}
           <div className="flex flex-wrap items-center gap-2">
-            {/* Provider dropdown */}
-            <select
-              value={provider}
-              onChange={(e) => {
-                setProvider(e.target.value as Provider);
-                setValidationResult(null);
-              }}
-              className="text-xs rounded border border-slate-300 px-2 py-1 text-slate-700"
-              aria-label="Provider"
-            >
-              {PROVIDERS.map((p) => (
-                <option key={p.value} value={p.value}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
-
             {/* Key input with show/hide toggle */}
             <div className="flex items-center gap-1">
               <input

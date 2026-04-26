@@ -50,5 +50,8 @@ class WorkspaceResponse(WorkspaceBase):
     bot_persona: Optional[str] = Field(None, max_length=2000)
     created_at: datetime
     updated_at: datetime
+    # Detail-only fields (GET /workspaces/{id}); never on list endpoints — see STORY-025-05.
+    is_owner: bool = False
+    slack_team_name: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)

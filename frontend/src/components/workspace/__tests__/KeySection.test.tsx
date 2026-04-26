@@ -221,7 +221,7 @@ describe('KeySection', () => {
       expect(keyMask).toHaveTextContent('sk-a...xyz9');
     });
 
-    it('shows Update and Delete controls when a key is configured', () => {
+    it('shows Rotate and Delete controls when a key is configured', () => {
       // Arrange
       vi.mocked(useKeyModule.useKeyQuery).mockReturnValue({
         data: {
@@ -249,8 +249,8 @@ describe('KeySection', () => {
         </QueryClientProvider>,
       );
 
-      // Assert: both action buttons present
-      expect(screen.getByText('Update')).toBeInTheDocument();
+      // Assert: Rotate button (renamed from "Update" in v2 re-skin) + Delete button present
+      expect(screen.getByText('Rotate')).toBeInTheDocument();
       expect(screen.getByText('Delete')).toBeInTheDocument();
     });
 

@@ -40,6 +40,7 @@ specific functions via ``monkeypatch.setattr``. Same principle as
 ADR references: ADR-015 (Supabase via get_supabase), ADR-024 (workspace isolation).
 """
 
+import asyncio
 import logging
 from typing import Optional
 
@@ -114,6 +115,23 @@ def _record_to_public(record) -> McpServerPublic:
     )
 
 
+async def _assert_workspace_access(
+    workspace_id: str, user_id: str, supabase
+) -> str:
+    """Resolve team_id from workspace_id and verify the user is a member.
+
+    Composes the two-hop auth chain into a single coroutine so it can be
+    awaited as one ``asyncio.Task`` and run concurrently with a data fetch
+    on read endpoints.
+
+    Returns the slack_team_id if access is granted; raises HTTPException
+    (403 non-member, 404 unknown workspace) otherwise.
+    """
+    team_id = await _resolve_team_id(workspace_id, supabase)
+    await assert_team_member(team_id, user_id)
+    return team_id
+
+
 # ---------------------------------------------------------------------------
 # GET /api/workspaces/{workspace_id}/mcp-servers
 # ---------------------------------------------------------------------------
@@ -143,10 +161,24 @@ async def list_mcp_servers(
         HTTPException(403): Caller is not a member of this workspace's team.
         HTTPException(404): Workspace not found.
     """
-    team_id = await _resolve_team_id(workspace_id, supabase)
-    await assert_team_member(team_id, user_id)
+    # Run the 2-hop auth chain (resolve team_id → assert membership) in
+    # parallel with the data fetch. Each Supabase round trip costs ~80ms
+    # against self-hosted Kong+PostgREST; sequential = ~240ms, parallel ≈
+    # ~160ms. The fetch result is only returned if auth succeeds — on
+    # failure we cancel the fetch task so it doesn't waste a connection.
+    auth_task = asyncio.create_task(
+        _assert_workspace_access(workspace_id, user_id, supabase)
+    )
+    fetch_task = asyncio.create_task(
+        mcp_service.list_mcp_servers(workspace_id, supabase=supabase)
+    )
+    try:
+        await auth_task
+    except BaseException:
+        fetch_task.cancel()
+        raise
 
-    records = await mcp_service.list_mcp_servers(workspace_id, supabase=supabase)
+    records = await fetch_task
     return [_record_to_public(r) for r in records]
 
 

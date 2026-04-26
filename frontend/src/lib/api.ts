@@ -992,6 +992,143 @@ export async function uploadKnowledgeFile(workspaceId: string, file: File): Prom
 }
 
 // ---------------------------------------------------------------------------
+// MCP Server wrappers (STORY-012-04)
+// ---------------------------------------------------------------------------
+
+/**
+ * Transport type union for MCP servers.
+ * Matches the backend `transport` column CHECK constraint.
+ */
+export type McpTransport = 'sse' | 'streamable_http';
+
+/**
+ * A single MCP server record returned by GET /api/workspaces/{id}/mcp-servers.
+ * Headers are NEVER included in the response (write-only over the API).
+ */
+export interface McpServer {
+  /** Slug identifier for this MCP server, unique per workspace. */
+  name: string;
+  /** Transport protocol — 'sse' or 'streamable_http'. */
+  transport: McpTransport;
+  /** HTTPS URL of the MCP server endpoint. */
+  url: string;
+  /** Whether the server is currently active (agent will use it). */
+  is_active: boolean;
+  /** ISO 8601 timestamp when this server was added. */
+  created_at: string;
+}
+
+/**
+ * Result returned by POST /api/workspaces/{id}/mcp-servers/{name}/test.
+ * Always returns HTTP 200 — read `ok` to determine success or failure.
+ */
+export interface McpTestResult {
+  /** true if the handshake succeeded and at least 1 tool was found. */
+  ok: boolean;
+  /** Number of tools registered by the MCP server (0 on failure). */
+  tool_count: number;
+  /** Error message from the handshake attempt, or null on success. */
+  error: string | null;
+}
+
+/** Request body for POST /api/workspaces/{id}/mcp-servers */
+export interface McpServerCreate {
+  name: string;
+  transport: McpTransport;
+  url: string;
+  headers: Record<string, string>;
+}
+
+/** Request body for PATCH /api/workspaces/{id}/mcp-servers/{name} */
+export interface McpServerPatch {
+  is_active?: boolean;
+  url?: string;
+  headers?: Record<string, string>;
+}
+
+/**
+ * GET /api/workspaces/{workspaceId}/mcp-servers
+ * Returns all MCP servers configured for a workspace.
+ * Headers are never included in the response.
+ *
+ * @param workspaceId - UUID of the workspace to list MCP servers for.
+ * @returns Array of McpServer records.
+ */
+export function listMcpServers(workspaceId: string): Promise<McpServer[]> {
+  return apiGet<McpServer[]>(`/api/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers`);
+}
+
+/**
+ * POST /api/workspaces/{workspaceId}/mcp-servers
+ * Adds a new MCP server to the workspace.
+ *
+ * @param workspaceId - UUID of the workspace to add the server to.
+ * @param body        - Server creation payload including name, transport, url, headers.
+ * @returns The newly created McpServer record (headers omitted).
+ */
+export function createMcpServer(workspaceId: string, body: McpServerCreate): Promise<McpServer> {
+  return apiPost<McpServerCreate, McpServer>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers`,
+    body,
+  );
+}
+
+/**
+ * PATCH /api/workspaces/{workspaceId}/mcp-servers/{name}
+ * Partially updates an MCP server (toggle is_active, update URL/headers).
+ *
+ * @param workspaceId - UUID of the workspace that owns the server.
+ * @param name        - Slug name of the MCP server to update.
+ * @param body        - Partial update payload.
+ * @returns The updated McpServer record.
+ */
+export function updateMcpServer(
+  workspaceId: string,
+  name: string,
+  body: McpServerPatch,
+): Promise<McpServer> {
+  return apiPatch<McpServerPatch, McpServer>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/${encodeURIComponent(name)}`,
+    body,
+  );
+}
+
+/**
+ * DELETE /api/workspaces/{workspaceId}/mcp-servers/{name}
+ * Permanently removes an MCP server from the workspace.
+ *
+ * @param workspaceId - UUID of the workspace that owns the server.
+ * @param name        - Slug name of the MCP server to delete.
+ * @returns void (HTTP 204 No Content on success).
+ */
+export async function deleteMcpServer(workspaceId: string, name: string): Promise<void> {
+  const r = await fetchWithAuth(
+    `${API_URL}/api/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/${encodeURIComponent(name)}`,
+    { method: 'DELETE' },
+  );
+  if (!r.ok) {
+    const payload = await r.json().catch(() => ({}));
+    throw new Error(payload?.detail ?? `HTTP ${r.status}`);
+  }
+}
+
+/**
+ * POST /api/workspaces/{workspaceId}/mcp-servers/{name}/test
+ * Runs an MCP handshake + tools/list probe against the named server.
+ * Always returns HTTP 200 — check `body.ok` to determine success or failure.
+ *
+ * @param workspaceId - UUID of the workspace that owns the server.
+ * @param name        - Slug name of the MCP server to test.
+ * @returns McpTestResult with ok, tool_count, and error fields.
+ */
+export function testMcpServer(workspaceId: string, name: string): Promise<McpTestResult> {
+  return apiPost<Record<string, never>, McpTestResult>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/${encodeURIComponent(name)}/test`,
+    {},
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Skills wrappers (STORY-023-01)
 // ---------------------------------------------------------------------------
 

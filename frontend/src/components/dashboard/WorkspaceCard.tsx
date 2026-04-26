@@ -42,6 +42,8 @@ import { useKeyQuery } from '../../hooks/useKey';
 import { useKnowledgeQuery } from '../../hooks/useKnowledge';
 import { RenameWorkspaceModal } from './RenameWorkspaceModal';
 import { KeySection } from '../workspace/KeySection';
+import { useMcpServersQuery } from '../../hooks/useMcpServers';
+import { Plug } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
 // Add File placeholder guard (EPIC-006 wires the real button)
@@ -292,6 +294,9 @@ export function WorkspaceCard({ workspace, teamId }: WorkspaceCardProps) {
         {/* BYOK Key Section — STORY-004-04 */}
         <KeySection workspaceId={workspace.id} teamId={teamId} />
 
+        {/* Integrations status chip — full wizard lives on the workspace page. */}
+        <IntegrationsChip workspaceId={workspace.id} teamId={teamId} />
+
         {/* Inline error if make-default mutation fails */}
         {makeDefaultMutation.error != null && (
           <p
@@ -312,5 +317,50 @@ export function WorkspaceCard({ workspace, teamId }: WorkspaceCardProps) {
         onClose={() => setRenameOpen(false)}
       />
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// IntegrationsChip — compact status row on the dashboard card
+// ---------------------------------------------------------------------------
+
+/**
+ * Single-line status chip for MCP integrations on the workspace card.
+ *
+ * Shows connected count + a deep link to the workspace page's integrations
+ * panel. The full add/test/toggle/delete wizard lives on the workspace page
+ * (moduleRegistry entry `integrations` under the `workspace` group).
+ */
+function IntegrationsChip({
+  workspaceId,
+  teamId,
+}: {
+  workspaceId: string;
+  teamId: string;
+}) {
+  const { data: servers = [] } = useMcpServersQuery(workspaceId);
+  const activeCount = servers.filter((s) => s.is_active).length;
+
+  let label: string;
+  if (servers.length === 0) {
+    label = 'No integrations connected';
+  } else if (activeCount === servers.length) {
+    label = `${activeCount} integration${activeCount === 1 ? '' : 's'} connected`;
+  } else {
+    label = `${activeCount} of ${servers.length} integrations active`;
+  }
+
+  return (
+    <Link
+      to="/app/teams/$teamId/$workspaceId"
+      params={{ teamId, workspaceId }}
+      hash="tm-integrations"
+      className="flex items-center gap-2 text-xs text-slate-500 hover:text-brand-600 transition-colors"
+      data-testid="integrations-chip"
+    >
+      <Plug className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      <span>{label}</span>
+      <span className="ml-auto text-brand-600 font-semibold">Manage →</span>
+    </Link>
   );
 }

@@ -38,6 +38,7 @@ const {
   mockUseChannelBindingsQuery,
   mockUseSkillsQuery,
   mockUseAutomationsQuery,
+  mockUseMcpServersQuery,
 } = vi.hoisted(() => ({
   mockUseWorkspaceQuery:       vi.fn(),
   mockUseDriveStatusQuery:     vi.fn(),
@@ -46,6 +47,7 @@ const {
   mockUseChannelBindingsQuery: vi.fn(),
   mockUseSkillsQuery:          vi.fn(),
   mockUseAutomationsQuery:     vi.fn(),
+  mockUseMcpServersQuery:      vi.fn(),
 }));
 
 // ---------------------------------------------------------------------------
@@ -72,6 +74,9 @@ vi.mock('../../../hooks/useSkills', () => ({
 }));
 vi.mock('../../../hooks/useAutomations', () => ({
   useAutomationsQuery: mockUseAutomationsQuery,
+}));
+vi.mock('../../../hooks/useMcpServers', () => ({
+  useMcpServersQuery: mockUseMcpServersQuery,
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -109,6 +114,9 @@ vi.mock('../AutomationsSection', () => ({
 }));
 vi.mock('../DangerZoneSection', () => ({
   DangerZoneSection: () => React.createElement('div', { 'data-testid': 'mock-danger' }, 'Danger zone'),
+}));
+vi.mock('../../dashboard/IntegrationsSection', () => ({
+  IntegrationsSection: () => React.createElement('div', { 'data-testid': 'mock-integrations' }, 'Integrations body'),
 }));
 
 // ---------------------------------------------------------------------------
@@ -164,6 +172,7 @@ function setupDefaultMocks() {
   });
   mockUseSkillsQuery.mockReturnValue({ data: [], isLoading: false });
   mockUseAutomationsQuery.mockReturnValue({ data: [], isLoading: false });
+  mockUseMcpServersQuery.mockReturnValue({ data: [], isLoading: false });
 }
 
 const GROUPS = [
@@ -337,13 +346,13 @@ describe('Scenario: All modules render through the new shell', () => {
     setupDefaultMocks();
   });
 
-  it('MODULE_REGISTRY has 9 entries covering all modules including DangerZone', () => {
-    // connections: slack, drive, key, channels (4)
-    // knowledge: files (1)
-    // behavior: persona, skills, automations (3)
-    // workspace: danger-zone (1)
-    // Total = 9
-    expect(MODULE_REGISTRY.length).toBe(9);
+  it('MODULE_REGISTRY has 10 entries covering all modules including DangerZone', () => {
+    // connections: slack, channels (2)
+    // knowledge:   files (1)
+    // behavior:    persona, skills, automations (3)
+    // workspace:   drive, key, integrations, danger-zone (4)
+    // Total = 10
+    expect(MODULE_REGISTRY.length).toBe(10);
   });
 
   it('WorkspaceShell renders a ModuleSection for each visible registry entry', async () => {

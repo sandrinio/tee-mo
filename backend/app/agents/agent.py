@@ -27,9 +27,7 @@ Module isolation (enforced by sprint rule):
 
 from __future__ import annotations
 
-import ipaddress
 import logging
-import socket
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -44,54 +42,9 @@ from pydantic_ai import RunContext
 
 from app.services import document_service as _doc_service
 from app.services import wiki_service as _wiki_service
+from app.core.url_safety import is_safe_url
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# IP safety — block requests to private/internal networks
-# ---------------------------------------------------------------------------
-
-_BLOCKED_NETWORKS = [
-    ipaddress.ip_network(cidr)
-    for cidr in [
-        "10.0.0.0/8",
-        "172.16.0.0/12",
-        "192.168.0.0/16",
-        "127.0.0.0/8",
-        "169.254.0.0/16",
-        "::1/128",
-        "fd00::/8",
-        "fe80::/10",
-    ]
-]
-
-
-def _is_safe_url(url: str) -> bool:
-    """Check that a URL does not resolve to a private/internal IP address.
-
-    Resolves the hostname via DNS first, then checks all returned addresses
-    against the blocked CIDR list. This prevents DNS rebinding attacks where
-    a hostname initially resolves to a public IP but later resolves to an
-    internal one.
-
-    Args:
-        url: Fully-qualified URL to check.
-
-    Returns:
-        True if all resolved IPs are public, False otherwise.
-    """
-    hostname = urlparse(url).hostname
-    if not hostname:
-        return False
-    try:
-        addr_infos = socket.getaddrinfo(hostname, None)
-    except socket.gaierror:
-        return False
-    for addr_info in addr_infos:
-        ip = ipaddress.ip_address(addr_info[4][0])
-        if any(ip in net for net in _BLOCKED_NETWORKS):
-            return False
-    return True
 
 
 # ---------------------------------------------------------------------------
@@ -255,6 +208,17 @@ class AgentDeps:
     for additional tolerance against SimpleNamespace / hand-rolled fakes
     (precedent: citations field's ``getattr`` guard in ``_add_citation``).
     """
+    mcp_servers: list = field(default_factory=list)
+    """Active MCP server client objects for this workspace (STORY-012-03).
+
+    Populated by ``build_agent`` from ``mcp_service.list_mcp_servers`` (active_only=True).
+    Each entry is an ``MCPServerSSE`` or ``MCPServerStreamableHTTP`` instance —
+    they are entered as async context managers by ``slack_dispatch`` via
+    ``AsyncExitStack`` before the ``agent.run_stream`` call.
+    Empty list (the default) means no MCP servers are configured — the
+    ``AsyncExitStack`` is a no-op and existing dispatch behaviour is unchanged.
+    Appended AT END of the dataclass to preserve positional-init order for tests.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -362,6 +326,7 @@ def _build_system_prompt(
     automations: list[dict] | None = None,
     bound_channels: list[dict] | None = None,
     sender_tz: str = "UTC",
+    active_mcp_servers: list[str] | None = None,
 ) -> str:
     """Assemble the system prompt for the Tee-Mo agent.
 
@@ -426,6 +391,13 @@ def _build_system_prompt(
                      line and current local time are appended immediately after
                      the UTC anchor. When "UTC" (default), a softer variant
                      tells the agent tz is unknown and to state its assumption.
+        active_mcp_servers: Optional list of active MCP server name strings
+                     (STORY-012-03). When non-empty, a ``## Connected Integrations``
+                     section is appended listing server names only (no tool
+                     enumeration — Pydantic AI registers tools internally).
+                     When None or empty, the heading is omitted entirely so the
+                     prompt is not polluted for the 99% of workspaces with no
+                     MCP servers.
 
     Returns:
         A fully assembled system prompt string.
@@ -638,6 +610,15 @@ def _build_system_prompt(
             "bind a channel first from the workspace dashboard's Channels section. "
             "Never invent a ``slack_channel_id``."
         )
+
+    # --- Connected Integrations (STORY-012-03) ---
+    # Only render the section when the workspace has ≥1 active MCP server.
+    # Omitting the heading for zero-server workspaces prevents prompt bloat.
+    # Tool enumeration is intentionally absent — Pydantic AI registers tools
+    # from the MCPServerSSE / MCPServerStreamableHTTP objects automatically.
+    if active_mcp_servers:
+        server_bullets = "\n".join(f"- {name}" for name in active_mcp_servers)
+        prompt += f"\n\n## Connected Integrations\n{server_bullets}"
 
     return prompt
 
@@ -1038,6 +1019,29 @@ async def build_agent(
         raw_bound_channels if isinstance(raw_bound_channels, list) else []
     )
 
+    # --- 7.9. Load active MCP servers (STORY-012-03) ---
+    # Fetch active MCP server rows and instantiate the correct Pydantic AI
+    # client for each (MCPServerSSE or MCPServerStreamableHTTP). These objects
+    # are stored on AgentDeps and entered as async context managers by
+    # slack_dispatch via AsyncExitStack before agent.run_stream runs.
+    # Option (A): instantiate via mcp_service._build_mcp_client (which already
+    # decrypts headers inline) — keeps Pydantic AI knowledge in one place.
+    from app.services import mcp_service as _mcp_svc
+
+    try:
+        active_mcp_records = await _mcp_svc.list_mcp_servers(
+            workspace_id,
+            active_only=True,
+            supabase=supabase,
+        )
+    except Exception as _mcp_exc:
+        # MCP load failure must not prevent the agent from running.
+        logger.warning("[AGENT] Failed to load MCP servers for workspace %s: %s", workspace_id, _mcp_exc)
+        active_mcp_records = []
+
+    mcp_clients: list = [_mcp_svc._build_mcp_client(r) for r in active_mcp_records]
+    active_mcp_names: list[str] = [r.name for r in active_mcp_records]
+
     # --- 8. Build system prompt ---
     prompt = _build_system_prompt(
         skills,
@@ -1047,6 +1051,7 @@ async def build_agent(
         automations=automations,
         bound_channels=bound_channels,
         sender_tz=sender_tz,
+        active_mcp_servers=active_mcp_names,
     )
 
     # --- 9. Build skill tool functions ---
@@ -1303,7 +1308,8 @@ async def build_agent(
         if method not in {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}:
             return f"Unsupported HTTP method: {method}"
 
-        if not _is_safe_url(url):
+        _url_ok, _url_reason = is_safe_url(url)
+        if not _url_ok:
             return "Blocked: this URL resolves to a private/internal network address."
 
         try:
@@ -1629,6 +1635,112 @@ async def build_agent(
             logger.error("search_wiki failed: %s", exc, exc_info=True)
             return f"Failed to search wiki: {exc}"
 
+    # --- 11.8. MCP server management tools (STORY-012-03) ---
+    # Tools follow the same pattern as add_skill / remove_skill / list_skills.
+    # The add_mcp_server tool MUST NOT echo auth_header in its return string (Q10).
+
+    async def add_mcp_server(
+        ctx: RunContext[AgentDeps],
+        name: str,
+        url: str,
+        transport: str = "streamable_http",
+        auth_header: str | None = None,
+    ) -> str:
+        """Connect a new MCP server to this workspace.
+
+        Registers an MCP server so the agent gains its tools on the next message.
+        Supports the 80% case: a single Bearer-style Authorization header.
+        For servers needing multiple custom headers, use the workspace dashboard.
+
+        Args:
+            ctx:         pydantic-ai RunContext with deps.
+            name:        Server slug (2-32 lowercase chars, hyphens/underscores ok).
+            url:         HTTPS URL to the MCP server endpoint.
+            transport:   Transport type — ``"streamable_http"`` (default) or ``"sse"``.
+            auth_header: Optional Bearer token. Stored encrypted; NEVER echoed back.
+        """
+        from app.services import mcp_service as _mcp_svc
+
+        headers: dict[str, str] = {}
+        if auth_header:
+            headers = {"Authorization": f"Bearer {auth_header}"}
+
+        try:
+            record = await _mcp_svc.create_mcp_server(
+                workspace_id=ctx.deps.workspace_id,
+                name=name,
+                transport=transport,
+                url=url,
+                headers=headers,
+                supabase=ctx.deps.supabase,
+            )
+            # IMPORTANT: the return string must never contain auth_header's value (Q10).
+            return (
+                f"Connected '{record.name}' ({record.transport}) — "
+                "tools available on your next message.\n\n"
+                "⚠️ Your auth token is encrypted server-side, but the message you sent "
+                "is still in this thread — consider deleting it.\n\n"
+                "If this server needs additional headers (e.g. X-API-Key), open the "
+                "workspace dashboard → Integrations to edit."
+            )
+        except ValueError as exc:
+            return str(exc)
+        except Exception as exc:
+            logger.error("[AGENT] add_mcp_server unexpected error: %s", exc)
+            return f"Failed to connect MCP server: {exc}"
+
+    async def remove_mcp_server(ctx: RunContext[AgentDeps], name: str) -> str:
+        """Disconnect an MCP server from this workspace.
+
+        Removes the server registration so the agent will no longer gain its tools.
+
+        Args:
+            ctx:  pydantic-ai RunContext with deps.
+            name: Exact slug name of the MCP server to remove.
+        """
+        from app.services import mcp_service as _mcp_svc
+
+        try:
+            deleted = await _mcp_svc.delete_mcp_server(
+                workspace_id=ctx.deps.workspace_id,
+                name=name,
+                supabase=ctx.deps.supabase,
+            )
+            if deleted:
+                return f"Disconnected '{name}'."
+            return f"No MCP server '{name}' is connected."
+        except Exception as exc:
+            logger.error("[AGENT] remove_mcp_server unexpected error: %s", exc)
+            return f"Failed to disconnect MCP server: {exc}"
+
+    async def list_mcp_servers(ctx: RunContext[AgentDeps]) -> str:
+        """List all MCP servers connected to this workspace.
+
+        Returns server names, transport type, and active/disabled state.
+        Headers are never included in the output.
+
+        Args:
+            ctx: pydantic-ai RunContext with deps.
+        """
+        from app.services import mcp_service as _mcp_svc
+
+        try:
+            records = await _mcp_svc.list_mcp_servers(
+                workspace_id=ctx.deps.workspace_id,
+                active_only=False,
+                supabase=ctx.deps.supabase,
+            )
+            if not records:
+                return "No MCP servers connected."
+            parts = [
+                f"{r.name} ({r.transport}, {'active' if r.is_active else 'disabled'})"
+                for r in records
+            ]
+            return f"Connected: {', '.join(parts)}"
+        except Exception as exc:
+            logger.error("[AGENT] list_mcp_servers unexpected error: %s", exc)
+            return f"Failed to list MCP servers: {exc}"
+
     # --- 11.7. lint_wiki tool (STORY-013-04) ---
     async def lint_wiki(ctx: RunContext[AgentDeps]) -> str:
         """Scan the entire workspace wiki for structural quality issues.
@@ -1661,6 +1773,9 @@ async def build_agent(
             return f"Failed to lint wiki: {exc}"
 
     # --- 12. Construct Agent and deps ---
+    # MCP tools are registered alongside the built-in skill/web/document tools.
+    # The mcp_servers kwarg tells Pydantic AI to register all tools from each
+    # MCP server object (handles tool enumeration automatically).
     agent = Agent(
         model,
         system_prompt=prompt,
@@ -1672,13 +1787,16 @@ async def build_agent(
             read_document, create_document, update_document, delete_document,
             search_wiki, read_wiki_page, lint_wiki,
             create_automation, list_automations, update_automation, delete_automation,
+            add_mcp_server, remove_mcp_server, list_mcp_servers,
         ],
+        mcp_servers=mcp_clients,
     )
     deps = AgentDeps(
         workspace_id=workspace_id,
         supabase=supabase,
         user_id=user_id,
         sender_tz=sender_tz,
+        mcp_servers=mcp_clients,
     )
 
     return (agent, deps)

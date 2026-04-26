@@ -21,6 +21,7 @@ import type {
   KnowledgeFile,
   Skill,
   Automation,
+  McpServer,
 } from '../../lib/api';
 
 // ---------------------------------------------------------------------------
@@ -67,6 +68,7 @@ export interface WorkspaceData {
   files: KnowledgeFile[];
   skills: Skill[];
   automations: Automation[];
+  mcpServers: McpServer[];
 }
 
 // ---------------------------------------------------------------------------

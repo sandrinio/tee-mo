@@ -30,6 +30,7 @@ import { useKnowledgeQuery } from '../../hooks/useKnowledge';
 import { useChannelBindingsQuery } from '../../hooks/useChannels';
 import { useSkillsQuery } from '../../hooks/useSkills';
 import { useAutomationsQuery } from '../../hooks/useAutomations';
+import { useMcpServersQuery } from '../../hooks/useMcpServers';
 
 import { MODULE_REGISTRY, GROUP_ORDER, GROUP_LABELS } from './moduleRegistry';
 import { ModuleSection } from './ModuleSection';
@@ -75,6 +76,7 @@ export function WorkspaceShell({ workspaceId, teamId }: WorkspaceShellProps) {
   const { data: channels,     isLoading: chLoading }= useChannelBindingsQuery(workspaceId);
   const { data: skills }                             = useSkillsQuery(workspaceId);
   const { data: automations }                        = useAutomationsQuery(workspaceId);
+  const { data: mcpServers }                         = useMcpServersQuery(workspaceId);
 
   // ---------------------------------------------------------------------------
   // Scrollspy — group anchor ids are the first module id in each group.
@@ -194,6 +196,7 @@ export function WorkspaceShell({ workspaceId, teamId }: WorkspaceShellProps) {
     files: knowledge ?? [],
     skills: skills ?? [],
     automations: automations ?? [],
+    mcpServers: mcpServers ?? [],
   };
 
   // ---------------------------------------------------------------------------

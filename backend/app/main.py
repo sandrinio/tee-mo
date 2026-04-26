@@ -39,6 +39,7 @@ from app.api.routes.drive_oauth import router as drive_oauth_router
 from app.api.routes.knowledge import router as knowledge_router
 from app.api.routes.slack_events import router as slack_events_router
 from app.api.routes.slack_oauth import router as slack_oauth_router
+from app.api.routes.mcp_servers import router as mcp_servers_router
 from app.api.routes.workspaces import router as workspace_router
 from app.core.config import settings
 from app.core.db import get_supabase
@@ -215,6 +216,7 @@ app.include_router(workspace_router)
 app.include_router(keys_module.router)
 app.include_router(channels_router)
 app.include_router(automations_router)
+app.include_router(mcp_servers_router)
 
 # Log the encryption key fingerprint at module import time (startup).
 # Only the 8-char hex fingerprint is logged — never the raw key or any secret.
@@ -239,6 +241,7 @@ TEEMO_TABLES = (
     "teemo_wiki_log",
     "teemo_automations",
     "teemo_automation_executions",
+    "teemo_mcp_servers",  # STORY-012-01 (EPIC-012 MCP integration)
 )
 
 

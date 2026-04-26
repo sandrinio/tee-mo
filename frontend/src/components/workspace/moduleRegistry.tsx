@@ -20,7 +20,7 @@
  * Per W01 §5.3: WorkspaceData is passed to each statusResolver once per render.
  */
 
-import { AlertTriangle, MessageSquare, FolderOpen, KeyRound, Hash, FileText, UserRound, Sparkles, Zap } from 'lucide-react';
+import { AlertTriangle, MessageSquare, FolderOpen, KeyRound, Hash, FileText, UserRound, Sparkles, Zap, Plug } from 'lucide-react';
 import type { ModuleEntry, ModuleGroup } from './types';
 
 // Section components — wired into entry.render() per HOTFIX 2026-04-26.
@@ -33,6 +33,7 @@ import { PersonaSection } from './PersonaSection';
 import { SkillsSection } from './SkillsSection';
 import { AutomationsSection } from './AutomationsSection';
 import { DangerZoneSection } from './DangerZoneSection';
+import { IntegrationsSection } from '../dashboard/IntegrationsSection';
 
 // Re-export convenience types so follow-on stories import from a single file.
 export type { ModuleEntry, ModuleGroup };
@@ -204,6 +205,23 @@ export const MODULE_REGISTRY: ModuleEntry[] = [
     // Key is ok when a key is stored, empty otherwise.
     statusResolver: (data) => (data.key?.has_key ? 'ok' : 'empty'),
     render: ({ workspaceId, teamId }) => <KeySection workspaceId={workspaceId} teamId={teamId} />,
+  },
+  {
+    id: 'integrations',
+    group: 'workspace',
+    label: 'Integrations',
+    icon: Plug,
+    summary: 'MCP server integrations',
+    // ok when at least one MCP server is active; partial when servers exist but
+    // none are active (everything disabled); empty when no servers registered.
+    statusResolver: (data) => {
+      const servers = data.mcpServers ?? [];
+      if (servers.length === 0) return 'empty';
+      return servers.some((s) => s.is_active) ? 'ok' : 'partial';
+    },
+    render: ({ workspaceId, teamId }) => (
+      <IntegrationsSection workspaceId={workspaceId} teamId={teamId} />
+    ),
   },
   {
     id: 'danger-zone',

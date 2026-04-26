@@ -221,13 +221,16 @@ async def run_all_tests():
     # ═══════════════════════════════════════════════════════════════════
 
     import httpx
-    from app.agents.agent import _is_safe_url
+    from app.core.url_safety import is_safe_url  # lifted from agent.py — STORY-012-01
 
-    logger.info("5a. _is_safe_url (private IP block)...")
+    logger.info("5a. is_safe_url (private IP block)...")
     try:
-        assert _is_safe_url("https://google.com") == True
-        assert _is_safe_url("http://127.0.0.1:8080") == False
-        assert _is_safe_url("http://192.168.1.1") == False
+        ok_public, _ = is_safe_url("https://google.com")
+        assert ok_public is True
+        ok_loopback, _ = is_safe_url("http://127.0.0.1:8080")
+        assert ok_loopback is False
+        ok_private, _ = is_safe_url("http://192.168.1.1")
+        assert ok_private is False
         results["safe_url_check"] = "PASS"
     except Exception as e:
         results["safe_url_check"] = f"FAIL: {e}"

@@ -1,7 +1,7 @@
 ---
 bug_id: "BUG-002"
 parent_ref: "EPIC-005"
-status: "Approved"
+status: "Shipped"
 severity: "P1-High"
 reporter: "@sandrinio"
 approved: true

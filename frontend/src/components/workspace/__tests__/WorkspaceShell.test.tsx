@@ -35,6 +35,7 @@ const {
   mockUseChannelBindingsQuery,
   mockUseSkillsQuery,
   mockUseAutomationsQuery,
+  mockUseMcpServersQuery,
 } = vi.hoisted(() => ({
   mockUseWorkspaceQuery:       vi.fn(),
   mockUseDriveStatusQuery:     vi.fn(),
@@ -43,6 +44,7 @@ const {
   mockUseChannelBindingsQuery: vi.fn(),
   mockUseSkillsQuery:          vi.fn(),
   mockUseAutomationsQuery:     vi.fn(),
+  mockUseMcpServersQuery:      vi.fn(),
 }));
 
 // ---------------------------------------------------------------------------
@@ -75,6 +77,10 @@ vi.mock('../../../hooks/useSkills', () => ({
 
 vi.mock('../../../hooks/useAutomations', () => ({
   useAutomationsQuery: mockUseAutomationsQuery,
+}));
+
+vi.mock('../../../hooks/useMcpServers', () => ({
+  useMcpServersQuery: mockUseMcpServersQuery,
 }));
 
 // TanStack Router mock — WorkspaceShell uses Link
@@ -113,6 +119,9 @@ vi.mock('../AutomationsSection', () => ({
 }));
 vi.mock('../DangerZoneSection', () => ({
   DangerZoneSection: () => React.createElement('div', { 'data-testid': 'mock-danger' }, 'Danger zone'),
+}));
+vi.mock('../../dashboard/IntegrationsSection', () => ({
+  IntegrationsSection: () => React.createElement('div', { 'data-testid': 'mock-integrations' }, 'Integrations body'),
 }));
 
 // ---------------------------------------------------------------------------
@@ -175,6 +184,10 @@ function setupDefaultMocks() {
     isLoading: false,
   });
   mockUseAutomationsQuery.mockReturnValue({
+    data: [],
+    isLoading: false,
+  });
+  mockUseMcpServersQuery.mockReturnValue({
     data: [],
     isLoading: false,
   });
@@ -513,6 +526,7 @@ describe('Scenario 8: Shell renders without setup wizard guard', () => {
     mockUseChannelBindingsQuery.mockReturnValue({ data: [], isLoading: false });
     mockUseSkillsQuery.mockReturnValue({ data: [], isLoading: false });
     mockUseAutomationsQuery.mockReturnValue({ data: [], isLoading: false });
+    mockUseMcpServersQuery.mockReturnValue({ data: [], isLoading: false });
   });
 
   it('WorkspaceShell mounts even when bot_persona empty, has_key false, drive not connected', async () => {

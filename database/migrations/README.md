@@ -26,6 +26,22 @@ Every migration ends with a `RAISE NOTICE` showing the row count after completio
 | 002 | `002_teemo_workspaces.sql` | `teemo_workspaces` | 001 |
 | 003 | `003_teemo_knowledge_index.sql` | `teemo_knowledge_index`, `teemo_enforce_knowledge_index_cap()` trigger | 002 |
 | 004 | `004_teemo_skills.sql` | `teemo_skills` | 002 |
+| 005 | `005_teemo_slack_teams.sql` | `teemo_slack_teams`, `teemo_slack_team_members` | 002 |
+| 006 | `006_teemo_workspace_channels.sql` | `teemo_workspace_channels` | 002, 005 |
+| 007 | `007_teemo_workspaces_alter.sql` | adds columns to `teemo_workspaces` | 002 |
+| 008 | `008_workspaces_add_key_mask.sql` | adds `byok_key_mask` column | 002 |
+| 009 | `009_knowledge_add_cached_content.sql` | adds `cached_content` column | 003 |
+| 010 | `010_teemo_documents.sql` | `teemo_documents` | 002 |
+| 011 | `011_teemo_wiki_pages.sql` | `teemo_wiki_pages` | 002 |
+| 012 | `012_increase_document_cap.sql` | raises document cap trigger to 100 | 010 |
+| 012a | `012a_teemo_automations.sql` | `teemo_automations` (orig. ordering collided at 012; renumbered 2026-04-26 — see *Numbering Fix Note* below) | 002 |
+| 013 | `013_add_bot_persona.sql` | adds `bot_persona` column | 002 |
+| 20260421174500 | `20260421174500_create_claim_pending_docs_rpc.sql` | `claim_pending_docs` RPC | 010 |
+| 014 | `014_teemo_mcp_servers.sql` *(planned, SPRINT-17)* | `teemo_mcp_servers` (SSE + Streamable HTTP MCP servers) | 002 |
+
+### Numbering Fix Note (2026-04-26)
+
+Two migrations were originally numbered `012_*` (`012_increase_document_cap.sql` and the now-renamed `012_teemo_automations.sql`). They shipped in different sprints (S-12 and earlier) and were both applied to production. Because migrations here are idempotent + manually pasted (no DB-side `_migrations` filename tracker), renaming the second collider to `012a_teemo_automations.sql` is purely cosmetic — production state unaffected. New numbered migrations (`014` onward) continue the sequential scheme.
 
 ## Tables
 

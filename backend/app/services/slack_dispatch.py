@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio  # noqa: F401 — imported for re-export / test compatibility
 import logging
 import re
+from contextlib import AsyncExitStack
 
 from slack_sdk.web.async_client import AsyncWebClient
 
@@ -101,38 +102,46 @@ async def _stream_agent_to_slack(
         if message_history is not None:
             run_kwargs["message_history"] = message_history
 
-        async with agent.run_stream(user_prompt, **run_kwargs) as stream:
-            async for chunk in stream.stream_text(delta=True):
-                accumulated += chunk
-                now = time.monotonic()
-                char_delta = len(accumulated) - last_update_len
-                time_delta = now - last_update_time
+        # AsyncExitStack enters each MCP server as an async context manager
+        # BEFORE run_stream so __aexit__ runs even if run_stream raises.
+        # getattr guard keeps existing test fixtures that build bare-bones fakes
+        # (without mcp_servers) working without changes (precedent: _add_citation).
+        # When mcp_servers is empty (the 99% case), the stack is a no-op.
+        async with AsyncExitStack() as stack:
+            for server in getattr(deps, "mcp_servers", []):
+                await stack.enter_async_context(server)
+            async with agent.run_stream(user_prompt, **run_kwargs) as stream:
+                async for chunk in stream.stream_text(delta=True):
+                    accumulated += chunk
+                    now = time.monotonic()
+                    char_delta = len(accumulated) - last_update_len
+                    time_delta = now - last_update_time
 
-                if time_delta >= _STREAM_UPDATE_INTERVAL and char_delta >= _STREAM_MIN_CHARS:
-                    try:
-                        await client.chat_update(
-                            channel=channel,
-                            ts=msg_ts,
-                            text=markdown_to_mrkdwn(accumulated) + " ▎",
-                        )
-                        last_update_time = now
-                        last_update_len = len(accumulated)
-                    except Exception:
-                        pass  # Non-fatal — final update will catch up
+                    if time_delta >= _STREAM_UPDATE_INTERVAL and char_delta >= _STREAM_MIN_CHARS:
+                        try:
+                            await client.chat_update(
+                                channel=channel,
+                                ts=msg_ts,
+                                text=markdown_to_mrkdwn(accumulated) + " ▎",
+                            )
+                            last_update_time = now
+                            last_update_len = len(accumulated)
+                        except Exception:
+                            pass  # Non-fatal — final update will catch up
 
-            # Final update with complete text (no cursor) — inside async with
-            final_text = accumulated.strip()
-            if not final_text:
-                # Fallback: stream produced no text chunks (tool-only response)
-                result = stream.get_output()
-                final_text = str(result)
-            final_mrkdwn = markdown_to_mrkdwn(final_text)
-            final_kwargs = _final_update_kwargs(final_mrkdwn, deps)
-            await client.chat_update(
-                channel=channel,
-                ts=msg_ts,
-                **final_kwargs,
-            )
+                # Final update with complete text (no cursor) — inside async with
+                final_text = accumulated.strip()
+                if not final_text:
+                    # Fallback: stream produced no text chunks (tool-only response)
+                    result = stream.get_output()
+                    final_text = str(result)
+                final_mrkdwn = markdown_to_mrkdwn(final_text)
+                final_kwargs = _final_update_kwargs(final_mrkdwn, deps)
+                await client.chat_update(
+                    channel=channel,
+                    ts=msg_ts,
+                    **final_kwargs,
+                )
     except Exception:
         # If streaming fails, fall back to the accumulated text or error
         if accumulated.strip():

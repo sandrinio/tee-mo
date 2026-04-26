@@ -25,7 +25,7 @@ Table access patterns:
 
 from __future__ import annotations
 
-import asyncio  # noqa: F401 — imported for re-export / test compatibility
+import asyncio
 import logging
 import re
 from contextlib import AsyncExitStack
@@ -56,6 +56,25 @@ logger = logging.getLogger(__name__)
 _STREAM_UPDATE_INTERVAL = 1.0
 # Minimum character delta before triggering an update (avoids tiny flickers).
 _STREAM_MIN_CHARS = 80
+
+
+async def _resolve_channel_name(
+    client: AsyncWebClient, channel_id: str
+) -> str | None:
+    """Look up a Slack channel's human-readable name via ``conversations.info``.
+
+    Returns ``None`` on any failure (missing scope, channel not visible to the
+    bot, network blip) — the agent prompt falls back to citing the ID alone in
+    that case rather than blocking dispatch on an enrichment hop.
+    """
+    if not channel_id:
+        return None
+    try:
+        info = await client.conversations_info(channel=channel_id)
+        return info.get("channel", {}).get("name") or None
+    except Exception as exc:
+        logger.warning("conversations.info failed for %s: %s", channel_id, exc)
+        return None
 
 
 async def _stream_agent_to_slack(
@@ -334,6 +353,14 @@ async def _handle_app_mention(event: dict, *, _dispatch_start: float | None = No
     # Create Slack client
     client = AsyncWebClient(token=bot_token)
 
+    # 6. Kick off conversations.info for the source channel in parallel with
+    #    the rest of dispatch setup. Slack message events only carry the
+    #    channel ID, not the name — the agent needs the name to resolve "this
+    #    channel" / "here" references and to honour the user's mental model
+    #    where they refer to channels by name. The lookup runs concurrently
+    #    with users_info + DB work below; it's awaited just before build_agent.
+    _channel_info_task = asyncio.create_task(_resolve_channel_name(client, channel))
+
     # 6. Strip mention prefix: "<@UBOT123> some question" → "some question"
     stripped_text = re.sub(r"<@[A-Z0-9]+>\s*", "", text).strip()
 
@@ -359,6 +386,14 @@ async def _handle_app_mention(event: dict, *, _dispatch_start: float | None = No
 
     user_prompt = f"{sender_name}: {stripped_text}"
 
+    # Await the channel-name lookup. It's been running in parallel with the
+    # users_info/sender_tz work above, so this almost always resolves
+    # immediately without adding wall-clock latency.
+    try:
+        current_channel_name = await _channel_info_task
+    except Exception:
+        current_channel_name = None
+
     try:
         # 7. Build agent first — raises ValueError("no_key_configured") if no BYOK key
         #    We build before fetching thread history so we short-circuit cheaply on missing keys.
@@ -368,6 +403,8 @@ async def _handle_app_mention(event: dict, *, _dispatch_start: float | None = No
             user_id=owner_user_id,
             supabase=supabase,
             sender_tz=sender_tz,
+            current_channel_id=channel,
+            current_channel_name=current_channel_name,
         )
         _agent_build_ms = round((_time.monotonic() - _agent_build_start) * 1000)
 
@@ -545,6 +582,10 @@ async def _handle_dm(event: dict, *, _dispatch_start: float | None = None) -> No
     bot_token = _enc_module.decrypt(team_row["encrypted_slack_bot_token"])
     client = AsyncWebClient(token=bot_token)
 
+    # Kick off conversations.info concurrently with the rest of dispatch setup.
+    # See _handle_app_mention for rationale; same pattern.
+    _channel_info_task = asyncio.create_task(_resolve_channel_name(client, channel))
+
     # 3. Look up default workspace for this team
     workspace_result = (
         supabase.table("teemo_workspaces")
@@ -590,6 +631,11 @@ async def _handle_dm(event: dict, *, _dispatch_start: float | None = None) -> No
     user_prompt = f"{sender_name}: {text}"
 
     try:
+        current_channel_name = await _channel_info_task
+    except Exception:
+        current_channel_name = None
+
+    try:
         # 5. Build agent first — raises ValueError("no_key_configured") if no BYOK key
         _agent_build_start = _time.monotonic()
         agent, deps = await _agent_module.build_agent(
@@ -597,6 +643,8 @@ async def _handle_dm(event: dict, *, _dispatch_start: float | None = None) -> No
             user_id=owner_user_id,
             supabase=supabase,
             sender_tz=sender_tz,
+            current_channel_id=channel,
+            current_channel_name=current_channel_name,
         )
         _agent_build_ms = round((_time.monotonic() - _agent_build_start) * 1000)
 

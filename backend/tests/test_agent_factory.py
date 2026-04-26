@@ -913,3 +913,73 @@ async def test_read_document_returns_not_found_for_unknown_uuid(monkeypatch: Any
     assert result == "Document not found.", (
         f"Result must be 'Document not found.' for unknown document UUID, got: {result!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Current-channel context (slack_dispatch threads it through build_agent)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_system_prompt_contains_current_channel_when_provided(monkeypatch: Any) -> None:
+    """When build_agent is called with current_channel_id + name, the system
+    prompt renders a ``## Current Channel`` section naming both, so the LLM
+    can resolve "this channel" / "here" without inventing names.
+    """
+    import app.agents.agent as agent_module  # type: ignore[import]
+
+    mock_agent_cls = MagicMock(name="Agent")
+    mock_agent_cls.return_value = MagicMock(name="agent_instance")
+    monkeypatch.setattr(agent_module, "Agent", mock_agent_cls)
+    monkeypatch.setattr(agent_module, "OpenAIChatModel", MagicMock())
+    monkeypatch.setattr(agent_module, "OpenAIProvider", MagicMock())
+    monkeypatch.setattr("app.core.encryption.decrypt", lambda enc: DECRYPTED_KEY)
+    monkeypatch.setattr(
+        "app.services.skill_service.list_skills",
+        lambda workspace_id, supabase: [],
+    )
+
+    supabase = _make_supabase_mock(_workspace_row())
+
+    await agent_module.build_agent(
+        WORKSPACE_ID,
+        USER_ID,
+        supabase,
+        current_channel_id="C0PROJTEEMO",
+        current_channel_name="project-teemo",
+    )
+
+    system_prompt = mock_agent_cls.call_args[1]["system_prompt"]
+    assert "## Current Channel" in system_prompt
+    assert "#project-teemo" in system_prompt
+    assert "C0PROJTEEMO" in system_prompt
+    # When NOT in the bound list, the prompt must explicitly tell the agent
+    # the channel is unbound — otherwise it might happily pass C0PROJTEEMO
+    # to create_automation, which would fail validation downstream.
+    assert "NOT bound" in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_system_prompt_omits_current_channel_when_not_provided(monkeypatch: Any) -> None:
+    """REST/cron callers don't pass channel context — the section must be
+    omitted entirely so the prompt isn't polluted with stale references.
+    """
+    import app.agents.agent as agent_module  # type: ignore[import]
+
+    mock_agent_cls = MagicMock(name="Agent")
+    mock_agent_cls.return_value = MagicMock(name="agent_instance")
+    monkeypatch.setattr(agent_module, "Agent", mock_agent_cls)
+    monkeypatch.setattr(agent_module, "OpenAIChatModel", MagicMock())
+    monkeypatch.setattr(agent_module, "OpenAIProvider", MagicMock())
+    monkeypatch.setattr("app.core.encryption.decrypt", lambda enc: DECRYPTED_KEY)
+    monkeypatch.setattr(
+        "app.services.skill_service.list_skills",
+        lambda workspace_id, supabase: [],
+    )
+
+    supabase = _make_supabase_mock(_workspace_row())
+
+    await agent_module.build_agent(WORKSPACE_ID, USER_ID, supabase)
+
+    system_prompt = mock_agent_cls.call_args[1]["system_prompt"]
+    assert "## Current Channel" not in system_prompt

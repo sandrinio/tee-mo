@@ -219,6 +219,22 @@ class AgentDeps:
     ``AsyncExitStack`` is a no-op and existing dispatch behaviour is unchanged.
     Appended AT END of the dataclass to preserve positional-init order for tests.
     """
+    current_channel_id: str | None = None
+    """Slack channel ID this message arrived from (e.g. ``"C01ABC..."``).
+
+    Populated by ``build_agent`` when ``slack_dispatch`` knows the source
+    channel. Used by tools that resolve "this channel" / "here" references
+    without forcing the LLM to guess. ``None`` for non-Slack callers (REST,
+    cron-driven automation runs, tests).
+    """
+    current_channel_name: str | None = None
+    """Human-readable name of the current Slack channel (e.g. ``"project-teemo"``).
+
+    Resolved by ``slack_dispatch`` via ``conversations.info`` once per
+    incoming event and threaded through ``build_agent``. ``None`` when the
+    Slack API call fails or when the caller is not slack_dispatch — the agent
+    falls back to citing the ID alone in that case.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -327,6 +343,8 @@ def _build_system_prompt(
     bound_channels: list[dict] | None = None,
     sender_tz: str = "UTC",
     active_mcp_servers: list[str] | None = None,
+    current_channel_id: str | None = None,
+    current_channel_name: str | None = None,
 ) -> str:
     """Assemble the system prompt for the Tee-Mo agent.
 
@@ -589,7 +607,13 @@ def _build_system_prompt(
         if isinstance(row, dict) and row.get("slack_channel_id")
     ]
     if channel_ids:
-        channel_list = "\n".join(f"- `{cid}`" for cid in channel_ids)
+        # Mark the current channel inline so the LLM can see at a glance which
+        # entry the user means by "this channel" / "here".
+        rendered_lines = []
+        for cid in channel_ids:
+            marker = "  ← current channel" if cid == current_channel_id else ""
+            rendered_lines.append(f"- `{cid}`{marker}")
+        channel_list = "\n".join(rendered_lines)
         prompt += (
             "\n\n## Bound Channels\n"
             "These are the ONLY Slack channel IDs registered to this workspace. "
@@ -609,6 +633,40 @@ def _build_system_prompt(
             "to set up an automation or post to a channel, tell them they need to "
             "bind a channel first from the workspace dashboard's Channels section. "
             "Never invent a ``slack_channel_id``."
+        )
+
+    # --- Current Channel context ---
+    # Surface the channel this message arrived from so the agent can resolve
+    # "this channel" / "here" / "current" references without inventing names
+    # or asking the user. Also tells the agent whether the current channel
+    # is bound — directly addresses the recurring confusion where the user
+    # is mentioning the bot from a channel they expect to be bound but isn't.
+    if current_channel_id:
+        name_phrase = (
+            f"#{current_channel_name}" if current_channel_name else "(name unknown)"
+        )
+        is_bound = current_channel_id in channel_ids
+        if is_bound:
+            binding_note = (
+                "This channel IS bound to the workspace, so it appears in the "
+                "Bound Channels list above and may be passed to "
+                "``create_automation`` and similar tools."
+            )
+        else:
+            binding_note = (
+                "This channel is NOT bound to the workspace. If the user asks to "
+                "post here, schedule an automation here, or use 'this channel', "
+                "tell them the channel isn't bound yet and ask them to bind it "
+                "from the workspace dashboard's Channels section first. The fact "
+                "that the bot can read messages here does NOT mean the channel "
+                "is bound — binding is a separate explicit action."
+            )
+        prompt += (
+            "\n\n## Current Channel\n"
+            f"This message arrived from {name_phrase} (`{current_channel_id}`). "
+            "When the user says \"this channel\", \"here\", \"current channel\", "
+            "or refers to a channel by the name above, they mean this one. "
+            f"{binding_note}"
         )
 
     # --- Connected Integrations (STORY-012-03) ---
@@ -878,6 +936,8 @@ async def build_agent(
     user_id: str,
     supabase: Any,
     sender_tz: str = "UTC",
+    current_channel_id: str | None = None,
+    current_channel_name: str | None = None,
 ) -> tuple[Any, AgentDeps]:
     """Build and return a fully configured pydantic-ai Agent for a workspace.
 
@@ -1052,6 +1112,8 @@ async def build_agent(
         bound_channels=bound_channels,
         sender_tz=sender_tz,
         active_mcp_servers=active_mcp_names,
+        current_channel_id=current_channel_id,
+        current_channel_name=current_channel_name,
     )
 
     # --- 9. Build skill tool functions ---
@@ -1797,6 +1859,8 @@ async def build_agent(
         user_id=user_id,
         sender_tz=sender_tz,
         mcp_servers=mcp_clients,
+        current_channel_id=current_channel_id,
+        current_channel_name=current_channel_name,
     )
 
     return (agent, deps)

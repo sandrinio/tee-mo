@@ -1374,6 +1374,18 @@ async def build_agent(
         if not _url_ok:
             return "Blocked: this URL resolves to a private/internal network address."
 
+        # Models occasionally emit header keys/values wrapped in literal quotes
+        # (e.g. `{'"Authorization"': '"Bearer ghp_..."'}`) when echoing the
+        # docstring example back as JSON. httpx then raises LocalProtocolError
+        # ("Illegal header name b'\"Authorization\"'") which crashed the whole
+        # agent run. Strip surrounding `"`/`'` from both keys and values, and
+        # catch the protocol error so a malformed header just returns a string.
+        if headers:
+            headers = {
+                k.strip().strip('"').strip("'"): v.strip().strip('"').strip("'")
+                for k, v in headers.items()
+            }
+
         try:
             async with httpx.AsyncClient(timeout=15.0) as http:
                 resp = await http.request(
@@ -1403,6 +1415,11 @@ async def build_agent(
             return f"Request timed out after 15 seconds: {url}"
         except httpx.ConnectError as e:
             return f"Connection failed: {e}"
+        except httpx.LocalProtocolError as e:
+            return (
+                f"Invalid request shape: {e}. Header names must be plain ASCII "
+                "without surrounding quotes — pass `Authorization` not `\"Authorization\"`."
+            )
 
     # --- 11.5. Document CRUD tools (STORY-015-03) ---
 

@@ -341,6 +341,61 @@ async def test_create_mcp_server_rejects_private_ip_url():
 
 
 # ---------------------------------------------------------------------------
+# Scenario: handshake unwraps anyio TaskGroup ExceptionGroup
+# ---------------------------------------------------------------------------
+
+
+async def test_perform_handshake_unwraps_exception_group():
+    """Anyio's MCP client wraps inner errors as BaseExceptionGroup.
+
+    The test_connection / pre-flight surface MUST drill into ``.exceptions[0]``
+    so callers see ``HTTPStatusError: 401 Unauthorized`` instead of the useless
+    ``unhandled errors in a TaskGroup (1 sub-exception)``.
+    """
+    from app.services.mcp_service import _perform_handshake, McpServerRecord
+
+    record = McpServerRecord(
+        id=SERVER_ID,
+        workspace_id=WORKSPACE_ID,
+        name="auth-fail",
+        transport="streamable_http",
+        url="https://api.example.com/mcp/",
+        headers_encrypted={},
+        is_active=True,
+        created_at=datetime.now(timezone.utc),
+    )
+
+    # Simulate the real failure: pydantic-ai's __aenter__ raises an
+    # ExceptionGroup whose only inner exception is an httpx HTTPStatusError.
+    class _FakeStatusError(Exception):
+        def __str__(self) -> str:
+            return "Client error '401 Unauthorized' for url 'https://api.example.com/mcp/'"
+
+    inner = _FakeStatusError()
+    eg = BaseExceptionGroup("unhandled errors in a TaskGroup (1 sub-exception)", [inner])
+
+    class _FakeClient:
+        async def __aenter__(self):  # noqa: D401
+            raise eg
+
+        async def __aexit__(self, *_):
+            return False
+
+    with patch(
+        "app.services.mcp_service._build_mcp_client",
+        return_value=_FakeClient(),
+    ):
+        result = await _perform_handshake(record, timeout_seconds=2.0)
+
+    assert result.ok is False
+    # The error message must NOT be the useless TaskGroup wrapper.
+    assert "unhandled errors in a TaskGroup" not in (result.error or "")
+    # It MUST surface the real cause.
+    assert "401 Unauthorized" in (result.error or "")
+    assert "_FakeStatusError" in (result.error or "")
+
+
+# ---------------------------------------------------------------------------
 # Scenario: Pre-flight handshake — unreachable URL blocks insert
 # ---------------------------------------------------------------------------
 

@@ -8,6 +8,7 @@ Format: `YYYY-MM-DD · #tags · [marker]? lesson`
 
 ---
 
+2026-04-27 · #agent #http · http_request tool dies on quoted header keys (`"Authorization"`) → httpx LocalProtocolError. Strip at agent.py:1379.
 2026-04-26 · #mcp #pydantic-ai · pydantic-ai==1.79.0 ships pydantic-ai-slim[mcp,fastmcp,...] transitively; from pydantic_ai.mcp import MCPServerSSE, MCPServerStreamableHTTP imports cleanly with no extras pin needed.
 2026-04-26 · #agent #lifespan · slack_dispatch wraps agent.run_stream (not agent.run) at slack_dispatch.py:104 — wrap MCP-server AsyncExitStack OUTSIDE the run_stream context manager so __aexit__ runs on stream-mid-flight exceptions too.
 2026-04-26 · #agent #test-harness · build_agent return signature is 17+ unpack sites across backend/tests/ (test_agent_factory, test_token_efficiency, test_production_scenarios, test_wiki_*, slack_dispatch.py:357). Adding new agent state — extend AgentDeps, never the return tuple.

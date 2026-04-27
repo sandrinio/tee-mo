@@ -247,6 +247,20 @@ def _build_mcp_client(record: McpServerRecord) -> Any:
     raise ValueError(f"Unknown MCP transport: {record.transport!r}")
 
 
+def _unwrap_exception_group(exc: BaseException) -> BaseException:
+    """Drill into a BaseExceptionGroup to surface the first inner exception.
+
+    pydantic-ai's MCP client (via anyio TaskGroup) wraps inner errors as
+    ``BaseExceptionGroup('unhandled errors in a TaskGroup (1 sub-exception)', ...)``.
+    The wrapper carries no user-actionable signal — the inner exception
+    (``httpx.HTTPStatusError: 401``, ``httpx.ConnectError``, etc.) does. Walk
+    one level (recursing if the inner is itself a group) and return the leaf.
+    """
+    if isinstance(exc, BaseExceptionGroup) and exc.exceptions:
+        return _unwrap_exception_group(exc.exceptions[0])
+    return exc
+
+
 async def _perform_handshake(
     record: McpServerRecord,
     *,
@@ -256,7 +270,10 @@ async def _perform_handshake(
 
     Used both by ``test_connection`` (post-create probe) and ``create_mcp_server``
     (pre-flight probe). Bounded by ``timeout_seconds``. All exceptions become a
-    ``McpTestResult(ok=False, error=...)`` — never propagated.
+    ``McpTestResult(ok=False, error=...)`` — never propagated. Inner exceptions
+    are unwrapped from anyio's ``BaseExceptionGroup`` so the error message
+    surfaces the real cause (e.g. ``401 Unauthorized``, ``404 Not Found``,
+    connection refused) instead of the useless ``unhandled errors in a TaskGroup``.
     """
     client = _build_mcp_client(record)
 
@@ -276,9 +293,15 @@ async def _perform_handshake(
             tool_count=0,
             error=f"timeout after {timeout_seconds}s connecting to {record.url}",
         )
-    except Exception as exc:  # noqa: BLE001
-        # 404, 401, DNS failure, TLS error, etc. all land here.
-        return McpTestResult(ok=False, tool_count=0, error=str(exc))
+    except BaseException as exc:  # noqa: BLE001
+        # 404, 401, DNS failure, TLS error, etc. all land here. Unwrap any
+        # ExceptionGroup so the message names the real cause.
+        inner = _unwrap_exception_group(exc)
+        return McpTestResult(
+            ok=False,
+            tool_count=0,
+            error=f"{type(inner).__name__}: {inner}",
+        )
 
 
 # ---------------------------------------------------------------------------

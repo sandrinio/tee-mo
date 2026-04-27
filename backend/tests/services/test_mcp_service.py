@@ -144,10 +144,15 @@ async def test_create_mcp_server_sse_happy_path():
 
     sb = _make_supabase()
 
+    from app.services.mcp_service import McpTestResult
+
     with patch("app.services.mcp_service.execute_async", new_callable=AsyncMock) as mock_exec, \
          patch("app.core.url_safety.socket.getaddrinfo", return_value=[
              (0, 0, 0, "", ("1.2.3.4", 0))
-         ]):
+         ]), patch(
+             "app.services.mcp_service._perform_handshake",
+             new=AsyncMock(return_value=McpTestResult(ok=True, tool_count=3, error=None)),
+         ):
         mock_exec.return_value = _exec_result([row_with_encrypted_headers])
         record = await create_mcp_server(
             workspace_id=WORKSPACE_ID,
@@ -184,10 +189,15 @@ async def test_create_mcp_server_streamable_http_happy_path():
 
     sb = _make_supabase()
 
+    from app.services.mcp_service import McpTestResult
+
     with patch("app.services.mcp_service.execute_async", new_callable=AsyncMock) as mock_exec, \
          patch("app.core.url_safety.socket.getaddrinfo", return_value=[
              (0, 0, 0, "", ("52.0.0.1", 0))
-         ]):
+         ]), patch(
+             "app.services.mcp_service._perform_handshake",
+             new=AsyncMock(return_value=McpTestResult(ok=True, tool_count=2, error=None)),
+         ):
         mock_exec.return_value = _exec_result([_VALID_HTTP_ROW])
         record = await create_mcp_server(
             workspace_id=WORKSPACE_ID,
@@ -328,6 +338,51 @@ async def test_create_mcp_server_rejects_private_ip_url():
                 url="https://10.0.0.1/sse",
                 supabase=sb,
             )
+
+
+# ---------------------------------------------------------------------------
+# Scenario: Pre-flight handshake — unreachable URL blocks insert
+# ---------------------------------------------------------------------------
+
+
+async def test_create_mcp_server_handshake_failure_blocks_insert():
+    """A 404 / unreachable URL must NOT result in a row being persisted.
+
+    Regression for the prod incident where the agent registered
+    ``https://api.github.com/mcp`` (a hallucinated URL that 404s); the row
+    was persisted, then every subsequent agent run crashed trying to enter
+    the SSE context. The pre-flight handshake closes that loop.
+    """
+    from app.services.mcp_service import (
+        create_mcp_server,
+        McpTestResult,
+        McpValidationError,
+    )
+
+    sb = _make_supabase()
+
+    with patch("app.services.mcp_service.execute_async", new_callable=AsyncMock) as mock_exec, \
+         patch("app.core.url_safety.socket.getaddrinfo", return_value=[
+             (0, 0, 0, "", ("1.2.3.4", 0))
+         ]), patch(
+             "app.services.mcp_service._perform_handshake",
+             new=AsyncMock(return_value=McpTestResult(
+                 ok=False, tool_count=0, error="Client error '404 Not Found'"
+             )),
+         ):
+        with pytest.raises(McpValidationError, match="404"):
+            await create_mcp_server(
+                workspace_id=WORKSPACE_ID,
+                name="ghbroken",
+                transport="sse",
+                url="https://api.github.com/mcp",
+                supabase=sb,
+            )
+
+    # The DB insert must NOT have been called.
+    assert mock_exec.await_count == 0, (
+        "Pre-flight handshake failed; create_mcp_server must not insert a row."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -794,12 +849,17 @@ async def test_create_does_not_chain_select_on_insert():
         "created_at": "2026-04-26T00:00:00+00:00",
     }
 
+    from app.services.mcp_service import McpTestResult
+
     with patch(
         "app.services.mcp_service.execute_async",
         _make_execute_async([new_row]),
     ), patch(
         "app.core.url_safety.socket.getaddrinfo",
         return_value=[(0, 0, 0, "", ("1.2.3.4", 0))],
+    ), patch(
+        "app.services.mcp_service._perform_handshake",
+        new=AsyncMock(return_value=McpTestResult(ok=True, tool_count=1, error=None)),
     ):
         record = await create_mcp_server(
             "00000000-0000-0000-0000-000000000001",

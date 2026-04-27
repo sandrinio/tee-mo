@@ -163,41 +163,71 @@ async def _stream_agent_to_slack(
         # getattr guard keeps existing test fixtures that build bare-bones fakes
         # (without mcp_servers) working without changes (precedent: _add_citation).
         # When mcp_servers is empty (the 99% case), the stack is a no-op.
+        #
+        # Resilience: a single broken MCP server (404, expired token, network)
+        # MUST NOT crash the whole agent run. We try each server independently,
+        # log + skip failures, and strip them from the agent's toolset list for
+        # this run so the model can't try to call their tools mid-run.
         async with AsyncExitStack() as stack:
+            failed_servers: list = []
             for server in getattr(deps, "mcp_servers", []):
-                await stack.enter_async_context(server)
-            async with agent.run_stream(user_prompt, **run_kwargs) as stream:
-                async for chunk in stream.stream_text(delta=True):
-                    accumulated += chunk
-                    now = time.monotonic()
-                    char_delta = len(accumulated) - last_update_len
-                    time_delta = now - last_update_time
+                try:
+                    await stack.enter_async_context(server)
+                except Exception as mcp_exc:
+                    logger.warning(
+                        "mcp.server_unavailable",
+                        extra={
+                            "event": "mcp.server_unavailable",
+                            "url": getattr(server, "url", None),
+                            "error_type": type(mcp_exc).__name__,
+                            "error_message": str(mcp_exc),
+                        },
+                    )
+                    failed_servers.append(server)
 
-                    if time_delta >= _STREAM_UPDATE_INTERVAL and char_delta >= _STREAM_MIN_CHARS:
-                        try:
-                            await client.chat_update(
-                                channel=channel,
-                                ts=msg_ts,
-                                text=markdown_to_mrkdwn(accumulated) + " ▎",
-                            )
-                            last_update_time = now
-                            last_update_len = len(accumulated)
-                        except Exception:
-                            pass  # Non-fatal — final update will catch up
+            saved_toolsets = None
+            if failed_servers and hasattr(agent, "_user_toolsets"):
+                failed_ids = {id(s) for s in failed_servers}
+                saved_toolsets = list(agent._user_toolsets)
+                agent._user_toolsets = [
+                    t for t in saved_toolsets if id(t) not in failed_ids
+                ]
+            try:
+                async with agent.run_stream(user_prompt, **run_kwargs) as stream:
+                    async for chunk in stream.stream_text(delta=True):
+                        accumulated += chunk
+                        now = time.monotonic()
+                        char_delta = len(accumulated) - last_update_len
+                        time_delta = now - last_update_time
 
-                # Final update with complete text (no cursor) — inside async with
-                final_text = accumulated.strip()
-                if not final_text:
-                    # Fallback: stream produced no text chunks (tool-only response)
-                    result = stream.get_output()
-                    final_text = str(result)
-                final_mrkdwn = markdown_to_mrkdwn(final_text)
-                final_kwargs = _final_update_kwargs(final_mrkdwn, deps)
-                await client.chat_update(
-                    channel=channel,
-                    ts=msg_ts,
-                    **final_kwargs,
-                )
+                        if time_delta >= _STREAM_UPDATE_INTERVAL and char_delta >= _STREAM_MIN_CHARS:
+                            try:
+                                await client.chat_update(
+                                    channel=channel,
+                                    ts=msg_ts,
+                                    text=markdown_to_mrkdwn(accumulated) + " ▎",
+                                )
+                                last_update_time = now
+                                last_update_len = len(accumulated)
+                            except Exception:
+                                pass  # Non-fatal — final update will catch up
+
+                    # Final update with complete text (no cursor) — inside async with
+                    final_text = accumulated.strip()
+                    if not final_text:
+                        # Fallback: stream produced no text chunks (tool-only response)
+                        result = stream.get_output()
+                        final_text = str(result)
+                    final_mrkdwn = markdown_to_mrkdwn(final_text)
+                    final_kwargs = _final_update_kwargs(final_mrkdwn, deps)
+                    await client.chat_update(
+                        channel=channel,
+                        ts=msg_ts,
+                        **final_kwargs,
+                    )
+            finally:
+                if saved_toolsets is not None:
+                    agent._user_toolsets = saved_toolsets
     except Exception:
         # If streaming fails, fall back to the accumulated text or error
         if accumulated.strip():

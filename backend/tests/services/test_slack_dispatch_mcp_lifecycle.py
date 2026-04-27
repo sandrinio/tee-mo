@@ -262,6 +262,75 @@ async def test_multiple_mcp_servers_all_enter_and_exit() -> None:
 # ---------------------------------------------------------------------------
 
 
+class _FailingMcpServer:
+    """An MCP server whose __aenter__ raises (simulates a 404/dead URL)."""
+
+    def __init__(self, error: Exception) -> None:
+        self.url = "https://broken.example.com/mcp"
+        self._error = error
+        self.aenter_attempts = 0
+
+    async def __aenter__(self) -> "_FailingMcpServer":
+        self.aenter_attempts += 1
+        raise self._error
+
+    async def __aexit__(self, *_: Any) -> bool | None:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Scenario: One broken MCP server does not crash the agent run
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_one_broken_mcp_server_does_not_crash_run() -> None:
+    """Regression for prod incident 2026-04-27.
+
+    Given one MCP server whose ``__aenter__`` raises (e.g. 404 from a
+    hallucinated/dead URL) and one healthy MCP server,
+    When the dispatch is invoked,
+    Then the run still completes (the bot replies),
+    And the broken server is stripped from agent._user_toolsets for the run,
+    And the healthy server's __aenter__/__aexit__ are still called.
+    """
+    import app.services.slack_dispatch as dispatch_module
+
+    healthy = _MockMcpServer()
+    broken = _FailingMcpServer(RuntimeError("404 Not Found"))
+
+    deps = _make_deps(mcp_servers=[broken, healthy])
+    client = _make_slack_client()
+    agent = _make_agent_mock(_make_stream_context("ok"))
+    # Simulate Pydantic AI's internal toolset list — both servers registered.
+    agent._user_toolsets = [broken, healthy]
+
+    with patch.object(
+        dispatch_module,
+        "markdown_to_mrkdwn",
+        side_effect=lambda x: x,
+    ):
+        await dispatch_module._stream_agent_to_slack(
+            agent=agent,
+            user_prompt="hi",
+            client=client,
+            channel="C999",
+            thread_ts="9.9",
+            deps=deps,
+        )
+
+    # Healthy server still entered + exited.
+    assert healthy.aenter_count == 1
+    assert healthy.aexit_count == 1
+    # Broken server attempted exactly once and skipped.
+    assert broken.aenter_attempts == 1
+    # Slack reply was posted — run did NOT crash.
+    assert client.chat_postMessage.call_count == 1
+    assert client.chat_update.call_count >= 1
+    # _user_toolsets restored after the run so the agent stays reusable.
+    assert agent._user_toolsets == [broken, healthy]
+
+
 @pytest.mark.asyncio
 async def test_bare_bones_deps_without_mcp_servers_attr() -> None:
     """Dispatch works with deps that have no mcp_servers attribute (getattr guard).

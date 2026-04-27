@@ -247,6 +247,40 @@ def _build_mcp_client(record: McpServerRecord) -> Any:
     raise ValueError(f"Unknown MCP transport: {record.transport!r}")
 
 
+async def _perform_handshake(
+    record: McpServerRecord,
+    *,
+    timeout_seconds: float = 10.0,
+) -> McpTestResult:
+    """Connect to ``record``'s MCP endpoint and list its tools.
+
+    Used both by ``test_connection`` (post-create probe) and ``create_mcp_server``
+    (pre-flight probe). Bounded by ``timeout_seconds``. All exceptions become a
+    ``McpTestResult(ok=False, error=...)`` — never propagated.
+    """
+    client = _build_mcp_client(record)
+
+    async def _run() -> McpTestResult:
+        async with client:
+            tools = await client.list_tools()
+            tool_count = len(tools)
+            if tool_count == 0:
+                return McpTestResult(ok=False, tool_count=0, error="no tools returned")
+            return McpTestResult(ok=True, tool_count=tool_count, error=None)
+
+    try:
+        return await asyncio.wait_for(_run(), timeout=timeout_seconds)
+    except asyncio.TimeoutError:
+        return McpTestResult(
+            ok=False,
+            tool_count=0,
+            error=f"timeout after {timeout_seconds}s connecting to {record.url}",
+        )
+    except Exception as exc:  # noqa: BLE001
+        # 404, 401, DNS failure, TLS error, etc. all land here.
+        return McpTestResult(ok=False, tool_count=0, error=str(exc))
+
+
 # ---------------------------------------------------------------------------
 # CRUD
 # ---------------------------------------------------------------------------
@@ -260,11 +294,15 @@ async def create_mcp_server(
     url: str,
     headers: dict[str, str] | None = None,
     supabase: Any,
+    handshake_timeout_seconds: float = 10.0,
 ) -> McpServerRecord:
     """Create and persist a new MCP server registration.
 
-    Validates all fields, encrypts header values, then inserts a row into
-    ``teemo_mcp_servers``.
+    Validates all fields, performs a live MCP handshake to confirm the URL is
+    reachable and serves ≥1 tool, encrypts header values, then inserts a row
+    into ``teemo_mcp_servers``. The handshake is the load-bearing pre-flight
+    that prevents agents from registering hallucinated/dead URLs (e.g. an LLM
+    inventing ``https://api.github.com/mcp`` — which 404s).
 
     Args:
         workspace_id: UUID of the owning workspace.
@@ -273,24 +311,53 @@ async def create_mcp_server(
         url:          HTTPS URL to the MCP server endpoint.
         headers:      Optional auth/custom headers. Values are encrypted at rest.
         supabase:     Supabase service-role client.
+        handshake_timeout_seconds: Bound on the pre-flight handshake.
 
     Returns:
         McpServerRecord for the newly created row.
 
     Raises:
-        McpValidationError: Any field fails validation.
+        McpValidationError: Any field fails validation, OR the live handshake
+            against ``url`` fails (404, timeout, auth error, zero tools).
+            The error message is included so callers (and the agent's
+            ``add_mcp_server`` tool) can surface the real reason to the user.
         postgrest.exceptions.APIError: DB uniqueness constraint violation
             (duplicate name within workspace).
     """
     headers = headers or {}
     validate_mcp_server_input(name, transport, url, headers)
 
+    # Pre-flight: handshake the URL before persisting anything. We synthesise a
+    # transient record with already-encrypted headers so ``_perform_handshake``
+    # can decrypt+rebuild the same way the agent factory does at run time. No
+    # row is inserted unless the handshake succeeds.
+    encrypted_headers = _encrypt_headers(headers)
+    transient_record = McpServerRecord(
+        id=UUID("00000000-0000-0000-0000-000000000000"),
+        workspace_id=UUID(str(workspace_id)) if not isinstance(workspace_id, UUID) else workspace_id,
+        name=name,
+        transport=transport,  # type: ignore[arg-type]
+        url=url,
+        headers_encrypted=encrypted_headers,
+        is_active=True,
+        created_at=datetime.now(),
+    )
+    handshake = await _perform_handshake(
+        transient_record, timeout_seconds=handshake_timeout_seconds
+    )
+    if not handshake.ok:
+        raise McpValidationError(
+            f"MCP handshake to {url!r} failed: {handshake.error}. "
+            "The URL is unreachable, returned a non-MCP response, or the auth "
+            "header was rejected. Verify the endpoint exists and the token is valid."
+        )
+
     payload = {
         "workspace_id": str(workspace_id),
         "name": name,
         "transport": transport,
         "url": url,
-        "headers_encrypted": _encrypt_headers(headers),
+        "headers_encrypted": encrypted_headers,
         "is_active": True,
     }
 
@@ -508,24 +575,7 @@ async def test_connection(
     if record is None:
         return McpTestResult(ok=False, tool_count=0, error=f"MCP server {name!r} not found")
 
-    client = _build_mcp_client(record)
-
-    async def _handshake() -> McpTestResult:
-        async with client:
-            tools = await client.list_tools()
-            tool_count = len(tools)
-            if tool_count == 0:
-                return McpTestResult(ok=False, tool_count=0, error="no tools returned")
-            return McpTestResult(ok=True, tool_count=tool_count, error=None)
-
-    try:
-        return await asyncio.wait_for(_handshake(), timeout=timeout_seconds)
-    except asyncio.TimeoutError:
-        return McpTestResult(
-            ok=False,
-            tool_count=0,
-            error=f"timeout after {timeout_seconds}s connecting to {record.url}",
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("MCP test_connection failed for %r: %s", name, exc)
-        return McpTestResult(ok=False, tool_count=0, error=str(exc))
+    result = await _perform_handshake(record, timeout_seconds=timeout_seconds)
+    if not result.ok and result.error and "timeout" not in result.error and "no tools" not in result.error:
+        logger.warning("MCP test_connection failed for %r: %s", name, result.error)
+    return result
